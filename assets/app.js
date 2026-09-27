@@ -16,22 +16,22 @@
   }
 
   /* ---------------- theme ---------------- */
-  function currentTheme() { return document.documentElement.getAttribute("data-theme") || "light"; }
+  var THEMES = ["light", "dark", "nord", "dracula", "solarized-light", "solarized-dark", "paper"];
+  function currentTheme() {
+    var t = document.documentElement.getAttribute("data-theme");
+    return THEMES.indexOf(t) !== -1 ? t : "light";
+  }
   function applyTheme(t) {
+    if (THEMES.indexOf(t) === -1) t = "light";
     document.documentElement.setAttribute("data-theme", t);
     store(LS_THEME, t);
-    var b = document.getElementById("theme-toggle");
-    if (b) {
-      b.textContent = (t === "dark") ? "Light" : "Dark";
-      b.setAttribute("aria-label", "Switch to " + ((t === "dark") ? "light" : "dark") + " theme");
-    }
+    var sel = document.getElementById("theme-select");
+    if (sel) sel.value = t;
   }
-  var toggle = document.getElementById("theme-toggle");
-  if (toggle) {
-    applyTheme(currentTheme());
-    toggle.addEventListener("click", function () {
-      applyTheme(currentTheme() === "dark" ? "light" : "dark");
-    });
+  var themeSelect = document.getElementById("theme-select");
+  applyTheme(currentTheme());
+  if (themeSelect) {
+    themeSelect.addEventListener("change", function () { applyTheme(themeSelect.value); });
   }
 
   /* ---------------- mobile sidebar ---------------- */

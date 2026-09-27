@@ -17,7 +17,15 @@
   <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
   <span class="spacer"></span>
   <div class="actions">
-    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+    <select class="iconbtn" id="theme-select" aria-label="Theme">
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+      <option value="nord">Nord</option>
+      <option value="dracula">Dracula</option>
+      <option value="solarized-light">Solarized Light</option>
+      <option value="solarized-dark">Solarized Dark</option>
+      <option value="paper">Paper</option>
+    </select>
   </div>
 </header>
 <div class="layout">
@@ -435,12 +443,13 @@ Static takes no receiver; bound bakes in a receiver; unbound borrows the first a
 </tbody>
 </table>
 <h2 id="16-myth-vs-reality">16. Myth vs Reality</h2>
-<p>Myth | Reality
-"<code>::</code> calls the method immediately." | It creates an interface instance; the method runs when the SAM is invoked.
-"<code>String::length</code> means length on the class." | It is unbound: the first argument supplies the receiver.
-"Method references and lambdas are different types." | They are two syntaxes for the same functional-interface value; the compiler desugars one to the other.
-"<code>compose</code> and <code>andThen</code> are the same." | They differ in order: <code>andThen</code> is left-to-right, <code>compose</code> is right-to-left.
-"Method references always improve readability." | For non-trivial logic an explicit lambda is clearer and safer.</p>
+<ul>
+<li><strong>"<code>::</code> calls the method immediately."</strong> — It creates an interface instance; the method runs when the SAM is invoked.</li>
+<li><strong>"<code>String::length</code> means length on the class."</strong> — It is unbound: the first argument supplies the receiver.</li>
+<li><strong>"Method references and lambdas are different types."</strong> — They are two syntaxes for the same functional-interface value; the compiler desugars one to the other.</li>
+<li><strong>"<code>compose</code> and <code>andThen</code> are the same."</strong> — They differ in order: <code>andThen</code> is left-to-right, <code>compose</code> is right-to-left.</li>
+<li><strong>"Method references always improve readability."</strong> — For non-trivial logic an explicit lambda is clearer and safer.</li>
+</ul>
 <h2 id="17-common-trap-questions">17. Common Trap Questions</h2>
 <blockquote class="callout callout--trap">
 <p>Trap 1 — "Is <code>System.out::println</code> static or bound?" It is a <strong>bound instance</strong> reference: the receiver is the <code>System.out</code> object, captured now.</p>
@@ -465,19 +474,20 @@ Static takes no receiver; bound bakes in a receiver; unbound borrows the first a
 <li>Captured locals must be effectively final, and a bound reference captures its receiver.</li>
 </ol>
 <h2 id="19-likely-interview-questions">19. Likely Interview Questions</h2>
-<p>Question | Crisp Answer
-What is a method reference? | A compact syntax (<code>::</code>) for a lambda that forwards to an existing method; the compiler desugars it to the equivalent lambda.
-Name the kinds of method references. | Static, bound instance, unbound instance, constructor, and array constructor.
-Difference between bound and unbound? | Bound captures a specific receiver and takes no receiver argument; unbound takes the receiver as the first argument.
-How is <code>String::length</code> typed? | By its target: <code>Function&lt;String, Integer&gt;</code>, <code>ToIntFunction&lt;String&gt;</code>, etc. The target fixes the SAM signature.
-What is target typing? | The compiler derives the type of a lambda or method reference from the functional interface it is assigned to.
-<code>andThen</code> vs <code>compose</code>? | <code>f.andThen(g)</code> is <code>g(f(x))</code>; <code>f.compose(g)</code> is <code>f(g(x))</code>. Order is opposite.
-How do you combine predicates? | <code>Predicate.and</code>, <code>Predicate.or</code>, <code>Predicate.negate</code>, and static <code>Predicate.isEqual</code>.
-What is <code>Function.identity()</code> for? | A <code>Function&lt;T, T&gt;</code> that returns its input; used as a mapper in collectors (Lecture 40).
-What is a higher-order function? | A method that takes and/or returns a functional interface, such as <code>andThen</code>.
-Why does <code>@FunctionalInterface</code> allow default methods? | Only abstract methods count toward the single-abstract-method rule; default and static methods are ignored.
-Can a method reference be ambiguous? | Yes, with overloaded methods; resolve it with an explicit lambda or a cast.
-What does a bound reference capture? | The receiver object, which must be effectively final, held for the reference's lifetime.</p>
+<ul>
+<li><strong>What is a method reference?</strong> — A compact syntax (<code>::</code>) for a lambda that forwards to an existing method; the compiler desugars it to the equivalent lambda.</li>
+<li><strong>Name the kinds of method references.</strong> — Static, bound instance, unbound instance, constructor, and array constructor.</li>
+<li><strong>Difference between bound and unbound?</strong> — Bound captures a specific receiver and takes no receiver argument; unbound takes the receiver as the first argument.</li>
+<li><strong>How is <code>String::length</code> typed?</strong> — By its target: <code>Function&lt;String, Integer&gt;</code>, <code>ToIntFunction&lt;String&gt;</code>, etc. The target fixes the SAM signature.</li>
+<li><strong>What is target typing?</strong> — The compiler derives the type of a lambda or method reference from the functional interface it is assigned to.</li>
+<li><strong><code>andThen</code> vs <code>compose</code>?</strong> — <code>f.andThen(g)</code> is <code>g(f(x))</code>; <code>f.compose(g)</code> is <code>f(g(x))</code>. Order is opposite.</li>
+<li><strong>How do you combine predicates?</strong> — <code>Predicate.and</code>, <code>Predicate.or</code>, <code>Predicate.negate</code>, and static <code>Predicate.isEqual</code>.</li>
+<li><strong>What is <code>Function.identity()</code> for?</strong> — A <code>Function&lt;T, T&gt;</code> that returns its input; used as a mapper in collectors (Lecture 40).</li>
+<li><strong>What is a higher-order function?</strong> — A method that takes and/or returns a functional interface, such as <code>andThen</code>.</li>
+<li><strong>Why does <code>@FunctionalInterface</code> allow default methods?</strong> — Only abstract methods count toward the single-abstract-method rule; default and static methods are ignored.</li>
+<li><strong>Can a method reference be ambiguous?</strong> — Yes, with overloaded methods; resolve it with an explicit lambda or a cast.</li>
+<li><strong>What does a bound reference capture?</strong> — The receiver object, which must be effectively final, held for the reference's lifetime.</li>
+</ul>
 <h2 id="20-final-summary">20. Final Summary</h2>
 <div class="highlight"><pre><span></span><code>lambda body: s -&gt; s.length()      ==     method reference: String::length
 five kinds:  static · bound · unbound · constructor · array-constructor
