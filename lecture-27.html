@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 27 · Java Generics Deep Dive — Java Notes</title>
+<meta name="description" content="Java Generics Deep Dive | Bounded Types using extends — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="27" data-lecture-title="Java Generics Deep Dive | Bounded Types using extends">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-27.html#1-why-generics-the-case-for-compile-time-type-safety">1. Why Generics — The Case for Compile-Time Type Safety</a></li><li><a href="lecture-27.html#2-the-pre-generics-problem-object-cast">2. The Pre-Generics Problem: Object + Cast</a></li><li><a href="lecture-27.html#3-generic-classes-boxt">3. Generic Classes: Box&lt;T&gt;</a></li><li><a href="lecture-27.html#4-generic-interfaces-and-generic-methods">4. Generic Interfaces and Generic Methods</a></li><li><a href="lecture-27.html#5-type-parameter-naming-conventions">5. Type Parameter Naming Conventions</a></li><li><a href="lecture-27.html#6-bounded-type-parameters-t-extends-number">6. Bounded Type Parameters: &lt;T extends Number&gt;</a></li><li><a href="lecture-27.html#7-bounded-generic-method-max-with-comparable">7. Bounded Generic Method: max with Comparable</a></li><li><a href="lecture-27.html#8-type-erasure-and-its-consequences">8. Type Erasure and Its Consequences</a></li><li><a href="lecture-27.html#9-invariance-listinteger-is-not-a-listnumber">9. Invariance: List&lt;Integer&gt; Is Not a List&lt;Number&gt;</a></li><li><a href="lecture-27.html#10-raw-types-and-heap-pollution">10. Raw Types and Heap Pollution</a></li><li><a href="lecture-27.html#11-generics-and-primitives">11. Generics and Primitives</a></li><li><a href="lecture-27.html#12-wildcard-teaser-forward-reference-lecture-28">12. Wildcard Teaser (Forward Reference — Lecture 28)</a></li><li><a href="lecture-27.html#13-pitfalls-catalogue">13. Pitfalls Catalogue</a></li><li><a href="lecture-27.html#14-myth-vs-reality">14. Myth vs Reality</a></li><li><a href="lecture-27.html#15-common-trap-questions">15. Common Trap Questions</a></li><li><a href="lecture-27.html#16-points-to-remember">16. Points to Remember</a></li><li><a href="lecture-27.html#17-likely-interview-questions">17. Likely Interview Questions</a></li><li><a href="lecture-27.html#18-final-summary">18. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 4 · Strings, Generics & Collections · Lecture 27</p>
+<h1>Java Generics Deep Dive | Bounded Types using extends</h1>
+<p class="readmeta">18 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="27" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: "Java Generics Deep Dive | Bounded Types using extends" (playlist map, verified). Repo evidence: 7 Demo files.</p>
+</blockquote>
+<p>Generics arrived in Java 5 to move the type check from runtime to compile time: instead of storing everything in <code>Object</code> and casting on the way out, a class or method declares the types it works with, and the compiler enforces them. This lecture builds the whole model from the pre-generics problem upward: generic classes, interfaces and methods, the naming conventions for type parameters, upper bounds using <code>extends</code> (including intersection bounds), and the erasure machinery that makes generics a compile-time-only feature. It then shows why <code>List&lt;Integer&gt;</code> is not a <code>List&lt;Number&gt;</code>, why raw types generate unchecked warnings, and why primitives cannot be type arguments — with <code>Lecture 18</code> autoboxing and the <code>Lecture 28</code> wildcard system as the two deliberate forward references.</p>
+<h2 id="1-why-generics-the-case-for-compile-time-type-safety">1. Why Generics — The Case for Compile-Time Type Safety</h2>
+<p>Before Java 5, the only general-purpose container was a holder of <code>Object</code>. It worked, but it deferred every type problem to runtime and forced a cast at every retrieval. Generics were introduced in Java 5 (JSR 14) to change exactly that:</p>
+<ol>
+<li><strong>Compile-time type safety</strong> — a wrong insertion is rejected by <code>javac</code>, not by an exception at 3 a.m. in production.</li>
+<li><strong>No casts</strong> — a parameterized container returns the declared type, so <code>(String) box.get()</code> disappears.</li>
+<li><strong>Reusable code</strong> — one <code>Box&lt;T&gt;</code> serves <code>String</code>, <code>Integer</code>, <code>Employee</code> and any future class without duplicating the class.</li>
+<li><strong>Self-documenting APIs</strong> — <code>List&lt;String&gt;</code> states its element type in the signature, where a raw <code>List</code> says nothing.</li>
+</ol>
+<blockquote class="callout callout--important">
+<p>Important
+Generics are a <strong>compile-time</strong> mechanism. Almost none of the type information survives into the bytecode — a fact called type erasure (section 8) that explains nearly every "strange" rule in this lecture.</p>
+</blockquote>
+<h2 id="2-the-pre-generics-problem-object-cast">2. The Pre-Generics Problem: Object + Cast</h2>
+<p>A generic type parameter compiles to a real check; a raw <code>Object</code> field compiles to nothing. The difference is where the failure lands.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — the pre-generics Object-and-cast pattern</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kd">class</span> <span class="nc">OldBox</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">private</span><span class="w"> </span><span class="n">Object</span><span class="w"> </span><span class="n">value</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">void</span><span class="w"> </span><span class="nf">set</span><span class="p">(</span><span class="n">Object</span><span class="w"> </span><span class="n">value</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="na">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">value</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="n">Object</span><span class="w"> </span><span class="nf">get</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">value</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">OldBox</span><span class="w"> </span><span class="n">box</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">OldBox</span><span class="p">();</span>
+<span class="w">        </span><span class="n">box</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="s">&quot;hello&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">String</span><span class="p">)</span><span class="w"> </span><span class="n">box</span><span class="p">.</span><span class="na">get</span><span class="p">();</span><span class="w">      </span><span class="c1">// mandatory cast</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">s</span><span class="p">.</span><span class="na">length</span><span class="p">());</span><span class="w">     </span><span class="c1">// 5</span>
+
+<span class="w">        </span><span class="n">box</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span>
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">String</span><span class="p">)</span><span class="w"> </span><span class="n">box</span><span class="p">.</span><span class="na">get</span><span class="p">();</span><span class="w">      </span><span class="c1">// compiles, fails at runtime</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">n</span><span class="p">);</span><span class="w">              </span><span class="c1">// ClassCastException</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The failure mode is the point: <code>box.set(42)</code> is perfectly legal, the cast <code>(String) box.get()</code> even compiles, and the program dies with <code>ClassCastException</code> only when that line executes. The compiler had enough information to reject it, but the raw <code>Object</code> type threw that information away.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"What problem do generics solve?" The precise answer is <strong>type safety without casts</strong>, enforced at compile time. Runtime <code>ClassCastException</code> does not become impossible — erasure and raw types (section 10) can still produce it — but correct generic code turns the class of bug into a compile error.</p>
+</blockquote>
+<h2 id="3-generic-classes-boxt">3. Generic Classes: <code>Box&lt;T&gt;</code></h2>
+<p>A <strong>type parameter</strong> is a placeholder for a type, written inside angle brackets after the class name. It is not a field and not a value; it is a compile-time symbol the compiler substitutes for the actual <strong>type argument</strong> supplied at use site.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo2.java — a generic class with a type parameter</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo2</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Box</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">private</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">value</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">void</span><span class="w"> </span><span class="nf">set</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="n">value</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="na">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">value</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="n">T</span><span class="w"> </span><span class="nf">get</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">value</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Box</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Box</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">s</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="s">&quot;hello&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="n">text</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="na">get</span><span class="p">();</span><span class="w">              </span><span class="c1">// no cast needed</span>
+
+<span class="w">        </span><span class="n">Box</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Box</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">i</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">number</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i</span><span class="p">.</span><span class="na">get</span><span class="p">();</span><span class="w">               </span><span class="c1">// auto-unboxed (Lecture 18)</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">text</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">number</span><span class="p">);</span><span class="w">   </span><span class="c1">// hello 42</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Mechanics worth naming:</p>
+<ol>
+<li><code>T</code> is declared on the class and used in fields, parameters and return types; each <code>new Box&lt;X&gt;</code> binds <code>T</code> to <code>X</code>.</li>
+<li><code>s.set(42)</code> is a <strong>compile error</strong> — the compiler knows <code>s</code> is a <code>Box&lt;String&gt;</code>.</li>
+<li>The <strong>diamond operator</strong> <code>&lt;&gt;</code> (Java 7) infers the argument from the left-hand side: <code>new Box&lt;&gt;()</code> instead of <code>new Box&lt;String&gt;()</code>.</li>
+<li>Only <strong>reference types</strong> may be type arguments — <code>Box&lt;int&gt;</code> is illegal (section 11).</li>
+</ol>
+<blockquote class="callout callout--important">
+<p>Important
+The type parameter is a contract with the <strong>compiler</strong>, not a runtime field. After compilation, <code>Box&lt;String&gt;</code> and <code>Box&lt;Integer&gt;</code> are both just <code>Box</code> (section 8).</p>
+</blockquote>
+<h2 id="4-generic-interfaces-and-generic-methods">4. Generic Interfaces and Generic Methods</h2>
+<p>The same type-parameter grammar applies to interfaces and to individual methods.</p>
+<ul>
+<li><strong>Generic interface</strong> — the most famous is <code>Comparable&lt;T&gt;</code>, which declares <code>int compareTo(T o)</code>. A class implementing <code>Comparable&lt;Employee&gt;</code> can only be compared with another <code>Employee</code>, and <code>Collections.sort</code> knows it.</li>
+<li><strong>Generic method</strong> — the type parameter is declared <strong>before the return type</strong>, making the method generic independently of its class:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo3.java — generic methods with and without bounds</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo3</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="nf">pick</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">                     </span><span class="c1">// unbounded type parameter</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">a</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="o">&lt;</span><span class="n">T</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="n">Comparable</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">   </span><span class="c1">// bounded (section 7)</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="na">compareTo</span><span class="p">(</span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">b</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pick</span><span class="p">(</span><span class="s">&quot;one&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;two&quot;</span><span class="p">);</span><span class="w">                 </span><span class="c1">// T inferred as String</span>
+<span class="w">        </span><span class="n">Integer</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pick</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span><span class="w">                        </span><span class="c1">// T inferred as Integer</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">max</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">7</span><span class="p">));</span><span class="w">                </span><span class="c1">// 10</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">max</span><span class="p">(</span><span class="s">&quot;apple&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;mango&quot;</span><span class="p">));</span><span class="w">     </span><span class="c1">// mango</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Type inference</strong> means the compiler usually derives <code>T</code> from the arguments, so <code>pick("one", "two")</code> is a <code>String</code>-returning call with no explicit <code>&lt;String&gt;</code> needed. When inference fails, the explicit form is <code>Demo3.&lt;String&gt;pick(...)</code>.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+A generic method's type parameter lives <strong>only</strong> for that method call and is inferred at each call site; a generic class's type parameter is fixed for the lifetime of each instance. Mixing the two — a static method trying to use its class's <code>T</code> — is a compile error (section 13).</p>
+</blockquote>
+<h2 id="5-type-parameter-naming-conventions">5. Type Parameter Naming Conventions</h2>
+<p>The letters are not magic; they are a widely followed readability convention. Any identifier works, but the alphabet below is what reviewers and interviewers expect.</p>
+<table>
+<thead>
+<tr>
+<th>Letter</th>
+<th>Convention</th>
+<th>Typical use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>T</code></td>
+<td>Type</td>
+<td>the general first choice</td>
+</tr>
+<tr>
+<td><code>E</code></td>
+<td>Element</td>
+<td>collection element types, as in <code>List&lt;E&gt;</code></td>
+</tr>
+<tr>
+<td><code>K</code></td>
+<td>Key</td>
+<td>map keys, as in <code>Map&lt;K, V&gt;</code></td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td>Value</td>
+<td>map values</td>
+</tr>
+<tr>
+<td><code>N</code></td>
+<td>Number</td>
+<td>numeric element types</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td>Result / return</td>
+<td>a method's return type</td>
+</tr>
+<tr>
+<td><code>S</code>, <code>U</code>, <code>V</code></td>
+<td>second, third types</td>
+<td>additional parameters</td>
+</tr>
+</tbody>
+</table>
+<p>Rules: multiple parameters are comma-separated (<code>Map&lt;K, V&gt;</code>), a class may not shadow a type parameter name with a nested class's own, and the letter should never be a real type name such as <code>String</code> — that obscures which identifiers are placeholders.</p>
+<h2 id="6-bounded-type-parameters-t-extends-number">6. Bounded Type Parameters: <code>&lt;T extends Number&gt;</code></h2>
+<p>An <strong>upper bound</strong> restricts what a type argument may be. The keyword is <code>extends</code> <strong>even for interfaces</strong> — there is no <code>implements</code> bound.</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Meaning</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;T&gt;</code></td>
+<td>Unbounded; the implicit bound is <code>Object</code></td>
+<td><code>static &lt;T&gt; T pick(T a, T b)</code></td>
+</tr>
+<tr>
+<td><code>&lt;T extends Number&gt;</code></td>
+<td><code>T</code> is <code>Number</code> or any subtype</td>
+<td><code>static double half(T x)</code></td>
+</tr>
+<tr>
+<td><code>&lt;T extends Comparable&lt;T&gt;&gt;</code></td>
+<td>Self-referential (recursive) bound</td>
+<td><code>static &lt;T&gt; T max(...)</code></td>
+</tr>
+<tr>
+<td><code>&lt;T extends A &amp; B&gt;</code></td>
+<td>Intersection: at most one class, then interfaces</td>
+<td><code>&lt;T extends Number &amp; Comparable&lt;T&gt;&gt;</code></td>
+</tr>
+<tr>
+<td><code>&lt;T extends A &amp; B &amp; C&gt;</code></td>
+<td>Multiple interface bounds</td>
+<td><code>&lt;T extends Runnable &amp; Cloneable&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p>Three facts to internalize:</p>
+<ol>
+<li><strong>One class may precede any number of interfaces</strong>, and the class must come <strong>first</strong> if both are present. <code>&lt;T extends Comparable&lt;T&gt; &amp; Number&gt;</code> is a compile error.</li>
+<li><code>extends</code> is used for interfaces too; there is no <code>implements</code> in a bound.</li>
+<li>The bound decides how the body may treat <code>T</code>: only members guaranteed by the bound are callable.</li>
+</ol>
+<h2 id="7-bounded-generic-method-max-with-comparable">7. Bounded Generic Method: <code>max</code> with <code>Comparable</code></h2>
+<p>The bound is what <strong>unlocks</strong> behavior. Without <code>&lt;T extends Comparable&lt;T&gt;&gt;</code>, the compiler sees only <code>Object</code> and refuses to call <code>compareTo</code>; with it, the method may sort, compare or order any type that promises it.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// reprinted from Demo3.java — the bound unlocks compareTo</span>
+<span class="kd">static</span><span class="w"> </span><span class="o">&lt;</span><span class="n">T</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="n">Comparable</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="na">compareTo</span><span class="p">(</span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">b</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The same idea unlocks numeric operations through <code>Number</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kd">static</span><span class="w"> </span><span class="o">&lt;</span><span class="n">T</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="n">Number</span><span class="o">&gt;</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="nf">sum</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">y</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">x</span><span class="p">.</span><span class="na">doubleValue</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">y</span><span class="p">.</span><span class="na">doubleValue</span><span class="p">();</span><span class="w">   </span><span class="c1">// doubleValue() is guaranteed by Number</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Without the bound, <code>x.doubleValue()</code> does not compile because <code>T</code> would be only <code>Object</code>. The bound is the bridge between "any type" and "any type that has these methods" — and because the bound's methods are invoked through the erased type, this is the rare place where erasure and polymorphism visibly cooperate (section 8).</p>
+<blockquote class="callout callout--trap">
+<p>Trap — A bound is a <strong>promise the caller must keep</strong>, not a conversion. <code>sum(3, 4)</code> works because <code>Integer</code> is a <code>Number</code>, but passing a <code>String</code> fails to compile — the bound is checked where the call is written, not inside the method.</p>
+</blockquote>
+<h2 id="8-type-erasure-and-its-consequences">8. Type Erasure and Its Consequences</h2>
+<p><strong>Type erasure</strong> is the compiler's strategy for backward compatibility with pre-Java-5 bytecode: it deletes type parameters and replaces each with its bound (or <code>Object</code> when unbounded), then inserts the casts the programmer used to write by hand.</p>
+<p>What the compiler actually does:</p>
+<ol>
+<li><strong>Replaces</strong> each type parameter with its leftmost bound, or <code>Object</code> if unbounded.</li>
+<li><strong>Inserts casts</strong> at every use site that needs the concrete type.</li>
+<li><strong>Inserts bridge methods</strong> so overriding still works after erasure (for example, when <code>Integer.compareTo(Integer)</code> becomes the erased <code>compareTo(Object)</code>).</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Source construct</th>
+<th>After erasure</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Box&lt;T&gt;</code></td>
+<td><code>Box</code></td>
+<td>No runtime type parameter exists</td>
+</tr>
+<tr>
+<td><code>&lt;T extends Number&gt;</code></td>
+<td>erased to <code>Number</code></td>
+<td><code>Number</code>'s methods are callable</td>
+</tr>
+<tr>
+<td>field <code>T value</code></td>
+<td><code>Object</code> or the bound</td>
+<td>The field itself carries no runtime type</td>
+</tr>
+<tr>
+<td><code>new T()</code></td>
+<td>illegal</td>
+<td>Cannot instantiate a type parameter</td>
+</tr>
+<tr>
+<td><code>new T[5]</code></td>
+<td>illegal</td>
+<td>Cannot create a generic array</td>
+</tr>
+<tr>
+<td><code>new List&lt;String&gt;[]</code></td>
+<td>illegal</td>
+<td>Generic array creation is forbidden</td>
+</tr>
+<tr>
+<td><code>instanceof List&lt;String&gt;</code></td>
+<td>illegal</td>
+<td>No runtime type info; use <code>List&lt;?&gt;</code></td>
+</tr>
+<tr>
+<td><code>catch (T e)</code></td>
+<td>illegal</td>
+<td>Cannot catch a type parameter</td>
+</tr>
+<tr>
+<td><code>static T field;</code></td>
+<td>illegal</td>
+<td>Static context cannot use the class parameter</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo4.java — type erasure removes the parameter at runtime</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.ArrayList</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.List</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo4</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="na">getClass</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">b</span><span class="p">.</span><span class="na">getClass</span><span class="p">());</span><span class="w">   </span><span class="c1">// true — both are ArrayList</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="na">getClass</span><span class="p">().</span><span class="na">getName</span><span class="p">());</span><span class="w">         </span><span class="c1">// java.util.ArrayList</span>
+
+<span class="w">        </span><span class="c1">// Object o = a;                       // legal: a raw view of the list</span>
+<span class="w">        </span><span class="c1">// if (o instanceof List&lt;String&gt;) { }  // compile error: no runtime type info</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The <code>true</code> on that line is the whole story: at runtime, <code>List&lt;String&gt;</code> and <code>List&lt;Integer&gt;</code> are the <strong>same class</strong>. Erasure also forbids <strong>overloading</strong> two methods that differ only by type parameter — <code>void f(List&lt;String&gt;)</code> and <code>void f(List&lt;Integer&gt;)</code> erase to the same <code>void f(List)</code>, a <strong>name clash</strong> compile error.</p>
+<blockquote class="callout callout--important">
+<p>Important
+Because of erasure, the compiler's generic type checks happen <strong>only</strong> at source compilation. If a raw type sneaks a wrong element past the compiler, no runtime check catches it — that is heap pollution (section 10).</p>
+</blockquote>
+<h2 id="9-invariance-listinteger-is-not-a-listnumber">9. Invariance: <code>List&lt;Integer&gt;</code> Is Not a <code>List&lt;Number&gt;</code></h2>
+<p>Although <code>Integer</code> extends <code>Number</code>, <code>List&lt;Integer&gt;</code> is <strong>not</strong> a subtype of <code>List&lt;Number&gt;</code>. This is <strong>invariance</strong>, and it exists for type safety:</p>
+<div class="highlight"><pre><span></span><code><span class="n">List</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">ints</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="n">List</span><span class="o">&lt;</span><span class="n">Number</span><span class="o">&gt;</span><span class="w"> </span><span class="n">nums</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ints</span><span class="p">;</span><span class="w">      </span><span class="c1">// compile error — and correctly so</span>
+</code></pre></div>
+
+<p>The rejected assignment is exactly what would break the world. If <code>nums</code> were legal, then <code>nums.add(3.14)</code> — legal for a <code>List&lt;Number&gt;</code> — would put a <code>Double</code> into a list that was declared to hold <code>Integer</code>, and a later <code>int x = ints.get(0)</code> would explode. The compiler refuses the alias rather than allow the contamination.</p>
+<p>Generics are invariant in their type arguments by default; <code>List&lt;? extends Number&gt;</code> (Lecture 28) restores the read-only covariant view safely.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Is <code>List&lt;Integer&gt;</code> a subtype of <code>List&lt;Number&gt;</code>?" No. Arrays are covariant (<code>Integer[]</code> is a <code>Number[]</code>) and that covariance famously causes <code>ArrayStoreException</code>; generics chose invariance to avoid the same hole. This is the single most important misconception the wildcard lecture (Lecture 28) fixes.</p>
+</blockquote>
+<h2 id="10-raw-types-and-heap-pollution">10. Raw Types and Heap Pollution</h2>
+<p>A <strong>raw type</strong> is a generic type used without type arguments — <code>List</code> rather than <code>List&lt;String&gt;</code>. Raw types exist only for backward compatibility with 2004-era code, and using them trades away the type checker.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo5.java — mixing raw and parameterized types causes unchecked warnings</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.ArrayList</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.List</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo5</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">List</span><span class="w"> </span><span class="n">raw</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">names</span><span class="p">;</span><span class="w">                   </span><span class="c1">// raw type: unchecked assignment</span>
+<span class="w">        </span><span class="n">raw</span><span class="p">.</span><span class="na">add</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span><span class="w">                        </span><span class="c1">// heap pollution: an Integer in a List&lt;String&gt;</span>
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="n">first</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">names</span><span class="p">.</span><span class="na">get</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w">        </span><span class="c1">// ClassCastException on read</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">first</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The compiler emits an <strong>unchecked warning</strong> at <code>List raw = names;</code> and then stays silent — the damage surfaces only when <code>names.get(0)</code> is cast back to <code>String</code> at runtime. This is <strong>heap pollution</strong>: a variable of a parameterized type refers to an object holding a wrong-typed element.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Raw type (<code>List</code>)</th>
+<th>Parameterized (<code>List&lt;String&gt;</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Type checking</td>
+<td>None</td>
+<td>Compile-time</td>
+</tr>
+<tr>
+<td>Casts at retrieval</td>
+<td>Required</td>
+<td>Inserted by the compiler</td>
+</tr>
+<tr>
+<td>Warning</td>
+<td><code>unchecked</code> warning</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Runtime safety</td>
+<td><code>ClassCastException</code> possible</td>
+<td>Type errors caught earlier</td>
+</tr>
+<tr>
+<td>When to use</td>
+<td>Legacy interop only</td>
+<td>Always, in new code</td>
+</tr>
+</tbody>
+</table>
+<h2 id="11-generics-and-primitives">11. Generics and Primitives</h2>
+<p>A type argument must be a <strong>reference type</strong>. <code>List&lt;int&gt;</code> and <code>Box&lt;double&gt;</code> do not compile; the workaround is the wrapper classes with autoboxing from <code>Lecture 18</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Attempted use</th>
+<th>Allowed</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>List&lt;int&gt;</code></td>
+<td>No</td>
+<td><code>List&lt;Integer&gt;</code> with autoboxing on insert</td>
+</tr>
+<tr>
+<td><code>Map&lt;long, double&gt;</code></td>
+<td>No</td>
+<td><code>Map&lt;Long, Double&gt;</code></td>
+</tr>
+<tr>
+<td><code>Box&lt;char&gt;</code></td>
+<td>No</td>
+<td><code>Box&lt;Character&gt;</code></td>
+</tr>
+<tr>
+<td><code>ArrayList&lt;boolean&gt;</code></td>
+<td>No</td>
+<td><code>ArrayList&lt;Boolean&gt;</code></td>
+</tr>
+<tr>
+<td><code>int[]</code></td>
+<td>Yes (array, not generic)</td>
+<td>Arrays are unaffected by erasure</td>
+</tr>
+</tbody>
+</table>
+<p>The cost is the boxing overhead described in Lecture 18: putting an <code>int</code> into an <code>ArrayList&lt;Integer&gt;</code> allocates an <code>Integer</code>, and reading it allocates nothing but unboxes. This is why the JDK keeps primitive-specialised classes such as <code>IntStream</code> (Lecture 39) and why hot numeric loops should use <code>int[]</code> and stay away from generic collections.</p>
+<h2 id="12-wildcard-teaser-forward-reference-lecture-28">12. Wildcard Teaser (Forward Reference — Lecture 28)</h2>
+<p>A <strong>wildcard</strong> is the question mark <code>?</code>, used as a type argument that stands for "some unknown type". The three forms you will meet next are:</p>
+<ol>
+<li><code>List&lt;?&gt;</code> — a list of <strong>some</strong> unknown type; read-only for safe element use.</li>
+<li><code>List&lt;? extends Number&gt;</code> — an <strong>upper-bounded</strong> wildcard (covariant, producer side).</li>
+<li><code>List&lt;? super Integer&gt;</code> — a <strong>lower-bounded</strong> wildcard (contravariant, consumer side).</li>
+</ol>
+<p>They are the declared-argument counterpart to the bounded <strong>type parameters</strong> of section 6: a bounded type parameter (<code>&lt;T extends Number&gt;</code>) fixes one type for the whole method, whereas a wildcard leaves it unknown at each use. The producer/consumer rule ("<code>extends</code> read, <code>super</code> write") and the PECS mnemonic belong to Lecture 28; here it is enough to know that wildcards exist and that invariance (section 9) is what motivates them.</p>
+<h2 id="13-pitfalls-catalogue">13. Pitfalls Catalogue</h2>
+<ol>
+<li><strong><code>new T()</code></strong> — illegal; the type parameter has no constructor after erasure.</li>
+<li><strong><code>new T[N]</code> and <code>new List&lt;String&gt;[N]</code></strong> — generic array creation is illegal; use an <code>Object[]</code> or an unbounded <code>List&lt;?&gt;</code>.</li>
+<li><strong><code>instanceof List&lt;String&gt;</code></strong> — illegal; there is no runtime type information. Use <code>instanceof List&lt;?&gt;</code>.</li>
+<li><strong>Overload clash after erasure</strong> — <code>f(List&lt;String&gt;)</code> and <code>f(List&lt;Integer&gt;)</code> erase to the same signature: a compile error.</li>
+<li><strong>Static context cannot use the class's type parameter</strong> — <code>static T value;</code> or <code>static T identity(T x)</code> inside a generic class does not compile; the static member needs its own <code>&lt;T&gt;</code>.</li>
+<li><strong>Generic static fields are impossible</strong> — a static field is shared by every instantiation, so it cannot depend on an instance's type parameter.</li>
+<li><strong>Casting to a generic type is unchecked</strong> — <code>(List&lt;String&gt;) someObject</code> compiles with a warning and can fail later; <code>List&lt;String&gt;</code> in a cast is not verifiable.</li>
+<li><strong>Raw types defeat the checker</strong> — mixing raw and parameterized types triggers unchecked warnings and heap pollution (section 10).</li>
+<li><strong>Assuming a runtime type check</strong> — <code>List&lt;String&gt;</code> and <code>List&lt;Integer&gt;</code> are the same class at runtime; no check will separate them.</li>
+<li><strong>A bound does not widen the caller's types</strong> — a <code>String</code> still fails the <code>&lt;T extends Number&gt;</code> call; the bound constrains, it does not convert.</li>
+</ol>
+<blockquote class="callout callout--trap">
+<p>Trap — "But <code>new T[5]</code> sometimes works if I cast it!" <code>(T[]) new Object[5]</code> compiles with an unchecked warning and defers the <code>ClassCastException</code> to the caller. It is a known workaround, not a guarantee; the array has no element type and is still a lie about <code>T[]</code>.</p>
+</blockquote>
+<h2 id="14-myth-vs-reality">14. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Generics exist only to remove casts."</td>
+<td>They also move type checking to compile time and enable type-safe reusable APIs; removing casts is a visible side effect.</td>
+</tr>
+<tr>
+<td>"Type information is available at runtime."</td>
+<td>Erasure removes it: <code>List&lt;String&gt;</code> and <code>List&lt;Integer&gt;</code> are the same class at runtime (section 8).</td>
+</tr>
+<tr>
+<td>"<code>List&lt;Integer&gt;</code> is a <code>List&lt;Number&gt;</code> because <code>Integer</code> is a <code>Number</code>."</td>
+<td>Generics are invariant; the assignment is rejected to prevent contamination (section 9).</td>
+</tr>
+<tr>
+<td>"<code>List&lt;int&gt;</code> works with autoboxing."</td>
+<td>No — type arguments must be reference types; <code>List&lt;Integer&gt;</code> boxes on insert (section 11).</td>
+</tr>
+<tr>
+<td>"A bound may list interfaces before a class."</td>
+<td>A single class must come first in an intersection bound: <code>&lt;T extends A &amp; B&gt;</code> (section 6).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="15-common-trap-questions">15. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — "Does <code>List&lt;String&gt;</code> compile? Does <code>instanceof List&lt;String&gt;</code>?" The first compiles; the second does not, because erasure leaves no runtime type to test. <code>instanceof List&lt;?&gt;</code> is the legal form.</p>
+<p>Trap 2 — "Can we overload <code>f(List&lt;String&gt;)</code> and <code>f(List&lt;Integer&gt;)</code>?" No — both erase to <code>f(List)</code>, a name clash at compile time.</p>
+<p>Trap 3 — "Can <code>T</code> be instantiated or array-created?" No: <code>new T()</code> and <code>new T[5]</code> are both illegal because the constructor and element type do not exist after erasure.</p>
+<p>Trap 4 — "Is <code>&lt;T extends Number&gt;</code> valid? <code>&lt;T extends Runnable&gt;</code>? <code>&lt;T extends Number &amp; Runnable&gt;</code>?" All three are valid; <code>extends</code> bounds interfaces too, and an intersection may combine one class with interfaces.</p>
+<p>Trap 5 — "Can a static method use the enclosing class's <code>T</code>?" No — static context cannot reference the class type parameter; it must declare its own <code>&lt;T&gt;</code>.</p>
+<p>Trap 6 — "What happens when raw and generic types mix?" The compiler issues an unchecked warning and heap pollution becomes possible; the <code>ClassCastException</code> is deferred to the read site.</p>
+<p>Trap 7 — "Why does <code>a.getClass() == b.getClass()</code> print <code>true</code> for <code>List&lt;String&gt;</code> and <code>List&lt;Integer&gt;</code>?" Because both erase to <code>ArrayList</code>; the type arguments exist only in source.</p>
+</blockquote>
+<h2 id="16-points-to-remember">16. Points to Remember</h2>
+<ol>
+<li>Generics (Java 5) provide compile-time type safety, remove casts and enable reusable parameterized APIs.</li>
+<li>The pre-generics <code>Object</code> holder compiled fine but raised <code>ClassCastException</code> at runtime; generics move the check earlier.</li>
+<li>A generic class declares a type parameter (<code>Box&lt;T&gt;</code>); a generic method declares it before the return type (<code>static &lt;T&gt; T pick(...)</code>).</li>
+<li>Conventions: <code>T</code> type, <code>E</code> element, <code>K</code> key, <code>V</code> value, <code>N</code> number, <code>R</code> result.</li>
+<li>Upper bounds use <code>extends</code> for classes <strong>and</strong> interfaces; a single class must precede interfaces in <code>&lt;T extends A &amp; B&gt;</code>.</li>
+<li>A bound unlocks the bound's members — <code>&lt;T extends Number&gt;</code> enables <code>doubleValue()</code>, <code>&lt;T extends Comparable&lt;T&gt;&gt;</code> enables <code>compareTo</code>.</li>
+<li>Erasure replaces a type parameter with its bound (or <code>Object</code>), inserts casts, and inserts bridge methods.</li>
+<li>Erasure forbids <code>new T()</code>, <code>new T[]</code>, <code>instanceof List&lt;String&gt;</code>, generic static fields, and overloads differing only by type parameter.</li>
+<li>Generics are invariant: <code>List&lt;Integer&gt;</code> is not a <code>List&lt;Number&gt;</code>; wildcards (Lecture 28) provide safe variance.</li>
+<li>Primitives cannot be type arguments; use wrappers with autoboxing (Lecture 18). Raw types cause unchecked warnings and heap pollution.</li>
+</ol>
+<h2 id="17-likely-interview-questions">17. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Why were generics introduced?</td>
+<td>Compile-time type safety, no casts, and reusable type-correct code (Java 5).</td>
+</tr>
+<tr>
+<td>What is a type parameter?</td>
+<td>A compile-time placeholder for a type, declared in angle brackets and bound to a real type argument at the use site.</td>
+</tr>
+<tr>
+<td>What is type inference?</td>
+<td>The compiler deriving type arguments from context, as in <code>pick("a", "b")</code> or the diamond <code>new Box&lt;&gt;()</code>.</td>
+</tr>
+<tr>
+<td>What is a bounded type parameter?</td>
+<td>An upper restriction written with <code>extends</code>, valid for classes and interfaces, e.g. <code>&lt;T extends Number&gt;</code>.</td>
+</tr>
+<tr>
+<td>Why <code>extends</code> for interfaces?</td>
+<td>The bound syntax uses <code>extends</code> for both; there is no <code>implements</code> form.</td>
+</tr>
+<tr>
+<td>Can a bound name a class and interfaces?</td>
+<td>Yes, one class first then interfaces: <code>&lt;T extends Number &amp; Comparable&lt;T&gt;&gt;</code>.</td>
+</tr>
+<tr>
+<td>What does a bound give you?</td>
+<td>The guarantee that <code>T</code> has the bound's members, so they can be called inside the method.</td>
+</tr>
+<tr>
+<td>What is type erasure?</td>
+<td>The compiler deleting type parameters, replacing them with their bound or <code>Object</code>, and inserting casts and bridge methods.</td>
+</tr>
+<tr>
+<td>Name three things erasure forbids.</td>
+<td><code>new T()</code>, <code>new T[]</code>, and <code>instanceof List&lt;String&gt;</code>; also generic static fields and type-only overloads.</td>
+</tr>
+<tr>
+<td>Is <code>List&lt;Integer&gt;</code> a <code>List&lt;Number&gt;</code>?</td>
+<td>No — generics are invariant; only wildcards (Lecture 28) allow safe variance.</td>
+</tr>
+<tr>
+<td>What is heap pollution?</td>
+<td>A parameterized variable referring to an object with an element of the wrong type, usually via raw types.</td>
+</tr>
+<tr>
+<td>Why can't generics use primitives?</td>
+<td>Type arguments must be reference types, so wrappers plus autoboxing are used instead (Lecture 18).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="18-final-summary">18. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>pre-generics:  Object holder --&gt; cast (String) --&gt; ClassCastException at runtime
+generics:      Box&lt;T&gt; --&gt; compile-time check --&gt; no cast --&gt; safety before runtime
+
+Box&lt;T&gt;, Comparable&lt;T&gt;, &lt;T&gt; T pick(T,T)        (type parameters)
+&lt;T extends Number&gt;, &lt;T extends A &amp; B&gt;         (bounds; class first, then interfaces)
+erasure: T --&gt; bound/Object + inserted casts + bridge methods
+consequence: no new T(), no new T[], no instanceof List&lt;String&gt;, no generic statics
+invariance:  List&lt;Integer&gt; ≠ List&lt;Number&gt;    --&gt; wildcards (Lecture 28)
+</code></pre></div>
+
+<ul>
+<li>Why → compile-time safety, no casts, reusable code; removes the runtime <code>ClassCastException</code> trap of <code>Object</code>.</li>
+<li>Declare → generic classes (<code>Box&lt;T&gt;</code>), interfaces (<code>Comparable&lt;T&gt;</code>), methods (<code>&lt;T&gt; T pick(...)</code>); name by convention <code>T, E, K, V, N</code>.</li>
+<li>Bound → <code>extends</code> for classes and interfaces; <code>&lt;T extends A &amp; B&gt;</code> (class first); unlocks the bound's methods.</li>
+<li>Erasure → type parameters vanish, casts and bridge methods are inserted; no runtime generic type exists.</li>
+<li>Invariance → <code>List&lt;Integer&gt;</code> is not <code>List&lt;Number&gt;</code>; wildcards are the safe escape (Lecture 28).</li>
+<li>Raw types → unchecked warnings and heap pollution; primitives need wrappers with autoboxing (Lecture 18).</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+A type parameter is a promise made to the compiler and erased before the JVM ever sees it — so put the type check where it matters (in the source), bound it to unlock behavior, and never trust a generic type to be verified at runtime.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> generics turn the <code>Object</code>-plus-cast pattern into a compile-time contract, bounds using <code>extends</code> decide what that contract may do, and erasure ensures the whole apparatus costs nothing at runtime — at the price of no runtime type information and invariance in the type arguments.</p>
+<div class="pager"><a class="prev" href="lecture-26.html"><span class="dir">Previous</span><span class="ttl">Java Strings Part 2</span></a><a class="next" href="lecture-28.html"><span class="dir">Next</span><span class="ttl">Wildcards in Generics</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 39 · Introduction to Java Streams — Java Notes</title>
+<meta name="description" content="Introduction to Java Streams | Creation & Architecture — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="39" data-lecture-title="Introduction to Java Streams | Creation & Architecture">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-39.html#1-what-a-stream-is-and-what-it-is-not">1. What a Stream Is — and What It Is Not</a></li><li><a href="lecture-39.html#2-stream-vs-collection">2. Stream vs Collection</a></li><li><a href="lecture-39.html#3-the-pipeline-architecture-source-intermediate-terminal">3. The Pipeline Architecture: Source, Intermediate, Terminal</a></li><li><a href="lecture-39.html#4-creating-streams">4. Creating Streams</a></li><li><a href="lecture-39.html#5-intermediate-operations-the-lazy-stage">5. Intermediate Operations — The Lazy Stage</a></li><li><a href="lecture-39.html#6-terminal-operations-the-one-that-runs-the-pipeline">6. Terminal Operations — The One That Runs the Pipeline</a></li><li><a href="lecture-39.html#7-primitive-streams-intstream-longstream-doublestream">7. Primitive Streams: IntStream, LongStream, DoubleStream</a></li><li><a href="lecture-39.html#8-stateless-vs-stateful-intermediate-operations">8. Stateless vs Stateful Intermediate Operations</a></li><li><a href="lecture-39.html#9-lazy-evaluation-and-short-circuiting">9. Lazy Evaluation and Short-Circuiting</a></li><li><a href="lecture-39.html#10-a-stream-is-single-use">10. A Stream Is Single-Use</a></li><li><a href="lecture-39.html#11-parallel-streams-a-first-look">11. Parallel Streams: A First Look</a></li><li><a href="lecture-39.html#12-common-pitfalls-and-errors">12. Common Pitfalls and Errors</a></li><li><a href="lecture-39.html#13-myth-vs-reality">13. Myth vs Reality</a></li><li><a href="lecture-39.html#14-common-trap-questions">14. Common Trap Questions</a></li><li><a href="lecture-39.html#15-points-to-remember">15. Points to Remember</a></li><li><a href="lecture-39.html#16-likely-interview-questions">16. Likely Interview Questions</a></li><li><a href="lecture-39.html#17-final-summary">17. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 5 · Collections, Lambdas & Streams · Lecture 39</p>
+<h1>Introduction to Java Streams | Creation & Architecture</h1>
+<p class="readmeta">17 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="39" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: "Introduction to Java Streams | Creation &amp; Architecture" (playlist map, verified). Repo evidence: code/Demo.java.</p>
+</blockquote>
+<p>Collections already give Java a way to store and group data; Streams, added in Java 8, give it a way to describe what to do with that data as a pipeline instead of a loop. A stream is not a container - it is a view over a source that carries values through a chain of operations. This lecture defines what a Stream is and is not, contrasts it with a Collection, lays out the source to intermediate to terminal architecture, catalogs the ways to create a stream, and examines laziness, short-circuiting, single-use behaviour and primitive streams.</p>
+<h2 id="1-what-a-stream-is-and-what-it-is-not">1. What a Stream Is — and What It Is Not</h2>
+<p><code>java.util.stream.Stream&lt;T&gt;</code> is a sequence of elements supporting sequential and parallel aggregate operations. It is declarative: you state the result you want (keep these, transform them, gather them) rather than the index-by-index steps that produce it.</p>
+<p>Five properties define it:</p>
+<ol>
+<li><strong>Not a data structure.</strong> A stream has no backing array, node or bucket structure of its own; it holds no storage.</li>
+<li><strong>Does not store elements.</strong> It is a view that pulls values from a source on demand and passes them along the pipeline.</li>
+<li><strong>Lazy.</strong> Intermediate operations only describe work; nothing executes until a terminal operation runs.</li>
+<li><strong>Single-use.</strong> Once a terminal operation consumes a stream, the stream is spent; a second terminal call fails.</li>
+<li><strong>Can be parallel.</strong> The same pipeline can be run sequentially (default) or split across threads with <code>parallel()</code>.</li>
+</ol>
+<blockquote class="callout callout--important">
+<p>Important
+A stream is computed, not stored. It is closer to a recipe than to a container: the source keeps the ingredients, the stream describes the dish, and the terminal operation cooks it. (Stream internals and <code>BaseStream</code> are covered further in Lecture 40.)</p>
+</blockquote>
+<h2 id="2-stream-vs-collection">2. Stream vs Collection</h2>
+<p>Both deal with groups of elements, but they play opposite roles: a Collection stores data, a Stream processes it.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Collection</th>
+<th>Stream</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Storage</td>
+<td>Stores its elements in memory</td>
+<td>Does not store elements; a view over a source</td>
+</tr>
+<tr>
+<td>Traversal</td>
+<td>External iteration (for-each, <code>Iterator</code>)</td>
+<td>Internal iteration (the library controls the walk)</td>
+</tr>
+<tr>
+<td>Reuse</td>
+<td>Can be traversed many times</td>
+<td>Single-use; consumed by one terminal operation</td>
+</tr>
+<tr>
+<td>Laziness</td>
+<td>Operations execute immediately (eager)</td>
+<td>Intermediate operations are lazy until the terminal</td>
+</tr>
+<tr>
+<td>Size</td>
+<td>Usually known (<code>size()</code> is O(1))</td>
+<td>May be unknown or infinite; <code>count()</code> consumes it</td>
+</tr>
+<tr>
+<td>Parallelism</td>
+<td>None of its own; manual threads required</td>
+<td><code>parallelStream()</code> and <code>parallel()</code> built in</td>
+</tr>
+<tr>
+<td>Construction</td>
+<td>A data structure you build and fill</td>
+<td>A pipeline you construct from a source</td>
+</tr>
+<tr>
+<td>Mutation</td>
+<td>Mostly mutable (add, remove, set)</td>
+<td>Structurally immutable; no add or remove of elements</td>
+</tr>
+<tr>
+<td>Computation</td>
+<td>Data exists at creation</td>
+<td>Work happens at the terminal operation</td>
+</tr>
+</tbody>
+</table>
+<p>Reading the table: a Collection answers "what do I have?", a Stream answers "what do I want to compute from it?". The stream borrows the collection, computes, and leaves the collection untouched.</p>
+<blockquote class="callout callout--note">
+<p>Memory aid — the assembly line: a Collection is the warehouse that stores parts; a Stream is the conveyor belt that transforms them as they pass. The belt holds nothing between stations.</p>
+</blockquote>
+<h2 id="3-the-pipeline-architecture-source-intermediate-terminal">3. The Pipeline Architecture: Source, Intermediate, Terminal</h2>
+<p>Every stream program has the same three-part shape:</p>
+<div class="highlight"><pre><span></span><code>source (create) --&gt; intermediate ops (zero or more, lazy) --&gt; terminal op (exactly one, runs)
+   collection          filter, map, sorted, limit              collect, forEach, reduce, count
+</code></pre></div>
+
+<ol>
+<li><strong>Source.</strong> Where the elements come from: a collection, an array, a generator, a file, a range. Creation is covered in Section 4.</li>
+<li><strong>Intermediate operations.</strong> Zero or more lazy stages such as <code>filter</code>, <code>map</code> or <code>sorted</code>. Each returns a new <code>Stream</code>, which is why they can be chained.</li>
+<li><strong>Terminal operation.</strong> Exactly one operation such as <code>collect</code>, <code>forEach</code> or <code>reduce</code>. It consumes the stream, triggers the whole pipeline and produces a result (or <code>void</code>).</li>
+</ol>
+<p>The critical rule: <strong>nothing in the pipeline runs until the terminal operation is invoked.</strong> Without a terminal, the chain is a description that never executes.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java - source, two lazy intermediates, one terminal</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.stream.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="s">&quot;Ann&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Bob&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Amy&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Carl&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">upper</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">names</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span><span class="w">          </span><span class="c1">// source</span>
+<span class="w">                </span><span class="p">.</span><span class="na">filter</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">n</span><span class="p">.</span><span class="na">startsWith</span><span class="p">(</span><span class="s">&quot;A&quot;</span><span class="p">))</span><span class="w">      </span><span class="c1">// intermediate: lazy</span>
+<span class="w">                </span><span class="p">.</span><span class="na">map</span><span class="p">(</span><span class="n">String</span><span class="p">::</span><span class="n">toUpperCase</span><span class="p">)</span><span class="w">            </span><span class="c1">// intermediate: lazy</span>
+<span class="w">                </span><span class="p">.</span><span class="na">collect</span><span class="p">(</span><span class="n">Collectors</span><span class="p">.</span><span class="na">toList</span><span class="p">());</span><span class="w">       </span><span class="c1">// terminal: triggers the work</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">upper</span><span class="p">);</span><span class="w">                   </span><span class="c1">// [ANN, AMY]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Removing the <code>collect</code> line compiles but prints nothing - the filter and map never fire.</p>
+<h2 id="4-creating-streams">4. Creating Streams</h2>
+<p>A stream is always obtained from a source. The standard factories:</p>
+<table>
+<thead>
+<tr>
+<th>Creation call</th>
+<th>Source kind</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>collection.stream()</code></td>
+<td>Collection</td>
+<td>Every <code>Collection</code> implements this.</td>
+</tr>
+<tr>
+<td><code>Arrays.stream(array)</code></td>
+<td>Array</td>
+<td>Works for object and primitive arrays.</td>
+</tr>
+<tr>
+<td><code>Stream.of(a, b, c)</code></td>
+<td>Literals / varargs</td>
+<td>Convenient for fixed values.</td>
+</tr>
+<tr>
+<td><code>Stream.iterate(seed, f)</code></td>
+<td>Infinite, ordered</td>
+<td>Java 8; each value derived from the previous.</td>
+</tr>
+<tr>
+<td><code>Stream.iterate(seed, pred, f)</code></td>
+<td>Bounded</td>
+<td>Java 9 three-arg form; stops when <code>pred</code> is false.</td>
+</tr>
+<tr>
+<td><code>Stream.generate(supplier)</code></td>
+<td>Infinite, unordered</td>
+<td>Each value from a <code>Supplier</code>.</td>
+</tr>
+<tr>
+<td><code>IntStream.range(a, b)</code></td>
+<td>Primitive range</td>
+<td><code>a</code> inclusive, <code>b</code> exclusive.</td>
+</tr>
+<tr>
+<td><code>IntStream.rangeClosed(a, b)</code></td>
+<td>Primitive range</td>
+<td>Both ends inclusive.</td>
+</tr>
+<tr>
+<td><code>Stream.builder()</code></td>
+<td>Builder</td>
+<td>Add elements, then call <code>build()</code>.</td>
+</tr>
+<tr>
+<td><code>Files.lines(path)</code></td>
+<td>File</td>
+<td>Lazy lines; close with try-with-resources.</td>
+</tr>
+<tr>
+<td><code>Stream.empty()</code></td>
+<td>Empty</td>
+<td>A stream with no elements.</td>
+</tr>
+<tr>
+<td><code>new Random().ints()</code></td>
+<td>Infinite random</td>
+<td>Primitive random values.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java - a few of the creation sources side by side</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.stream.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Stream</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Arrays</span><span class="p">.</span><span class="na">stream</span><span class="p">(</span><span class="k">new</span><span class="w"> </span><span class="n">String</span><span class="o">[]</span><span class="p">{</span><span class="s">&quot;x&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;y&quot;</span><span class="p">});</span>
+<span class="w">        </span><span class="n">Stream</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Stream</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="s">&quot;x&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;y&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">Stream</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="s">&quot;x&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;y&quot;</span><span class="p">).</span><span class="na">stream</span><span class="p">();</span>
+<span class="w">        </span><span class="n">Stream</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Random</span><span class="p">().</span><span class="na">ints</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">100</span><span class="p">).</span><span class="na">limit</span><span class="p">(</span><span class="mi">3</span><span class="p">).</span><span class="na">boxed</span><span class="p">();</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="na">count</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">.</span><span class="na">count</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">c</span><span class="p">.</span><span class="na">count</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="na">count</span><span class="p">());</span><span class="w"> </span><span class="c1">// 9</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>Files.lines</code> is the one source that owns an OS resource: it must be closed, so wrap it in try-with-resources.</p>
+<h2 id="5-intermediate-operations-the-lazy-stage">5. Intermediate Operations — The Lazy Stage</h2>
+<p>Intermediate operations transform one stream into another and are lazy. They fall into a handful of families. The full treatment is Lecture 40; this is the map.</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Purpose</th>
+<th>Nature</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>filter(Predicate)</code></td>
+<td>Keep only matching elements</td>
+<td>Stateless</td>
+</tr>
+<tr>
+<td><code>map(Function)</code></td>
+<td>One-to-one transform</td>
+<td>Stateless</td>
+</tr>
+<tr>
+<td><code>mapToInt</code> / <code>mapToLong</code> / <code>mapToDouble</code></td>
+<td>Convert to a primitive stream</td>
+<td>Stateless</td>
+</tr>
+<tr>
+<td><code>flatMap(Function)</code></td>
+<td>One-to-many, then flatten to one stream</td>
+<td>Stateless</td>
+</tr>
+<tr>
+<td><code>distinct()</code></td>
+<td>Remove duplicates</td>
+<td>Stateful</td>
+</tr>
+<tr>
+<td><code>sorted()</code></td>
+<td>Sort by natural order or a comparator</td>
+<td>Stateful</td>
+</tr>
+<tr>
+<td><code>limit(n)</code></td>
+<td>Truncate to at most <code>n</code> elements</td>
+<td>Stateful, short-circuiting</td>
+</tr>
+<tr>
+<td><code>skip(n)</code></td>
+<td>Drop the first <code>n</code> elements</td>
+<td>Stateful</td>
+</tr>
+<tr>
+<td><code>peek(Consumer)</code></td>
+<td>Observe each element (debugging)</td>
+<td>Stateless</td>
+</tr>
+<tr>
+<td><code>takeWhile(p)</code></td>
+<td>Take while <code>p</code> is true (Java 9)</td>
+<td>Stateful, short-circuiting</td>
+</tr>
+<tr>
+<td><code>dropWhile(p)</code></td>
+<td>Drop while <code>p</code> is true (Java 9)</td>
+<td>Stateful</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+If asked "when does a stream actually do something?", the precise answer is: intermediate operations only build the pipeline; the work begins at the terminal operation and may stop early if a short-circuiting operation is present. Naming <code>flatMap</code> as the fix for a stream of streams is the detail that shows real use.</p>
+</blockquote>
+<h2 id="6-terminal-operations-the-one-that-runs-the-pipeline">6. Terminal Operations — The One That Runs the Pipeline</h2>
+<p>A terminal operation consumes the stream and yields a result. There can be exactly one per stream. Full detail is Lecture 40.</p>
+<table>
+<thead>
+<tr>
+<th>Terminal operation</th>
+<th>Returns</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>forEach(Consumer)</code></td>
+<td><code>void</code></td>
+<td>Act on each element</td>
+</tr>
+<tr>
+<td><code>collect(Collector)</code></td>
+<td>A result container</td>
+<td>Mutable reduction into a list, set, map</td>
+</tr>
+<tr>
+<td><code>reduce(...)</code></td>
+<td><code>Optional</code> or value</td>
+<td>Fold the elements to one value</td>
+</tr>
+<tr>
+<td><code>count()</code></td>
+<td><code>long</code></td>
+<td>Number of elements</td>
+</tr>
+<tr>
+<td><code>min</code> / <code>max</code></td>
+<td><code>Optional</code></td>
+<td>Extremes by a comparator</td>
+</tr>
+<tr>
+<td><code>findFirst()</code></td>
+<td><code>Optional</code></td>
+<td>First element</td>
+</tr>
+<tr>
+<td><code>findAny()</code></td>
+<td><code>Optional</code></td>
+<td>Any element (parallel-friendly)</td>
+</tr>
+<tr>
+<td><code>anyMatch</code> / <code>allMatch</code> / <code>noneMatch</code></td>
+<td><code>boolean</code></td>
+<td>Predicate testing</td>
+</tr>
+<tr>
+<td><code>toArray()</code></td>
+<td>Array</td>
+<td>Materialize the elements</td>
+</tr>
+</tbody>
+</table>
+<p>Rules to remember: <code>collect</code> and <code>reduce</code> are reductions that build a result; <code>forEach</code> is for side effects only; <code>count</code>, <code>findFirst</code> and the match operations can stop early.</p>
+<h2 id="7-primitive-streams-intstream-longstream-doublestream">7. Primitive Streams: IntStream, LongStream, DoubleStream</h2>
+<p>A <code>Stream&lt;Integer&gt;</code> boxes every element, which allocates. Java provides three primitive specializations that store raw <code>int</code>, <code>long</code> and <code>double</code> values and therefore avoid boxing.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Direction</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mapToInt</code> / <code>mapToLong</code> / <code>mapToDouble</code></td>
+<td>Object stream to primitive</td>
+<td>Unbox into a primitive stream</td>
+</tr>
+<tr>
+<td><code>mapToObj</code></td>
+<td>Primitive to object stream</td>
+<td>Convert back to <code>Stream&lt;U&gt;</code></td>
+</tr>
+<tr>
+<td><code>boxed()</code></td>
+<td>Primitive to object stream</td>
+<td>Explicitly box to <code>Stream&lt;Integer&gt;</code></td>
+</tr>
+<tr>
+<td><code>sum()</code></td>
+<td>Terminal</td>
+<td>Sum of the elements</td>
+</tr>
+<tr>
+<td><code>average()</code></td>
+<td>Terminal</td>
+<td>Mean as <code>OptionalDouble</code></td>
+</tr>
+<tr>
+<td><code>max()</code></td>
+<td>Terminal</td>
+<td>Largest as <code>OptionalInt</code></td>
+</tr>
+<tr>
+<td><code>range(a, b)</code> / <code>rangeClosed(a, b)</code></td>
+<td>Factory</td>
+<td>Numeric range source</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java - primitive streams avoid boxing and add numeric aggregates</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.stream.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">sum</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">IntStream</span><span class="p">.</span><span class="na">rangeClosed</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">).</span><span class="na">sum</span><span class="p">();</span><span class="w">            </span><span class="c1">// 15</span>
+<span class="w">        </span><span class="kt">double</span><span class="w"> </span><span class="n">avg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">IntStream</span><span class="p">.</span><span class="na">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">).</span><span class="na">average</span><span class="p">().</span><span class="na">orElse</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w"> </span><span class="c1">// (1+2+3+4)/4 = 2.5</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">sum</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">avg</span><span class="p">);</span><span class="w">                    </span><span class="c1">// 15 2.5</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<blockquote class="callout callout--important">
+<p>Important
+<code>sum()</code>, <code>average()</code> and <code>max()</code> exist only on primitive streams. On a <code>Stream&lt;Integer&gt;</code> you must call <code>mapToInt(...)</code> first; that single conversion is what removes the boxing cost.</p>
+</blockquote>
+<h2 id="8-stateless-vs-stateful-intermediate-operations">8. Stateless vs Stateful Intermediate Operations</h2>
+<p>An intermediate operation is stateless if each element can be processed independently, and stateful if it must remember something about other elements seen so far.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Stateless</th>
+<th>Stateful</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Examples</td>
+<td><code>filter</code>, <code>map</code>, <code>flatMap</code>, <code>peek</code></td>
+<td><code>sorted</code>, <code>distinct</code>, <code>limit</code>, <code>skip</code>, <code>takeWhile</code></td>
+</tr>
+<tr>
+<td>Per-element state</td>
+<td>None</td>
+<td>Must track seen elements or a count</td>
+</tr>
+<tr>
+<td>Parallel behaviour</td>
+<td>Any element can be handled on any thread</td>
+<td>May need a barrier or buffering to coordinate</td>
+</tr>
+<tr>
+<td>Infinite streams</td>
+<td>Safe when combined with a short-circuit</td>
+<td><code>sorted</code> and <code>distinct</code> may never finish</td>
+</tr>
+<tr>
+<td>Memory</td>
+<td>Constant (O(1))</td>
+<td>Can be O(n) because elements are buffered</td>
+</tr>
+</tbody>
+</table>
+<p>Reading the table: stateless operations preserve the element-by-element, lazy model; stateful operations break it because they must see multiple elements before emitting one. That is why chaining <code>filter</code> and <code>map</code> before <code>sorted</code> is the usual and most efficient order.</p>
+<h2 id="9-lazy-evaluation-and-short-circuiting">9. Lazy Evaluation and Short-Circuiting</h2>
+<p>Laziness is what makes infinite streams safe. <code>Stream.iterate</code> and <code>Stream.generate</code> can produce endless values, but because the pipeline is lazy and some operations short-circuit, only as many elements as needed are ever produced. A terminal operation is still required to trigger even that.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java - an infinite stream is safe because limit short-circuits</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.stream.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">long</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Stream</span><span class="p">.</span><span class="na">iterate</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w">   </span><span class="c1">// infinite: 1, 2, 3, ...</span>
+<span class="w">                </span><span class="p">.</span><span class="na">skip</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span><span class="w">                             </span><span class="c1">// drop 1..5 -&gt; 6, 7, 8, ...</span>
+<span class="w">                </span><span class="p">.</span><span class="na">limit</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span><span class="w">                            </span><span class="c1">// take 6, 7, 8</span>
+<span class="w">                </span><span class="p">.</span><span class="na">count</span><span class="p">();</span><span class="w">                            </span><span class="c1">// terminal: runs the pipeline</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">count</span><span class="p">);</span><span class="w">                   </span><span class="c1">// 3</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The short-circuiting operations are <code>limit</code>, <code>findFirst</code>, <code>findAny</code>, <code>anyMatch</code>, <code>allMatch</code>, <code>noneMatch</code>, <code>takeWhile</code> and <code>dropWhile</code>. An infinite stream feeding a stateful operation such as <code>sorted</code> with no bound will never terminate.</p>
+<blockquote class="callout callout--note">
+<p>Memory aid — the tap: the source is an endless water main; <code>limit</code> is the tap that lets through only three cups. Without a terminal operation, nobody opens the tap at all.</p>
+</blockquote>
+<h2 id="10-a-stream-is-single-use">10. A Stream Is Single-Use</h2>
+<p>A stream is not reusable. The moment a terminal operation consumes it, the stream is closed, and any second attempt fails with <code>IllegalStateException</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java - reusing a consumed stream throws</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.stream.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Stream</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Stream</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="s">&quot;a&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;b&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;c&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">s</span><span class="p">.</span><span class="na">forEach</span><span class="p">(</span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">::</span><span class="n">println</span><span class="p">);</span><span class="w">   </span><span class="c1">// first terminal: consumes the stream</span>
+<span class="w">        </span><span class="n">s</span><span class="p">.</span><span class="na">forEach</span><span class="p">(</span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">::</span><span class="n">println</span><span class="p">);</span><span class="w">   </span><span class="c1">// IllegalStateException: stream has already been operated upon or closed</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The fix is always to obtain a fresh stream from the source: call <code>list.stream()</code> again for each pass. This is the single most common stream bug and is examined again in Section 12.</p>
+<h2 id="11-parallel-streams-a-first-look">11. Parallel Streams: A First Look</h2>
+<p>A pipeline can run in parallel by calling <code>collection.parallelStream()</code> or <code>.parallel()</code> on an existing stream. The work is split by a <code>Spliterator</code> (introduced in Lecture 30) and executed across the common Fork-Join pool.</p>
+<div class="highlight"><pre><span></span><code>list.parallelStream().filter(...).map(...).collect(...)   // same pipeline, split across threads
+</code></pre></div>
+
+<p>Parallelism changes execution, not the operations: the program is unchanged, only the thread that runs each element differs. It is not automatically faster, and it must never be used with stateful lambdas that mutate shared data. This is a teaser only; the full treatment belongs to Lecture 42.</p>
+<blockquote class="callout callout--important">
+<p>Important
+Prefer sequential streams by default. Parallelism pays off only for large data sets, CPU-bound work and operations that are genuinely independent.</p>
+</blockquote>
+<h2 id="12-common-pitfalls-and-errors">12. Common Pitfalls and Errors</h2>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>What happens</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Reusing a consumed stream</td>
+<td><code>IllegalStateException</code></td>
+<td>Obtain a new stream from the source each time</td>
+</tr>
+<tr>
+<td>Forgetting the terminal operation</td>
+<td>Nothing runs; no output, no error</td>
+<td>Always finish with <code>collect</code>, <code>forEach</code>, <code>count</code>, etc.</td>
+</tr>
+<tr>
+<td>Side effects in <code>forEach</code></td>
+<td>Hard to test and unsafe in parallel</td>
+<td>Prefer <code>collect</code> / <code>reduce</code> to build a result</td>
+</tr>
+<tr>
+<td>Streams for a trivial loop</td>
+<td>Extra machinery for no gain</td>
+<td>Keep a plain for-loop for simple iteration</td>
+</tr>
+<tr>
+<td><code>map</code> returning a stream</td>
+<td>A stream of streams, not flat data</td>
+<td>Use <code>flatMap</code> instead of <code>map</code></td>
+</tr>
+<tr>
+<td>Infinite stream without short-circuit</td>
+<td>Program hangs, never completes</td>
+<td>Add <code>limit</code>, <code>findFirst</code>, <code>anyMatch</code> or <code>takeWhile</code></td>
+</tr>
+<tr>
+<td>Boxing in primitive pipelines</td>
+<td>Unnecessary allocation</td>
+<td>Use <code>mapToInt</code> and primitive streams</td>
+</tr>
+<tr>
+<td>Assuming order</td>
+<td>Results vary with source and parallelism</td>
+<td>Use <code>sorted()</code> or an ordered source</td>
+</tr>
+<tr>
+<td>Mutating the source during the pipeline</td>
+<td>Undefined results or <code>ConcurrentModificationException</code></td>
+<td>Do not modify the backing collection while streaming</td>
+</tr>
+</tbody>
+</table>
+<h2 id="13-myth-vs-reality">13. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"A Stream is a new kind of collection."</td>
+<td>A stream is not a data structure; it stores no elements, it is a view over a source.</td>
+</tr>
+<tr>
+<td>"Streams are always faster than loops."</td>
+<td>Speed is often comparable; the real gains are readability and built-in parallelism.</td>
+</tr>
+<tr>
+<td>"The pipeline runs as each operation is written."</td>
+<td>Intermediate operations are lazy; only the terminal operation triggers execution.</td>
+</tr>
+<tr>
+<td>"A stream can be reused like a collection."</td>
+<td>A stream is single-use; a second terminal operation throws <code>IllegalStateException</code>.</td>
+</tr>
+<tr>
+<td>"Streams modify their source."</td>
+<td>Streams are non-mutating; they produce a new result and leave the source untouched.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="14-common-trap-questions">14. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — Is a <code>Stream</code> a container? No. It does not store elements. It is a pipeline view over a source, closer to an iterator than to a <code>List</code>.</p>
+<p>Trap 2 — Does calling <code>filter</code> or <code>map</code> execute anything? No. Intermediate operations are lazy descriptions; execution begins only at the terminal operation.</p>
+<p>Trap 3 — Can the same stream be traversed twice? No. A stream is single-use; the second terminal operation throws <code>IllegalStateException</code>, and the fix is to create a fresh stream.</p>
+<p>Trap 4 — Does an infinite stream hang immediately? No. Because intermediate operations are lazy and short-circuiting operations exist, <code>Stream.iterate(...).limit(...)</code> is perfectly safe; a terminal operation is still required to start it.</p>
+<p>Trap 5 — Do intermediate operations change the original collection? No. The source is untouched; streams never mutate the collection they read from.</p>
+<p>Trap 6 — Is <code>IntStream</code> simply a <code>Stream&lt;Integer&gt;</code>? No. It is a primitive specialization that stores raw <code>int</code> values and avoids boxing; <code>mapToObj</code> or <code>boxed()</code> converts it back.</p>
+</blockquote>
+<h2 id="15-points-to-remember">15. Points to Remember</h2>
+<ol>
+<li>A Stream is a declarative pipeline over a sequence of elements; it is not a data structure and stores no elements.</li>
+<li>A Collection stores data; a Stream processes data using internal iteration.</li>
+<li>Every stream program has the shape source to intermediate operations to exactly one terminal operation.</li>
+<li>Intermediate operations are lazy; nothing executes until the terminal operation runs.</li>
+<li>Intermediate operations return new streams, which is what allows chaining.</li>
+<li>Common creation sources: <code>stream()</code>, <code>Arrays.stream</code>, <code>Stream.of</code>, <code>iterate</code>, <code>generate</code>, <code>IntStream.range</code>, <code>builder</code>, <code>Files.lines</code>.</li>
+<li>Stateless operations (<code>filter</code>, <code>map</code>) process elements independently; stateful operations (<code>sorted</code>, <code>distinct</code>, <code>limit</code>) must track state.</li>
+<li>Laziness plus short-circuiting (<code>limit</code>, <code>findFirst</code>, <code>anyMatch</code>) makes infinite streams safe to use.</li>
+<li>A stream is single-use; consuming it twice throws <code>IllegalStateException</code>.</li>
+<li><code>IntStream</code>, <code>LongStream</code> and <code>DoubleStream</code> avoid boxing and provide <code>sum</code>, <code>average</code> and <code>max</code>; <code>parallel()</code> splits the work across threads (Lecture 42).</li>
+</ol>
+<h2 id="16-likely-interview-questions">16. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What is a Stream in Java?</td>
+<td>A sequence of elements supporting sequential and parallel aggregate operations, added in Java 8 as a declarative processing pipeline.</td>
+</tr>
+<tr>
+<td>Is a Stream a data structure?</td>
+<td>No. It stores no elements; it is a view that pulls values from a source on demand.</td>
+</tr>
+<tr>
+<td>Collection vs Stream?</td>
+<td>A Collection stores elements and is reusable; a Stream processes elements, is lazy and is single-use.</td>
+</tr>
+<tr>
+<td>When does a stream execute?</td>
+<td>Only when the terminal operation is invoked; intermediate operations are lazy.</td>
+</tr>
+<tr>
+<td>What are the three parts of a stream pipeline?</td>
+<td>Source, zero or more intermediate operations, and exactly one terminal operation.</td>
+</tr>
+<tr>
+<td>Name common stream-creation methods.</td>
+<td><code>collection.stream()</code>, <code>Arrays.stream(...)</code>, <code>Stream.of(...)</code>, <code>Stream.iterate</code>, <code>Stream.generate</code>, <code>IntStream.range</code>, <code>Stream.builder</code>, <code>Files.lines</code>.</td>
+</tr>
+<tr>
+<td>Can a stream be reused?</td>
+<td>No. After a terminal operation it is consumed; reuse throws <code>IllegalStateException</code>.</td>
+</tr>
+<tr>
+<td>What is a stateless vs stateful intermediate operation?</td>
+<td>Stateless ones (<code>filter</code>, <code>map</code>) process each element independently; stateful ones (<code>sorted</code>, <code>distinct</code>, <code>limit</code>) must remember other elements.</td>
+</tr>
+<tr>
+<td>Are infinite streams safe?</td>
+<td>Yes, if the pipeline has a short-circuit (<code>limit</code>, <code>findFirst</code>, <code>anyMatch</code>) that stops production early; a terminal op is still needed.</td>
+</tr>
+<tr>
+<td>Why primitive streams?</td>
+<td><code>IntStream</code>, <code>LongStream</code> and <code>DoubleStream</code> avoid boxing and add <code>sum</code>, <code>average</code> and <code>max</code>.</td>
+</tr>
+<tr>
+<td>How do you convert an object stream to an <code>IntStream</code>?</td>
+<td>Call <code>mapToInt</code>; use <code>mapToObj</code> or <code>boxed()</code> to convert back.</td>
+</tr>
+<tr>
+<td>How do you make a stream parallel?</td>
+<td>Call <code>parallelStream()</code> on a collection or <code>.parallel()</code> on a stream; the same pipeline then runs across threads.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="17-final-summary">17. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>source (collection / array / generator / file)
+        --&gt; intermediate ops (filter, map, sorted, limit)   [lazy, zero or more]
+        --&gt; terminal op (collect, forEach, reduce, count)   [runs the whole pipeline, exactly one]
+</code></pre></div>
+
+<ul>
+<li>A Stream → declarative, non-storing view over a source; not a data structure</li>
+<li>Collection vs Stream → stores vs processes; reusable vs single-use</li>
+<li>Pipeline → source → intermediate (lazy) → terminal (triggers)</li>
+<li>Creation → <code>stream</code>, <code>Arrays.stream</code>, <code>Stream.of</code>, <code>iterate</code>, <code>generate</code>, <code>IntStream.range</code>, <code>builder</code>, <code>Files.lines</code></li>
+<li>Intermediate → <code>filter</code>/<code>map</code>/<code>flatMap</code> stateless; <code>sorted</code>/<code>distinct</code>/<code>limit</code> stateful</li>
+<li>Laziness → infinite streams are safe with short-circuiting operations</li>
+<li>Single-use → consuming a consumed stream throws <code>IllegalStateException</code></li>
+<li>Primitive streams → <code>IntStream</code>, <code>LongStream</code>, <code>DoubleStream</code> avoid boxing</li>
+<li>Parallel → <code>parallelStream()</code> and <code>parallel()</code> (Lecture 42)</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+Use a Collection to store data and a Stream to compute from it; build the pipeline with lazy intermediate operations and run it with exactly one terminal operation, then throw the stream away.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> a Stream is a lazy, single-use pipeline that flows elements from a source through intermediate operations into a terminal operation - it computes over data, it does not store it.</p>
+<div class="pager"><a class="prev" href="lecture-38.html"><span class="dir">Previous</span><span class="ttl">Lambdas & Functional Interface Deep Dive</span></a><a class="next" href="lecture-40.html"><span class="dir">Next</span><span class="ttl">Java Stream Methods Deep Dive</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

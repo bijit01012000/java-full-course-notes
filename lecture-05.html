@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 05 · Java Type Conversions & Type Promotions Explained — Java Notes</title>
+<meta name="description" content="Java Type Conversions & Type Promotions Explained — Casting in Java — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="5" data-lecture-title="Java Type Conversions & Type Promotions Explained — Casting in Java">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part" open><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-05.html#1-what-is-type-conversion">1. What Is Type Conversion?</a></li><li><a href="lecture-05.html#2-the-two-directions-widening-vs-narrowing">2. The Two Directions: Widening vs Narrowing</a></li><li><a href="lecture-05.html#3-widening-implicit-conversion">3. Widening (Implicit) Conversion</a></li><li><a href="lecture-05.html#4-narrowing-explicit-casting">4. Narrowing (Explicit) Casting</a></li><li><a href="lecture-05.html#5-what-narrowing-actually-does">5. What Narrowing Actually Does</a></li><li><a href="lecture-05.html#6-numeric-type-promotion-in-expressions">6. Numeric Type Promotion in Expressions</a></li><li><a href="lecture-05.html#7-char-and-int-the-special-case">7. char and int: The Special Case</a></li><li><a href="lecture-05.html#8-overflow-vs-precision-loss-the-long-float-trap">8. Overflow vs Precision Loss: the long → float Trap</a></li><li><a href="lecture-05.html#9-compound-assignment-the-hidden-cast">9. Compound Assignment: The Hidden Cast</a></li><li><a href="lecture-05.html#10-conversion-at-method-and-string-boundaries">10. Conversion at Method and String Boundaries</a></li><li><a href="lecture-05.html#11-myth-vs-reality">11. Myth vs Reality</a></li><li><a href="lecture-05.html#12-common-trap-questions">12. Common Trap Questions</a></li><li><a href="lecture-05.html#13-points-to-remember">13. Points to Remember</a></li><li><a href="lecture-05.html#14-likely-interview-questions">14. Likely Interview Questions</a></li><li><a href="lecture-05.html#15-final-summary">15. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 1 · Java Basics · Lecture 05</p>
+<h1>Java Type Conversions & Type Promotions Explained — Casting in Java</h1>
+<p class="readmeta">15 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="5" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: lecture title "Java Type Conversions &amp; Type Promotions Explained | Casting in Java" (playlist map, verified). This lecture's repo folder contains two code files: <code>Demo.java</code> and <code>Demo2.java</code>.</p>
+</blockquote>
+<p>Type conversion is the set of rules the compiler uses to turn one primitive type into another, and it decides whether a line compiles or fails before the program ever runs. This lecture covers the two directions (widening and narrowing), what a cast really does to the bits, the promotion rules that fire inside every arithmetic expression, and the compound-assignment exception interviewers love. Primitive sizes and ranges are assumed from Lecture 3; the bit layouts behind them come from Lecture 4.</p>
+<h2 id="1-what-is-type-conversion">1. What Is Type Conversion?</h2>
+<p>Java is statically and strongly typed: every value has one declared type, and the compiler checks every assignment and expression against it. When the types do not match, Java either converts automatically or refuses to compile until a cast is written.</p>
+<ol>
+<li><strong>Implicit conversion (widening)</strong> — the compiler converts a smaller type to a larger one silently, because no information can be lost.</li>
+<li><strong>Explicit conversion (narrowing, a "cast")</strong> — the developer writes <code>(type)</code> in front of the expression to force a larger type into a smaller one and accepts the possible loss.</li>
+</ol>
+<p>A cast never changes the operand itself. It produces a new value converted to the target type; the original variable keeps its type and value.</p>
+<blockquote class="callout callout--important">
+<p>Important
+Conversion and casting are the same mechanism at two levels of control. Conversion is what the compiler does; a cast is the developer overriding the compiler's default refusal.</p>
+</blockquote>
+<h2 id="2-the-two-directions-widening-vs-narrowing">2. The Two Directions: Widening vs Narrowing</h2>
+<p>Every primitive conversion goes one of two ways along the size and range ladder:</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Widening (implicit)</th>
+<th>Narrowing (explicit cast)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Language syntax</td>
+<td>No cast written — <code>long l = i;</code></td>
+<td>Cast required — <code>byte b = (byte) i;</code></td>
+</tr>
+<tr>
+<td>Direction</td>
+<td>Smaller type → larger type</td>
+<td>Larger type → smaller type</td>
+</tr>
+<tr>
+<td>Data loss</td>
+<td>Guaranteed none for integers</td>
+<td>Possible: truncation or wraparound</td>
+</tr>
+<tr>
+<td>When it happens</td>
+<td>Compile time, automatically</td>
+<td>Compile-time check, run-time conversion</td>
+</tr>
+<tr>
+<td>Compiler stance</td>
+<td>Silent approval</td>
+<td>Forced acceptance — you signed the risk</td>
+</tr>
+<tr>
+<td>Example</td>
+<td><code>double d = 42;</code></td>
+<td><code>int i = (int) 19.9; // 19</code></td>
+</tr>
+</tbody>
+</table>
+<p>The golden direction rule: <strong>a type fits into any type that appears to its right in the chain of Section 3; anything to the left needs a cast.</strong></p>
+<h2 id="3-widening-implicit-conversion">3. Widening (Implicit) Conversion</h2>
+<p>Widening follows one fixed chain. Each arrow is a step the compiler performs without being asked:</p>
+<div class="highlight"><pre><span></span><code>byte → short → int → long → float → double
+char → int → long → float → double
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>From</th>
+<th>To</th>
+<th>Size change</th>
+<th>Loss possible</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>byte</code> (8)</td>
+<td><code>short</code> (16)</td>
+<td>sign-extended</td>
+<td>No</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>short</code> (16)</td>
+<td><code>int</code> (32)</td>
+<td>sign-extended</td>
+<td>No</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>int</code> (32)</td>
+<td><code>long</code> (64)</td>
+<td>sign-extended</td>
+<td>No</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>long</code> (64)</td>
+<td><code>float</code> (32)</td>
+<td>range adjusted</td>
+<td>Yes — precision (Section 8)</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>float</code> (32)</td>
+<td><code>double</code> (32→64)</td>
+<td>precision extended</td>
+<td>No</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>char</code> (16)</td>
+<td><code>int</code> (32)</td>
+<td>zero-extended</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<p><code>char</code> joins the chain at <code>int</code>, not at <code>short</code>: <code>char</code> is unsigned, so even widening it to <code>short</code> would be unsafe and requires a cast. Memory aid — the ladder: "<strong>Be Swift, In Life, Fly Down.</strong>" (byte, short, int, long, float, double); the char climbs straight onto the int rung.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — widening: no cast, no effort, no loss</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">byte</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">42</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">short</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">b</span><span class="p">;</span><span class="w">      </span><span class="c1">// byte → short: automatic</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="p">;</span><span class="w">        </span><span class="c1">// short → int: automatic</span>
+<span class="w">        </span><span class="kt">long</span><span class="w"> </span><span class="n">l</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i</span><span class="p">;</span><span class="w">       </span><span class="c1">// int → long: automatic</span>
+<span class="w">        </span><span class="kt">double</span><span class="w"> </span><span class="n">d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l</span><span class="p">;</span><span class="w">     </span><span class="c1">// long → double: fits exactly (53-bit mantissa)</span>
+<span class="w">        </span><span class="kt">char</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="sc">&#39;A&#39;</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">code</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">c</span><span class="p">;</span><span class="w">     </span><span class="c1">// char → int: 65</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">d</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; / &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">code</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Method call boundaries widen the same way: a <code>byte</code> argument lands in an <code>int</code> parameter with no cast, because the compiler can prove nothing is lost.</p>
+<h2 id="4-narrowing-explicit-casting">4. Narrowing (Explicit) Casting</h2>
+<p>Narrowing needs the cast operator <code>(type)</code> in front of the expression:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo2.java — narrowing: manual, and lossy by permission</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo2</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">130</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">byte</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">byte</span><span class="p">)</span><span class="w"> </span><span class="n">i</span><span class="p">;</span><span class="w">   </span><span class="c1">// keeps low 8 bits → -126</span>
+<span class="w">        </span><span class="kt">double</span><span class="w"> </span><span class="n">d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">19.9</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)</span><span class="w"> </span><span class="n">d</span><span class="p">;</span><span class="w">     </span><span class="c1">// drops the fraction → 19</span>
+<span class="w">        </span><span class="kt">long</span><span class="w"> </span><span class="n">big</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">123456789123456789L</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">float</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">big</span><span class="p">;</span><span class="w">       </span><span class="c1">// legal widening — but see Section 8</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">b</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="kt">long</span><span class="p">)</span><span class="w"> </span><span class="n">f</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The compiler still type-checks the cast itself: <code>(byte)</code> on a <code>boolean</code> or on an <code>Object</code> that is not a number will not compile. Narrowing among numeric types is always allowed syntactically; the risk runs at run time.</p>
+<h2 id="5-what-narrowing-actually-does">5. What Narrowing Actually Does</h2>
+<p>Three behaviors account for nearly every exam and interview question:</p>
+<ol>
+<li><strong>Integer truncation (modulo wraparound).</strong> Casting <code>int</code> to <code>byte</code> keeps only the lowest 8 bits. Bits 8-31 are discarded and the sign comes from bit 7: <code>130</code> is <code>1000 0010</code> in 8 bits, so the result is <code>-126</code>.</li>
+<li><strong>Floating-point truncation toward zero.</strong> Casting a <code>double</code> to <code>int</code> drops the fraction — it does not round, and it does not floor negative numbers: <code>(int) 19.9</code> is <code>19</code>, and <code>(int) -19.9</code> is <code>-19</code>, not <code>-20</code>. Edge cases: <code>(int) Double.NaN</code> is <code>0</code>; values beyond <code>int</code> range clamp to <code>Integer.MAX_VALUE</code>/<code>MIN_VALUE</code>.</li>
+<li><strong>Range wraparound for <code>char</code>.</strong> <code>(char) i</code> keeps the lowest 16 bits modulo 65536, so the result is never negative — but converting back with <code>(short)</code> reintroduces the sign.</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Source value</th>
+<th>Cast</th>
+<th>Stored bits</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>int 130</code></td>
+<td><code>(byte)</code></td>
+<td><code>1000 0010</code></td>
+<td><code>-126</code></td>
+</tr>
+<tr>
+<td><code>int 128</code></td>
+<td><code>(byte)</code></td>
+<td><code>1000 0000</code></td>
+<td><code>-128</code></td>
+</tr>
+<tr>
+<td><code>int -1</code></td>
+<td><code>(char)</code></td>
+<td><code>1111 1111 1111 1111</code></td>
+<td><code>\uFFFF</code> (65535)</td>
+</tr>
+<tr>
+<td><code>double 19.9</code></td>
+<td><code>(int)</code></td>
+<td>fraction dropped</td>
+<td><code>19</code></td>
+</tr>
+<tr>
+<td><code>double -19.9</code></td>
+<td><code>(int)</code></td>
+<td>truncates toward zero</td>
+<td><code>-19</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Is <code>(int)</code> a floor or a round of the double?" Neither. It truncates toward zero, so <code>-19.9</code> becomes <code>-19</code>. Candidates who answer "floor" reveal they never tested a negative number.</p>
+</blockquote>
+<h2 id="6-numeric-type-promotion-in-expressions">6. Numeric Type Promotion in Expressions</h2>
+<p>Conversion does not wait for assignment. The moment an operator is applied, the JVM promotes the operands to at least <code>int</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Expression</th>
+<th>Operands before</th>
+<th>Type after promotion</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>byte + byte</code></td>
+<td>8 + 8 bit</td>
+<td><code>int</code></td>
+</tr>
+<tr>
+<td><code>short * short</code></td>
+<td>16 + 16 bit</td>
+<td><code>int</code></td>
+</tr>
+<tr>
+<td><code>char + char</code></td>
+<td>16 + 16 bit</td>
+<td><code>int</code></td>
+</tr>
+<tr>
+<td><code>int + long</code></td>
+<td>32 + 64 bit</td>
+<td><code>long</code></td>
+</tr>
+<tr>
+<td><code>long + float</code></td>
+<td>64 + 32 bit</td>
+<td><code>float</code></td>
+</tr>
+<tr>
+<td><code>any + double</code></td>
+<td>—</td>
+<td><code>double</code></td>
+</tr>
+</tbody>
+</table>
+<p>The rule in one sentence: <strong><code>byte</code>, <code>short</code> and <code>char</code> are promoted to <code>int</code> in every arithmetic expression; if any operand is already <code>long</code>, <code>float</code> or <code>double</code>, the other operand rises to that type, the widest one winning.</strong> This is why the classic line fails:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">byte</span><span class="w"> </span><span class="n">b1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="n">b2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">20</span><span class="p">;</span>
+<span class="kt">byte</span><span class="w"> </span><span class="n">b3</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">b1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b2</span><span class="p">;</span><span class="w">          </span><span class="c1">// compile error: int cannot be converted to byte</span>
+<span class="kt">byte</span><span class="w"> </span><span class="n">b4</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">byte</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="n">b1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b2</span><span class="p">);</span><span class="w"> </span><span class="c1">// legal: cast the promoted int result back</span>
+<span class="n">b1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">b1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b2</span><span class="p">;</span><span class="w">               </span><span class="c1">// same compile error on assignment</span>
+</code></pre></div>
+
+<p>The JVM has no 8-bit or 16-bit arithmetic instructions — only <code>int</code> and wider. Promoting small types to <code>int</code> is the compiler matching the bytecode reality, not a style choice.</p>
+<blockquote class="callout callout--important">
+<p>Important
+The unary plus <code>+b</code> also promotes: <code>int x = +b;</code> is legal while <code>byte y = +b;</code> is not. Promotion is triggered by operators, not only by mixing types.</p>
+</blockquote>
+<h2 id="7-char-and-int-the-special-case">7. char and int: The Special Case</h2>
+<p><code>char</code> is a 16-bit unsigned integer that happens to print as a symbol, so arithmetic and casting behave unusually:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">char</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="sc">&#39;A&#39;</span><span class="p">;</span>
+<span class="kt">char</span><span class="w"> </span><span class="n">d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="sc">&#39;A&#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">   </span><span class="c1">// &#39;B&#39; — a compile-time constant, 66 fits in char</span>
+<span class="n">c</span><span class="o">++</span><span class="p">;</span><span class="w">                </span><span class="c1">// works: compound update ≡ (char)(c + 1)</span>
+<span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">          </span><span class="c1">// compile error: c is promoted to int in c + 1</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">code</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="sc">&#39;A&#39;</span><span class="p">;</span><span class="w"> </span><span class="c1">// arithmetic on chars runs as int</span>
+</code></pre></div>
+
+<p>Three facts to state crisply:</p>
+<ol>
+<li><code>'A' + 1</code> compiles because both operands are constants; the compiler evaluates <code>66</code> at compile time and accepts it where a <code>char</code> is expected. With a variable on the left, no such narrowing of constants happens.</li>
+<li><code>c++</code> compiles because <code>++</code> and all compound operators insert the hidden cast of Section 9.</li>
+<li><code>(char)</code> never produces a negative value, so casting <code>char</code> back produces surprise-free unsigned values — but converting through <code>int</code> and casting onward to <code>short</code> or <code>byte</code> can flip the sign that <code>char</code> never had.</li>
+</ol>
+<h2 id="8-overflow-vs-precision-loss-the-long-float-trap">8. Overflow vs Precision Loss: the long → float Trap</h2>
+<p>"Loss" is two different phenomena, and interviews blur them on purpose:</p>
+<ul>
+<li><strong>Overflow</strong> — the value leaves the target type's range (integer wraparound, Section 5).</li>
+<li><strong>Precision loss</strong> — the value stays in range but can no longer be stored exactly.</li>
+</ul>
+<p><code>long</code> is 64 bits and <code>float</code> is 32, yet <code>long</code> → <code>float</code> is a widening conversion and compiles with no cast. The loss hides in the mantissa: a <code>float</code> carries only 24 significant bits, far fewer than a <code>long</code>'s 64. So <code>float</code> can hold a <code>long</code>'s <em>magnitude</em> but not its <em>exact value</em>.</p>
+<div class="highlight"><pre><span></span><code><span class="kt">long</span><span class="w"> </span><span class="n">l</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">123456789123456789L</span><span class="p">;</span><span class="w"> </span><span class="c1">// exact, 64-bit</span>
+<span class="kt">float</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l</span><span class="p">;</span><span class="w">                  </span><span class="c1">// widening — compiles silently</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">((</span><span class="kt">long</span><span class="p">)</span><span class="w"> </span><span class="n">f</span><span class="p">);</span><span class="w"> </span><span class="c1">// 123456791348711424 — not the original</span>
+</code></pre></div>
+
+<p>The same applies to <code>int</code> → <code>float</code> once the value exceeds 2^24-1 (16,777,215): trailing bits are rounded away. <code>int</code> → <code>double</code> is exact, because a <code>double</code> has a 53-bit mantissa — more than an <code>int</code> ever needs.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Widening can lose information — true or false?" True, and the proof is <code>long</code> → <code>float</code>. The conversion is widening by the JLS definition (it accepts every <code>long</code> value), but the stored value may differ. Say both halves: legal, yet lossy.</p>
+<p>Important
+<code>long</code> → <code>double</code> is exact for all practical program values; <code>long</code> → <code>float</code> is not. One extra letter changes the answer.</p>
+</blockquote>
+<h2 id="9-compound-assignment-the-hidden-cast">9. Compound Assignment: The Hidden Cast</h2>
+<p>The single most quoted conversion question in Java interviews:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">byte</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span><span class="p">;</span>
+<span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">   </span><span class="c1">// compile error — b + b is int arithmetic (Section 6)</span>
+<span class="n">b</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">      </span><span class="c1">// compiles — the += operator casts for you</span>
+</code></pre></div>
+
+<p>The language specification defines <code>E1 op= E2</code> as equivalent, when it compiles, to <code>E1 = (TypeOfE1)(E1 op E2)</code>. The compound operator performs the narrowing cast at the end by itself. It is a documentable guarantee, not a compiler accident:</p>
+<ol>
+<li><code>b += 1</code> ≡ <code>b = (byte)(b + 1)</code>.</li>
+<li><code>i *= 1.5</code> with <code>int i</code> ≡ <code>i = (int)(i * 1.5)</code> — it compiles and truncates.</li>
+<li>The same hidden cast applies to <code>char</code> (<code>c++</code> in Section 7 is this rule in disguise).</li>
+</ol>
+<p>The trade: convenience for silence. The compound cast never warns that precision or range is being lost, exactly the warning the compiler gave you on the long form.</p>
+<h2 id="10-conversion-at-method-and-string-boundaries">10. Conversion at Method and String Boundaries</h2>
+<p>Conversion is not only an assignment-list topic:</p>
+<ol>
+<li><strong>Method calls</strong> widen automatically at the parameter boundary: passing a <code>byte</code> or <code>char</code> into an <code>int</code> parameter works without a cast; the reverse needs one at the call site.</li>
+<li><strong>String to number</strong> is parsing, not casting: <code>Integer.parseInt("42")</code> returns an <code>int</code>, <code>Double.parseDouble("3.14")</code> returns a <code>double</code>. A malformed string throws <code>NumberFormatException</code> at run time. The wrapper classes behind these methods are covered in Lecture 18.</li>
+<li><strong>Casting a <code>String</code> to a number</strong> does not parse anything — <code>(int) "42"</code> is a compile error, because a cast changes types, not text.</li>
+</ol>
+<h2 id="11-myth-vs-reality">11. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"A cast changes the value stored in the variable"</td>
+<td>A cast produces a converted copy; the source variable and its bits are untouched.</td>
+</tr>
+<tr>
+<td>"Widening never loses data"</td>
+<td><code>long</code> → <code>float</code> and <code>int</code> → <code>float</code> are widening yet lose precision (Section 8).</td>
+</tr>
+<tr>
+<td>"<code>byte + byte</code> gives a <code>byte</code>"</td>
+<td>Both operands promote to <code>int</code>; the result is <code>int</code> and needs a cast for <code>byte</code>.</td>
+</tr>
+<tr>
+<td>"Casting a double rounds it"</td>
+<td><code>(int)</code> truncates toward zero; <code>(int) -19.9</code> is <code>-19</code>.</td>
+</tr>
+<tr>
+<td>"<code>200</code> fits in a byte after casting"</td>
+<td><code>(byte) 200</code> wraps modulo 256 to <code>-56</code>; range is fixed at [-128, 127].</td>
+</tr>
+</tbody>
+</table>
+<h2 id="12-common-trap-questions">12. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — The wraparound: "What is <code>(byte) 130</code>?"
+The low 8 bits survive: <code>1000 0010</code> → <code>-126</code>. The rule is modulo 256 mapped onto [-128, 127], not saturation to 127.</p>
+<p>Trap 2 — The silent widening: "long is bigger than float, so long → float is safe?"
+Backwards. It is widening by definition, but <code>float</code> has a 24-bit mantissa, so exact <code>long</code> values are lost. Widening is about range, not precision.</p>
+<p>Trap 3 — The compound operator: "If <code>b = b + 1</code> fails for <code>byte</code>, does <code>b += 1</code> fail too?"
+No. <code>+=</code> performs the hidden cast and compiles. The pair is a stock interview question.</p>
+<p>Trap 4 — The signed char: "char is signed like byte, right?"
+No. <code>char</code> is 16-bit, unsigned, [0, 65535]. Casting <code>int -1</code> to <code>char</code> yields <code>\uFFFF</code>; converting that back via <code>(short)</code> gives <code>-1</code> again.</p>
+<p>Trap 5 — The boolean bridge: "Cast a boolean to int with (int)."
+Impossible. <code>boolean</code> sits outside the numeric chain and cannot be cast to or from anything numeric.</p>
+<p>Trap 6 — The promotion scope: "Promotion only applies to byte."
+<code>short</code> and <code>char</code> promote to <code>int</code> as well, and unary <code>+</code> triggers it too (<code>+b</code> is already an int).</p>
+</blockquote>
+<h2 id="13-points-to-remember">13. Points to Remember</h2>
+<ol>
+<li>Implicit conversion is widening (no cast); explicit casting is narrowing (<code>(type)</code> required).</li>
+<li>The widening chains are fixed: <code>byte → short → int → long → float → double</code> and <code>char → int → long → float → double</code>.</li>
+<li><code>char</code> joins at <code>int</code> because it is unsigned 16-bit; widening to <code>short</code> needs a cast.</li>
+<li>Narrowing truncates: integers lose high-order bits (int 130 → byte -126); doubles lose the fraction toward zero.</li>
+<li>In arithmetic, <code>byte</code>, <code>short</code> and <code>char</code> promote to <code>int</code>; <code>long</code>/<code>float</code>/<code>double</code> pull the whole expression up to the widest type.</li>
+<li><code>b = b + 1</code> fails on a byte; <code>b += 1</code> passes because compound assignment casts implicitly.</li>
+<li>Widening can still lose precision: <code>long</code> → <code>float</code> and large <code>int</code> → <code>float</code> are lossy; <code>int</code> → <code>double</code> is exact.</li>
+<li>Overflow and precision loss are different failures: wraparound crosses a range boundary; precision loss keeps the range and drops the exactness.</li>
+<li><code>boolean</code> can never be cast to or from a numeric type — wrappers aside, there is no numeric route at all (Lecture 18).</li>
+<li>Strings become numbers by parsing (<code>Integer.parseInt</code>, <code>Double.parseDouble</code>), never by casting.</li>
+</ol>
+<h2 id="14-likely-interview-questions">14. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What is type conversion in Java?</td>
+<td>Automatic or explicit transformation of a value from one primitive type to another under fixed compiler rules.</td>
+</tr>
+<tr>
+<td>Widening vs narrowing?</td>
+<td>Widening goes up the chain automatically; narrowing goes down and requires a cast because loss is possible.</td>
+</tr>
+<tr>
+<td>State the widening order.</td>
+<td><code>byte → short → int → long → float → double</code>; <code>char</code> widens to <code>int</code> and above.</td>
+</tr>
+<tr>
+<td>When must you cast explicitly?</td>
+<td>Whenever the source type does not fit the target by the widening chain — mostly larger into smaller.</td>
+</tr>
+<tr>
+<td>What is <code>(byte) 130</code>?</td>
+<td><code>-126</code>: the low 8 bits <code>1000 0010</code> are reinterpreted as a signed byte.</td>
+</tr>
+<tr>
+<td>Why does <code>byte b = 10; b = b + 1;</code> fail?</td>
+<td><code>b</code> promotes to <code>int</code>, the sum is <code>int</code>, and <code>int</code> → <code>byte</code> needs a cast.</td>
+</tr>
+<tr>
+<td>How is <code>b += 1</code> different?</td>
+<td>Compound assignment is specified as <code>b = (byte)(b + 1)</code>; it casts internally and compiles.</td>
+</tr>
+<tr>
+<td>Is <code>(int) 19.9</code> a rounding?</td>
+<td>No — truncation toward zero. For negatives, <code>(int) -19.9</code> is <code>-19</code>.</td>
+</tr>
+<tr>
+<td>Can widening lose data?</td>
+<td>Yes, by precision: <code>long</code> → <code>float</code> and <code>int</code> beyond 16,777,215 → <code>float</code> are inexact.</td>
+</tr>
+<tr>
+<td>Is <code>char</code> signed?</td>
+<td>No: 16-bit unsigned, [0, 65535]; arithmetic runs after promotion to <code>int</code>.</td>
+</tr>
+<tr>
+<td>Can boolean be cast to a number?</td>
+<td>Never — <code>boolean</code> is outside the numeric conversion chain entirely.</td>
+</tr>
+<tr>
+<td>How do you convert "42" to an int?</td>
+<td><code>Integer.parseInt("42")</code> — parsing, not casting; bad input throws <code>NumberFormatException</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="15-final-summary">15. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>byte → short → int → long → float → double      (widening: automatic, mostly lossless)
+                     ↑                                     ↓
+          promotion in expressions                  (type) forces the way back
+     (byte/short/char → int)                        bits are kept or cut, never rounded
+</code></pre></div>
+
+<ul>
+<li>Widening → compiler's job, silent, exact for integers, exact for <code>long</code> → <code>double</code>.</li>
+<li>Narrowing → developer's job, <code>(type)</code> cast, truncation and wraparound are your accepted risk.</li>
+<li>Promotion → every operator computes in <code>int</code> at minimum; the widest operand type wins.</li>
+<li>Compound assignment (<code>+=</code>, <code>++</code>) → the one place Java hides a cast for you.</li>
+<li>Precision ≠ range → <code>long</code> → <code>float</code> widens and still loses exactness.</li>
+<li><code>boolean</code> → outside the chain; <code>String</code> → number goes through parsing, not casting.</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+The compiler widens without asking and refuses to narrow without your signature — and once the cast is written, the lost bits are yours alone.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> widening is silent and usually safe, narrowing is signed-for and lossy, and every arithmetic expression quietly computes as <code>int</code> — three rules that answer nearly every conversion question an interviewer can ask.</p>
+<div class="pager"><a class="prev" href="lecture-04.html"><span class="dir">Previous</span><span class="ttl">How Java Stores Negative & Floating Point Numbers</span></a><a class="next" href="lecture-06.html"><span class="dir">Next</span><span class="ttl">Java Operators</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

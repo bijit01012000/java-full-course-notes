@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 11 · Java Functions Deep Dive — Java Notes</title>
+<meta name="description" content="Java Functions Deep Dive | Recursion | Method Overloading — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="11" data-lecture-title="Java Functions Deep Dive | Recursion | Method Overloading">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-11.html#1-what-a-method-is-and-why-java-is-built-around-them">1. What a Method Is, and Why Java Is Built Around Them</a></li><li><a href="lecture-11.html#2-method-anatomy-the-seven-parts">2. Method Anatomy — The Seven Parts</a></li><li><a href="lecture-11.html#3-parameters-vs-arguments-and-pass-by-value-lecture-14-preview">3. Parameters vs Arguments, and Pass-by-Value (Lecture 14 Preview)</a></li><li><a href="lecture-11.html#4-void-return-values-multiple-returns-and-early-return">4. void, Return Values, Multiple Returns and Early Return</a></li><li><a href="lecture-11.html#5-the-method-signature-name-plus-parameter-types">5. The Method Signature — Name Plus Parameter Types</a></li><li><a href="lecture-11.html#6-method-overloading-compile-time-static-polymorphism">6. Method Overloading: Compile-Time (Static) Polymorphism</a></li><li><a href="lecture-11.html#7-overloading-rules-and-ambiguity">7. Overloading Rules and Ambiguity</a></li><li><a href="lecture-11.html#8-overloading-vs-overriding-lecture-17-preview">8. Overloading vs Overriding (Lecture 17 Preview)</a></li><li><a href="lecture-11.html#9-recursion-the-base-case-and-the-recursive-case">9. Recursion: The Base Case and the Recursive Case</a></li><li><a href="lecture-11.html#10-the-call-stack-frames-and-stackoverflowerror">10. The Call Stack, Frames and StackOverflowError</a></li><li><a href="lecture-11.html#11-classic-recursion-factorial-and-fibonacci">11. Classic Recursion: Factorial and Fibonacci</a></li><li><a href="lecture-11.html#12-recursion-vs-iteration">12. Recursion vs Iteration</a></li><li><a href="lecture-11.html#13-tail-recursion-java-does-not-optimize-it">13. Tail Recursion — Java Does Not Optimize It</a></li><li><a href="lecture-11.html#14-scope-and-lifetime-inside-methods-lecture-45-preview">14. Scope and Lifetime Inside Methods (Lecture 45 Preview)</a></li><li><a href="lecture-11.html#15-varargs-int-nums">15. Varargs: int... nums</a></li><li><a href="lecture-11.html#16-the-pitfall-catalogue">16. The Pitfall Catalogue</a></li><li><a href="lecture-11.html#17-myth-vs-reality">17. Myth vs Reality</a></li><li><a href="lecture-11.html#18-common-trap-questions">18. Common Trap Questions</a></li><li><a href="lecture-11.html#19-points-to-remember">19. Points to Remember</a></li><li><a href="lecture-11.html#20-likely-interview-questions">20. Likely Interview Questions</a></li><li><a href="lecture-11.html#21-final-summary">21. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 2 · Arrays & OOP Core · Lecture 11</p>
+<h1>Java Functions Deep Dive | Recursion | Method Overloading</h1>
+<p class="readmeta">21 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="11" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: lecture title "Java Functions Deep Dive | Recursion | Method Overloading" (playlist map, verified). Repo evidence: the lecture-11 folder contains four code files (<code>Demo.java</code>, <code>Demo2.java</code>, <code>Demo3.java</code>, <code>Demo4.java</code>). The cached lecture PDF is image-only and is ignored per project rules.</p>
+</blockquote>
+<p>A method is the smallest reusable unit of behaviour in Java, and almost every design question later in the course — inheritance, polymorphism, interfaces, lambdas — is a question about how methods are declared, chosen and dispatched. This lecture takes the humble method apart: its anatomy, the difference between a parameter and an argument, the method signature, method overloading (compile-time polymorphism), and recursion with its base case, call stack and failure mode. It then closes the loop with scope, varargs and the pitfall catalogue that interviewers reuse every season.</p>
+<h2 id="1-what-a-method-is-and-why-java-is-built-around-them">1. What a Method Is, and Why Java Is Built Around Them</h2>
+<p>A <strong>method</strong> is a named block of statements that performs one task, optionally accepts inputs (<strong>parameters</strong>), and optionally produces a result (a <strong>return value</strong>). Methods are the unit of behaviour: a class with fields but no methods is a data shell, while a class's real contract is the set of methods it exposes.</p>
+<p>Three properties define a method:</p>
+<ol>
+<li><strong>Named</strong> — the name is the handle callers use; it must be a legal identifier (Lecture 3).</li>
+<li><strong>Typed interface</strong> — inputs have types, and the output has a type (or <code>void</code> for none).</li>
+<li><strong>Encapsulated body</strong> — callers see the interface, never the statements inside; this is the abstraction that makes large programs tractable.</li>
+</ol>
+<p>Java has no free functions. Every method lives inside a class, interface, enum, record or annotation — which is exactly why even <code>main</code> is a method (Section 5, and Lecture 2/15).</p>
+<p>Memory aid — a method is a <strong>contract</strong>: give it inputs, it gives you a result, and everyone else may ignore how the result is produced.</p>
+<h2 id="2-method-anatomy-the-seven-parts">2. Method Anatomy — The Seven Parts</h2>
+<p>Every method declaration is assembled from seven parts, and naming them precisely is what earns marks:</p>
+<ol>
+<li><strong>Access modifier</strong> — <code>public</code>, <code>protected</code>, package-private (no keyword) or <code>private</code>; controls visibility.</li>
+<li><strong><code>static</code> or instance</strong> — <code>static</code> methods belong to the class and have no <code>this</code>; instance methods need an object (Lecture 12, Lecture 15).</li>
+<li><strong>Return type</strong> — any type, including <code>void</code> for "returns nothing".</li>
+<li><strong>Name</strong> — a verb in <code>camelCase</code> by convention (<code>calculateTotal</code>, not <code>CalculateTotal</code>).</li>
+<li><strong>Parameter list</strong> — zero or more comma-separated <code>type name</code> pairs inside parentheses.</li>
+<li><strong>Body</strong> — the brace-delimited block of statements.</li>
+<li><strong>Return statement</strong> — <code>return value;</code> for a value, or bare <code>return;</code> in a <code>void</code> method.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — method anatomy and a void method</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// access  static  return  name  parameters</span>
+<span class="w">    </span><span class="kd">public</span><span class="w">   </span><span class="kd">static</span><span class="w">   </span><span class="kt">int</span><span class="w">     </span><span class="nf">add</span><span class="w">   </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">;</span><span class="w">                  </span><span class="c1">// return statement: value of type int</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">greet</span><span class="p">(</span><span class="n">String</span><span class="w"> </span><span class="n">name</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">name</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">null</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="p">;</span><span class="w">      </span><span class="c1">// bare return: legal early exit in void</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;Hello, &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">name</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">add</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">));</span><span class="w"> </span><span class="c1">// 5</span>
+<span class="w">        </span><span class="n">greet</span><span class="p">(</span><span class="s">&quot;Ada&quot;</span><span class="p">);</span><span class="w">                  </span><span class="c1">// Hello, Ada</span>
+<span class="w">        </span><span class="n">greet</span><span class="p">(</span><span class="kc">null</span><span class="p">);</span><span class="w">                   </span><span class="c1">// prints nothing</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>main</code> itself is a method with the special signature <code>public static void main(String[] args)</code>: <code>public</code> so the launcher can reach it, <code>static</code> so it runs without an object, <code>void</code> because it returns to the JVM, and <code>String[]</code> because the launcher passes command-line arguments (Lecture 2/15).</p>
+<blockquote class="callout callout--important">
+<p>Important
+A non-<code>void</code> method must return on <strong>every possible path</strong>, or <code>javac</code> rejects it with "missing return statement". The compiler proves reachability statically, not at runtime.</p>
+</blockquote>
+<h2 id="3-parameters-vs-arguments-and-pass-by-value-lecture-14-preview">3. Parameters vs Arguments, and Pass-by-Value (Lecture 14 Preview)</h2>
+<p>The two words are not synonyms:</p>
+<ul>
+<li>A <strong>parameter</strong> is the variable declared in the method header (<code>int a</code> in <code>add(int a, int b)</code>).</li>
+<li>An <strong>argument</strong> is the actual value supplied at the call site (<code>add(2, 3)</code> passes the arguments <code>2</code> and <code>3</code>).</li>
+</ul>
+<p>Java is strictly <strong>pass-by-value</strong>. For a primitive parameter, the method receives a <strong>copy</strong> of the value, so assigning to the parameter never touches the caller's variable. For an object parameter, the method receives a <strong>copy of the reference</strong>: mutating the object is visible to the caller because both references point at the same heap object, but reassigning the parameter to a new object is not visible. The full call-by-value versus call-by-reference discussion belongs to Lecture 14.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo4.java — pass-by-value (primitive copy vs object reference)</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo4</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">trySwap</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">   </span><span class="c1">// copies of the caller&#39;s ints</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">a</span><span class="p">;</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">b</span><span class="p">;</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">t</span><span class="p">;</span><span class="w">          </span><span class="c1">// caller&#39;s values are untouched</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">setZero</span><span class="p">(</span><span class="kt">int</span><span class="o">[]</span><span class="w"> </span><span class="n">arr</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">      </span><span class="c1">// arr is a copy of the reference</span>
+<span class="w">        </span><span class="n">arr</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">                       </span><span class="c1">// mutates the shared array object</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">        </span><span class="n">trySwap</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">y</span><span class="p">);</span><span class="w">                    </span><span class="c1">// still x=1, y=2</span>
+<span class="w">        </span><span class="kt">int</span><span class="o">[]</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span><span class="w"> </span><span class="mi">7</span><span class="p">};</span>
+<span class="w">        </span><span class="n">setZero</span><span class="p">(</span><span class="n">data</span><span class="p">);</span><span class="w">                    </span><span class="c1">// data[0] becomes 0</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">data</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">);</span><span class="w">  </span><span class="c1">// 1 2 0</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The result <code>1 2 0</code> is the whole lesson in one line: primitives were immune, the array was mutated. The method never had access to the caller's variable <code>x</code> — only to its value.</p>
+<h2 id="4-void-return-values-multiple-returns-and-early-return">4. void, Return Values, Multiple Returns and Early Return</h2>
+<p>A method's return type is a promise about what the call expression evaluates to:</p>
+<ol>
+<li><strong><code>void</code></strong> — no value; the call is a statement, and bare <code>return;</code> may exit early.</li>
+<li><strong>A concrete type</strong> — exactly one value of that type (or a widening-compatible type, Lecture 5); the call is an expression that can be assigned, printed or nested.</li>
+<li><strong><code>return</code></strong> — exits the current method immediately, returning control to the caller and, if a value is given, the type must match the declared return type.</li>
+</ol>
+<p>Multiple <code>return</code> statements are perfectly legal: control leaves at the <strong>first</strong> one reached. The idiomatic use is the <strong>early return</strong> (guard clause), which checks the invalid cases first and lets the main logic run at the bottom, unindented:</p>
+<div class="highlight"><pre><span></span><code>static int safeDivide(int a, int b) {
+    if (b == 0) return 0;      // guard: reject the bad case first
+    return a / b;              // happy path, no else needed
+}
+</code></pre></div>
+
+<p>Two rules follow. First, statements after an unconditional <code>return</code> in the same block are <strong>unreachable code</strong> and will not compile (Lecture 8). Second, <code>return</code> exits only the method it appears in — it does not terminate the program, unlike <code>System.exit</code>.</p>
+<h2 id="5-the-method-signature-name-plus-parameter-types">5. The Method Signature — Name Plus Parameter Types</h2>
+<p>The <strong>method signature</strong> is the method name plus the ordered list of its parameter types:</p>
+<div class="highlight"><pre><span></span><code>add(int, int)          -&gt; signature
+add(double, double)    -&gt; a different signature
+</code></pre></div>
+
+<p>Everything else is deliberately <strong>not</strong> part of the signature:</p>
+<table>
+<thead>
+<tr>
+<th>Declaration element</th>
+<th>Part of signature?</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Method name</td>
+<td>Yes</td>
+<td><code>add</code> and <code>sum</code> are different methods</td>
+</tr>
+<tr>
+<td>Parameter types (ordered)</td>
+<td>Yes</td>
+<td><code>add(int, long)</code> and <code>add(long, int)</code> differ</td>
+</tr>
+<tr>
+<td>Parameter names</td>
+<td>No</td>
+<td><code>add(int a, int b)</code> and <code>add(int x, int y)</code> clash</td>
+</tr>
+<tr>
+<td>Return type</td>
+<td>No</td>
+<td><code>int add(int, int)</code> and <code>double add(int, int)</code> clash — compile error</td>
+</tr>
+<tr>
+<td>Access modifier</td>
+<td>No</td>
+<td><code>public add(int)</code> and <code>private add(int)</code> clash</td>
+</tr>
+<tr>
+<td><code>static</code> keyword</td>
+<td>No</td>
+<td>a static and an instance method with one signature clash</td>
+</tr>
+<tr>
+<td><code>throws</code> clause</td>
+<td>No</td>
+<td>cannot be the only difference between two methods</td>
+</tr>
+</tbody>
+</table>
+<p>This single definition explains two otherwise puzzling rules: you cannot overload a method by changing only its return type, and you cannot overload by changing only parameter names.</p>
+<h2 id="6-method-overloading-compile-time-static-polymorphism">6. Method Overloading: Compile-Time (Static) Polymorphism</h2>
+<p><strong>Method overloading</strong> is declaring two or more methods with the <strong>same name but different parameter lists</strong> in one class. The compiler picks the best match from the <strong>static types</strong> of the arguments at the call site — hence the names <em>compile-time polymorphism</em>, <em>static polymorphism</em> and <em>early binding</em>. The overloaded methods are unrelated at runtime; only the selected one is invoked.</p>
+<ol>
+<li>Differ by <strong>number</strong> of parameters: <code>add(int, int)</code> versus <code>add(int, int, int)</code>.</li>
+<li>Differ by <strong>type</strong> of parameters: <code>add(int, int)</code> versus <code>add(double, double)</code>.</li>
+<li>Differ by <strong>order</strong> of parameter types: <code>log(String, int)</code> versus <code>log(int, String)</code>.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo2.java — overloading by count and type</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo2</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w">          </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">c</span><span class="p">)</span><span class="w">   </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">c</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// static double add(int a, int b) { return a + b; } // ILLEGAL: same signature as line 3</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">add</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">));</span><span class="w">        </span><span class="c1">// add(int, int) -&gt; 5</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">add</span><span class="p">(</span><span class="mf">2.0</span><span class="p">,</span><span class="w"> </span><span class="mf">3.0</span><span class="p">));</span><span class="w">    </span><span class="c1">// add(double, double) -&gt; 5.0</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">add</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">));</span><span class="w">     </span><span class="c1">// add(int, int, int) -&gt; 6</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The commented line is the classic exam trap: changing only the return type from <code>int</code> to <code>double</code> does not create a new signature, so it is a duplicate-method compile error. Overloading is what makes <code>System.out.println</code> work for every argument type and <code>Math.abs</code> work for <code>int</code>, <code>long</code>, <code>float</code> and <code>double</code>.</p>
+<h2 id="7-overloading-rules-and-ambiguity">7. Overloading Rules and Ambiguity</h2>
+<p>The rules are mechanical once the signature definition is accepted:</p>
+<table>
+<thead>
+<tr>
+<th>Candidate overloads differ by</th>
+<th>Legal?</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Number of parameters</td>
+<td>Yes</td>
+<td>Different signature</td>
+</tr>
+<tr>
+<td>Parameter types</td>
+<td>Yes</td>
+<td>Different signature</td>
+</tr>
+<tr>
+<td>Order of parameter types</td>
+<td>Yes</td>
+<td>Different ordered signature</td>
+</tr>
+<tr>
+<td>Parameter names only</td>
+<td>No</td>
+<td>Same signature</td>
+</tr>
+<tr>
+<td>Return type only</td>
+<td>No</td>
+<td>Return type is not in the signature</td>
+</tr>
+<tr>
+<td>Access modifier only</td>
+<td>No</td>
+<td>Access is not in the signature</td>
+</tr>
+<tr>
+<td><code>static</code> versus instance only</td>
+<td>No</td>
+<td>Static is not in the signature</td>
+</tr>
+</tbody>
+</table>
+<p>When several overloads are applicable, the compiler resolves in <strong>phases</strong>, and the first phase that finds a match wins:</p>
+<ol>
+<li><strong>Exact or widening primitive match</strong> — <code>foo(long)</code> is chosen over <code>foo(Integer)</code> for <code>foo(5)</code>, because <code>int</code> widens to <code>long</code> in phase one while boxing happens in phase two.</li>
+<li><strong>Autoboxing / unboxing</strong> — <code>Integer</code> arguments can match <code>int</code> parameters and vice versa (Lecture 18).</li>
+<li><strong>Varargs</strong> — a <code>foo(int...)</code> is considered only when no fixed-arity overload applies.</li>
+</ol>
+<p>Two consequences deserve memorising. A widening match beats a boxing match (<code>foo(long)</code> over <code>foo(Integer)</code>), and both beat a varargs match. Where no candidate is unambiguously most specific, the compiler reports <strong>reference to foo is ambiguous</strong> — a compile error, not a runtime choice:</p>
+<div class="highlight"><pre><span></span><code>static void m(int a, long b) { }    // consider m(1, 2)
+static void m(long a, int b) { }    // both are applicable, neither is more specific
+</code></pre></div>
+
+<p>A <code>null</code> argument is a special ambiguity source: it matches any reference type, so <code>m(String)</code> versus <code>m(Object)</code> picks <code>String</code> (most specific), while <code>m(String)</code> versus <code>m(Integer)</code> has no most-specific winner and fails to compile. Cast the null (<code>m((String) null)</code>) to disambiguate.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+The favourite question is "which overload runs for <code>foo(5)</code> if both <code>foo(long)</code> and <code>foo(Integer)</code> exist?" The answer is <code>foo(long)</code>: primitive widening is phase one, boxing is phase two, and Java always prefers the earlier phase. Candidates who answer "it depends on the JVM" have confused compile-time overload selection with runtime dispatch.</p>
+</blockquote>
+<h2 id="8-overloading-vs-overriding-lecture-17-preview">8. Overloading vs Overriding (Lecture 17 Preview)</h2>
+<p>Overloading is often confused with <strong>overriding</strong>, which is a different mechanism and the topic of Lecture 17. The distinction is fundamental:</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Overloading</th>
+<th>Overriding</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Where</td>
+<td>Same class (or inherited methods)</td>
+<td>Subclass replaces a superclass method</td>
+</tr>
+<tr>
+<td>Resolved</td>
+<td>Compile time, from static types</td>
+<td>Runtime, from the actual object type</td>
+</tr>
+<tr>
+<td>Signature</td>
+<td>Must differ in parameter list</td>
+<td>Must be identical</td>
+</tr>
+<tr>
+<td>Return type</td>
+<td>May differ freely</td>
+<td>Same or a covariant subtype</td>
+</tr>
+<tr>
+<td>Access</td>
+<td>Any</td>
+<td>May widen, never reduce visibility</td>
+</tr>
+<tr>
+<td><code>static</code> / <code>final</code> / <code>private</code></td>
+<td>Can be overloaded</td>
+<td>Cannot be overridden (<code>static</code> is hidden)</td>
+</tr>
+<tr>
+<td>Binding</td>
+<td>Early binding</td>
+<td>Late binding (dynamic dispatch)</td>
+</tr>
+<tr>
+<td>Also called</td>
+<td>Static polymorphism</td>
+<td>Runtime polymorphism</td>
+</tr>
+</tbody>
+</table>
+<p>The mental split: <strong>overloading is about the call site</strong> (many methods, one name, chosen by arguments); <strong>overriding is about the object</strong> (one method name, many implementations, chosen by the receiver). Both are forms of polymorphism, but only overriding needs <code>extends</code> and an object (Lecture 16).</p>
+<h2 id="9-recursion-the-base-case-and-the-recursive-case">9. Recursion: The Base Case and the Recursive Case</h2>
+<p><strong>Recursion</strong> is a method calling itself. A correct recursive method has exactly two kinds of branch:</p>
+<ol>
+<li><strong>Base case</strong> — the smallest input, where the method returns a value directly without recursing. This is what stops the chain.</li>
+<li><strong>Recursive case</strong> — the method calls itself on a smaller or simpler input and combines that result with local work.</li>
+</ol>
+<p>Two obligations follow: the base case must be <strong>reachable</strong> for every legal input, and each recursive call must <strong>make progress</strong> toward it. A recursion that guarantees both terminates; one that misses either runs forever until the call stack is exhausted (Section 10).</p>
+<p>The structure is a contract: <em>assume the recursive call is already correct for the smaller input, and use its answer</em>. This "recursive leap of faith" is the reason recursive code is short — the method solves one step and delegates the rest.</p>
+<h2 id="10-the-call-stack-frames-and-stackoverflowerror">10. The Call Stack, Frames and StackOverflowError</h2>
+<p>Every method call pushes a <strong>stack frame</strong> onto the JVM's call stack: the frame holds the parameters, the local variables and the return address. A normal method pops its frame on return. A recursive method cannot pop until the innermost call returns, so the frames pile up:</p>
+<div class="highlight"><pre><span></span><code>factorial(4)
+  -&gt; factorial(3)
+       -&gt; factorial(2)
+            -&gt; factorial(1)
+                 base case: returns 1     (frame pops)
+            &lt;- returns 2 * 1 = 2
+       &lt;- returns 3 * 2 = 6
+  &lt;- returns 4 * 6 = 24
+</code></pre></div>
+
+<ol>
+<li>On the way <strong>down</strong>, frames are pushed and nothing is computed yet.</li>
+<li>At the <strong>base case</strong>, the stack is at its deepest.</li>
+<li>On the way <strong>up</strong> (unwinding), each frame multiplies and returns.</li>
+</ol>
+<p>If the base case is missing or unreachable, frames push until the stack space is exhausted and the JVM throws <strong><code>StackOverflowError</code></strong>. This is an <code>Error</code>, not an <code>Exception</code> (Lecture 43): it signals a broken program, not a recoverable condition, and should generally not be caught. The stack is created per thread and sized by <code>-Xss</code>; its full memory picture is Lecture 45.</p>
+<blockquote class="callout callout--important">
+<p>Important
+Depth is the enemy, not the number of calls. A recursion that is <code>n</code> levels deep needs <code>n</code> live frames at once, even if it makes only <code>n</code> calls in total.</p>
+</blockquote>
+<h2 id="11-classic-recursion-factorial-and-fibonacci">11. Classic Recursion: Factorial and Fibonacci</h2>
+<p>Two examples anchor the topic: one linear, one exponential.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo3.java — factorial and naive fibonacci</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo3</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="nf">factorial</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">              </span><span class="c1">// base case</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">factorial</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">       </span><span class="c1">// one recursive call, depth n</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="nf">fib</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w">              </span><span class="c1">// base case: fib(0)=0, fib(1)=1</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">fib</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">fib</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span><span class="w">    </span><span class="c1">// two calls: exponential without caching</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">factorial</span><span class="p">(</span><span class="mi">5</span><span class="p">));</span><span class="w">  </span><span class="c1">// 120</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">fib</span><span class="p">(</span><span class="mi">10</span><span class="p">));</span><span class="w">       </span><span class="c1">// 55</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>factorial</code> makes one recursive call per level, so it takes O(n) time and O(n) stack depth. <code>fib</code> makes <strong>two</strong> calls per level, so the same subproblem is recomputed again and again: <code>fib(n)</code> calls roughly <code>phi^n</code> times (about 1.6^n), which is exponential. <code>fib(40)</code> is around a billion calls and takes seconds; <code>fib(50)</code> is impractical.</p>
+<p>The cure is <strong>memoization</strong> — cache each computed result so a subproblem is solved once, reducing <code>fib</code> to O(n) time at the cost of O(n) memory. Iterative dynamic programming and the general streams/collections machinery arrive in later lectures; the point here is recognising the exponential shape. Note also that <code>factorial</code> overflows <code>long</code> at <code>21!</code>, because <code>long</code> saturates around 9.2 × 10^18 (Lecture 3).</p>
+<h2 id="12-recursion-vs-iteration">12. Recursion vs Iteration</h2>
+<p>Anything recursive can be rewritten iteratively, and vice versa — the two are equally powerful but not equally convenient:</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Recursion</th>
+<th>Iteration</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mechanism</td>
+<td>Method calls itself</td>
+<td>Loop repeats a block</td>
+</tr>
+<tr>
+<td>Stopping rule</td>
+<td>Base case</td>
+<td>Loop condition</td>
+</tr>
+<tr>
+<td>Extra memory</td>
+<td>O(depth) stack frames</td>
+<td>O(1) extra state (usually)</td>
+</tr>
+<tr>
+<td>Constant factor</td>
+<td>Call overhead per level, slower</td>
+<td>Loop overhead, faster</td>
+</tr>
+<tr>
+<td>Failure mode</td>
+<td><code>StackOverflowError</code></td>
+<td>Infinite loop (silently hot)</td>
+</tr>
+<tr>
+<td>Readability</td>
+<td>Natural for trees, divide-and-conquer, backtracking</td>
+<td>Natural for linear scans and counters</td>
+</tr>
+<tr>
+<td>Debugging</td>
+<td>Harder — deep stack traces</td>
+<td>Easier — one frame to inspect</td>
+</tr>
+<tr>
+<td>Best when</td>
+<td>The problem itself is nested or self-similar</td>
+<td>Repetition is flat and count-driven</td>
+</tr>
+</tbody>
+</table>
+<p>Practical guidance: use recursion when the <strong>data structure is recursive</strong> (tree traversal, directory walk, divide-and-conquer like merge sort, backtracking like N-queens), and use iteration for flat repetition (summing a range, scanning an array). Recursion buys clarity; iteration buys memory and speed. A recursive solution with no natural nesting is usually a mnemonic for a loop.</p>
+<h2 id="13-tail-recursion-java-does-not-optimize-it">13. Tail Recursion — Java Does Not Optimize It</h2>
+<p>A recursive call is <strong>tail-recursive</strong> when it is the <strong>last operation</strong> of the method — nothing happens after it returns. Some languages (Scheme, Scala with an annotation) reuse the current frame for such calls, a technique called <strong>tail-call optimisation (TCO)</strong>, turning the recursion into a loop at the machine level.</p>
+<p><strong>Java does not perform TCO.</strong> The language specification gives no such guarantee and HotSpot does not implement it, so every tail-recursive call still pushes a new frame. A tail-recursive accumulator that would be safe in Scala can still throw <code>StackOverflowError</code> in Java on a deep input. The Java-idiomatic answer is to write the loop by hand:</p>
+<div class="highlight"><pre><span></span><code>static long factorialIter(int n) {
+    long acc = 1;
+    for (int i = 2; i &lt;= n; i++) acc *= i;   // manual TCO: explicit loop
+    return acc;
+}
+</code></pre></div>
+
+<p>This is a favourite interview point because it separates "recursion is a language feature" from "recursion is free".</p>
+<h2 id="14-scope-and-lifetime-inside-methods-lecture-45-preview">14. Scope and Lifetime Inside Methods (Lecture 45 Preview)</h2>
+<p>Parameters and local variables live on the method's stack frame, and their <strong>scope</strong> and <strong>lifetime</strong> are tied to the method execution:</p>
+<ol>
+<li>A parameter is in scope for the whole method body and is <strong>local to that call</strong>.</li>
+<li>A local variable is in scope from its declaration to the end of its enclosing block.</li>
+<li>Each call gets <strong>fresh copies</strong>; nothing survives from the previous call unless it was stored in a field or passed back.</li>
+<li>Locals are invisible outside the method; a caller cannot read them, only the returned value.</li>
+<li>A local may <strong>shadow</strong> a field of the same name, in which case <code>this.name</code> (Lecture 12) reaches the field.</li>
+</ol>
+<p>Because frames are per-call, recursion's correctness depends on locals being independent per frame — <code>factorial(3)</code> and <code>factorial(2)</code> never share an <code>n</code>. The physical layout of the stack, heap and method area is Lecture 45; static members, which live off the frame, are Lecture 15.</p>
+<h2 id="15-varargs-int-nums">15. Varargs: <code>int... nums</code></h2>
+<p><strong>Varargs</strong> (variable arity) lets a method accept zero or more arguments of one type. The syntax is the type followed by <code>...</code>:</p>
+<div class="highlight"><pre><span></span><code>static int sum(int... nums) {          // nums is really an int[]
+    int s = 0;
+    for (int n : nums) s += n;
+    return s;
+}
+// sum()            -&gt; 0
+// sum(1, 2, 3)     -&gt; 6
+// sum(new int[]{4, 5}) -&gt; 9
+</code></pre></div>
+
+<p>The rules are few but exact:</p>
+<ol>
+<li>The varargs parameter <strong>must be the last</strong> parameter; nothing may follow it.</li>
+<li>There can be <strong>at most one</strong> varargs parameter in a method.</li>
+<li>Inside the body it is an <strong>array</strong> — the compiler wraps the arguments into a new array (or passes your array through unchanged).</li>
+<li>It is compatible with zero arguments; beware methods like <code>sum(int first, int... rest)</code> if both are numbers.</li>
+<li><code>main(String[] args)</code> and <code>main(String... args)</code> are the <strong>same signature</strong>, so declaring both is a compile error (Lecture 2/15).</li>
+</ol>
+<p>Varargs and overloading interact cautiously: a fixed-arity overload always wins over a varargs one when both apply, which is why adding <code>sum(int a, int b)</code> beside <code>sum(int... nums)</code> silently reroutes two-argument calls.</p>
+<h2 id="16-the-pitfall-catalogue">16. The Pitfall Catalogue</h2>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>Trigger</th>
+<th>Result</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Overload by return type only</td>
+<td>Same name, same params, different return</td>
+<td>Compile error (duplicate method)</td>
+<td>Change the parameter list</td>
+</tr>
+<tr>
+<td>Infinite recursion</td>
+<td>Missing or unreachable base case</td>
+<td><code>StackOverflowError</code></td>
+<td>Add a base case; ensure progress</td>
+</tr>
+<tr>
+<td>Primitive "not changing"</td>
+<td><code>trySwap(x, y)</code></td>
+<td>Caller's values unchanged</td>
+<td>Return a value or use an object/array</td>
+</tr>
+<tr>
+<td>Object reassignment ignored</td>
+<td><code>p = new Point()</code> inside the method</td>
+<td>Caller still sees the old object</td>
+<td>Mutate the object, or return the new one</td>
+</tr>
+<tr>
+<td><code>null</code> overload ambiguity</td>
+<td><code>m(null)</code> with unrelated reference overloads</td>
+<td>Compile error</td>
+<td>Cast: <code>m((String) null)</code></td>
+</tr>
+<tr>
+<td>Mixed-order ambiguity</td>
+<td><code>m(int, long)</code> and <code>m(long, int)</code></td>
+<td>Compile error</td>
+<td>Retype arguments or rename methods</td>
+</tr>
+<tr>
+<td>Varargs plus array duplicate</td>
+<td><code>f(int[])</code> and <code>f(int...)</code> in one class</td>
+<td>Compile error (same signature)</td>
+<td>Keep only one</td>
+</tr>
+<tr>
+<td>Static versus instance clash</td>
+<td>Same params, one <code>static</code></td>
+<td>Compile error</td>
+<td>Change the signature</td>
+</tr>
+<tr>
+<td>Unreachable code after return</td>
+<td>Statements after an unconditional <code>return</code></td>
+<td>Compile error</td>
+<td>Move or delete the statements</td>
+</tr>
+<tr>
+<td>Confusing hiding with overriding</td>
+<td>Overriding a <code>static</code> method</td>
+<td>Hidden, not dispatched</td>
+<td>Override instance methods only (Lecture 17)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="17-myth-vs-reality">17. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"The return type can distinguish overloads."</td>
+<td>It cannot — the signature is name plus parameter types, so returning a different type changes nothing.</td>
+</tr>
+<tr>
+<td>"Java passes objects by reference."</td>
+<td>Java is pass-by-value for everything; object parameters receive a copy of the reference, so mutation is visible but reassignment is not (Lecture 14).</td>
+</tr>
+<tr>
+<td>"Recursion is always slower than a loop."</td>
+<td>Only the call overhead and extra memory are the cost; for self-similar problems recursion is clearer and often correct where a hand-rolled loop is not (tree traversal).</td>
+</tr>
+<tr>
+<td>"Java optimises tail recursion."</td>
+<td>It does not. Every tail call still pushes a frame; convert deep tail recursion to a loop by hand (Section 13).</td>
+</tr>
+<tr>
+<td>"static methods can be overridden."</td>
+<td>They are hidden, not overridden. Overriding is resolved at runtime by the receiver, and <code>static</code> has no receiver (Lecture 17).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="18-common-trap-questions">18. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — Overloading by return type: "Can I write <code>int f()</code> and <code>double f()</code> in the same class?"
+No. Return type is not part of the signature, so both declare the same method <code>f()</code> and the compiler reports a duplicate. Give them different parameter lists instead.</p>
+<p>Trap 2 — <code>void</code> with a value: "Is <code>return x;</code> legal inside a <code>void</code> method?"
+No. A <code>void</code> method may only use the bare <code>return;</code>. Returning an expression is a compile error, because the method's declared type promises nothing.</p>
+<p>Trap 3 — The object parameter: "I did <code>p = new Point(0, 0)</code> inside the method — why is the caller's point unchanged?"
+Assigning to the parameter rebinds only the local copy of the reference. The caller's variable still points at the original object. Mutate the object's fields, or return the new reference.</p>
+<p>Trap 4 — The <code>null</code> call: "With <code>m(String)</code> and <code>m(Object)</code> available, which runs for <code>m(null)</code>?"
+<code>m(String)</code>, because <code>String</code> is the more specific reference type. Swap one of them for an unrelated type such as <code>Integer</code> and the call becomes ambiguous — a compile error.</p>
+<p>Trap 5 — Missing base case: "What error does recursion with no stopping condition throw?"
+<code>StackOverflowError</code> (an <code>Error</code>, not an <code>Exception</code>) once the stack fills. It is not a <code>RuntimeException</code>, and catching it is discouraged because the stack is already broken (Lecture 43).</p>
+<p>Trap 6 — Varargs signature: "Can <code>sum(int...)</code> and <code>sum(int[])</code> coexist?"
+No. A varargs parameter is an array parameter, so the two declarations are the same signature and the class fails to compile.</p>
+<p>Trap 7 — Static hiding: "If the subclass defines a <code>static</code> method with the same signature, is that overriding?"
+No, it is <strong>method hiding</strong>. The call is resolved from the reference's static type at compile time, so no dynamic dispatch occurs (Lecture 17).</p>
+</blockquote>
+<h2 id="19-points-to-remember">19. Points to Remember</h2>
+<ol>
+<li>A method has seven parts: access modifier, static/instance, return type, name, parameter list, body and return statement.</li>
+<li>A parameter is declared; an argument is supplied. Java is pass-by-value: primitives copy, objects copy the reference (Lecture 14).</li>
+<li><code>void</code> methods return nothing and may use a bare <code>return;</code>; non-<code>void</code> methods must return on every reachable path.</li>
+<li>Multiple <code>return</code> statements are legal; control leaves at the first one reached, and code after an unconditional <code>return</code> is unreachable (Lecture 8).</li>
+<li>The signature is name plus ordered parameter types — return type, access modifier, parameter names and <code>static</code> are excluded.</li>
+<li>Overloading is same name, different parameter list, resolved at compile time from static types (static polymorphism).</li>
+<li>Resolution prefers widening over autoboxing over varargs; no most-specific winner means a compile-time ambiguity error (Lecture 5).</li>
+<li>Overriding (Lecture 17) is subclass replacement with an identical signature, resolved at runtime by dynamic dispatch; <code>static</code> methods are hidden, not overridden.</li>
+<li>Recursion needs a reachable base case and progress toward it; each call pushes a frame, and exhaustion throws <code>StackOverflowError</code>.</li>
+<li>Naive <code>fib</code> is exponential because it recomputes subproblems; memoization restores linear time (Section 11).</li>
+<li>Java has no tail-call optimisation — deep tail recursion still overflows; write the loop instead.</li>
+<li>Varargs (<code>Type...</code>) must be last, at most one, and is an array inside; keep receiver's <code>main(String[] args)</code> and <code>main(String... args)</code> as one method (Lecture 2/15).</li>
+</ol>
+<h2 id="20-likely-interview-questions">20. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What is a method in Java?</td>
+<td>A named, typed block of statements inside a class that performs one task, optionally takes parameters and optionally returns a value.</td>
+</tr>
+<tr>
+<td>What is the difference between a parameter and an argument?</td>
+<td>A parameter is the declared variable in the header; an argument is the value passed at the call site.</td>
+</tr>
+<tr>
+<td>Is Java pass-by-value or pass-by-reference?</td>
+<td>Strictly pass-by-value. Primitives copy the value; object parameters copy the reference, so mutation is visible but reassignment is not (Lecture 14).</td>
+</tr>
+<tr>
+<td>What is a method signature?</td>
+<td>Method name plus the ordered list of parameter types. Return type, access modifier, names and <code>static</code> are not part of it.</td>
+</tr>
+<tr>
+<td>What is method overloading?</td>
+<td>Same name, different parameter lists in one class, resolved at compile time from the arguments' static types (static polymorphism).</td>
+</tr>
+<tr>
+<td>Can you overload a method by changing only the return type?</td>
+<td>No — that leaves the signature identical, producing a duplicate-method compile error.</td>
+</tr>
+<tr>
+<td>Which overload wins for <code>foo(5)</code> if both <code>foo(long)</code> and <code>foo(Integer)</code> exist?</td>
+<td><code>foo(long)</code>; resolution runs in phases — exact/widening first, then boxing/unboxing, then varargs — and no most-specific match is a compile error.</td>
+</tr>
+<tr>
+<td>Overloading vs overriding?</td>
+<td>Overloading: compile-time, different parameters. Overriding: runtime, identical signature, subclass replaces superclass (Lecture 17).</td>
+</tr>
+<tr>
+<td>What are the two required parts of recursion?</td>
+<td>A base case that returns without recursing and a recursive case that makes progress toward the base case.</td>
+</tr>
+<tr>
+<td>Why is naive Fibonacci exponential?</td>
+<td>Each call spawns two calls (<code>fib(n-1)</code> and <code>fib(n-2)</code>), so the same subproblems are recomputed, giving roughly 1.6^n calls.</td>
+</tr>
+<tr>
+<td>Does Java optimise tail recursion?</td>
+<td>No. Java performs no tail-call optimisation, so deep tail recursion still throws <code>StackOverflowError</code>.</td>
+</tr>
+<tr>
+<td>What happens with varargs in the method body?</td>
+<td>The parameter is an array; the compiler packs the arguments (or passes your array through). It must be the last parameter, at most one per method.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="21-final-summary">21. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>call add(2, 3) -&gt; compiler picks overload -&gt; frame pushed (params + locals + return address)
+               -&gt; body runs -&gt; return value -&gt; frame popped
+recursion: call -&gt; ... -&gt; base case -&gt; unwind (frame pops on each return)
+iteration: loop condition -&gt; body -&gt; update -&gt; condition   (one frame, no growth)
+</code></pre></div>
+
+<ul>
+<li>Anatomy → access, static/instance, return type, name, parameters, body, return; non-<code>void</code> must return on every path.</li>
+<li>Signature → name + ordered parameter types; return type, access, names and <code>static</code> are excluded.</li>
+<li>Overloading → same name, different parameter list, compile-time choice; widening ⊃ autoboxing ⊃ varargs; ambiguity is a compile error.</li>
+<li>Overriding → same signature in a subclass, runtime dispatch; <code>static</code> is hidden, not overridden (Lecture 17).</li>
+<li>Recursion → base case + recursive case; frames grow with depth; missing base case → <code>StackOverflowError</code>.</li>
+<li>Factorial → O(n) time and stack; naive Fibonacci → exponential, fixed by memoization.</li>
+<li>Recursion vs iteration → clarity for nested/self-similar data, memory and speed for flat repetition; Java adds no tail-call optimisation.</li>
+<li>Pass-by-value → primitives copy; object references copy, so mutation shows but reassignment does not (Lecture 14).</li>
+<li>Varargs → <code>Type...</code> last and single, treated as an array; <code>main</code> is just a method with a special signature.</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+The compiler chooses the overload from the arguments' static types; the runtime chooses the override from the receiver's actual type — keep those two decisions apart and most method questions answer themselves.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> a method is a typed contract, overloading is the compiler picking the right contract by arguments, overriding is the object picking the right implementation at runtime, and recursion is a method that trusts its smaller self until the base case pays the debt.</p>
+<div class="pager"><a class="prev" href="lecture-10.html"><span class="dir">Previous</span><span class="ttl">How Arrays Work in Java</span></a><a class="next" href="lecture-12.html"><span class="dir">Next</span><span class="ttl">Object Oriented Programming in Java</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

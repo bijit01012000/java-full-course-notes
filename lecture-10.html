@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 10 · How Arrays Work in Java — Java Notes</title>
+<meta name="description" content="How Arrays Work in Java — Heap, Contiguous Storage & Random Access — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="10" data-lecture-title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-10.html#1-arrays-are-objects-stack-reference-heap-storage">1. Arrays Are Objects: Stack Reference, Heap Storage</a></li><li><a href="lecture-10.html#2-the-object-header-and-length-why-it-is-o1">2. The Object Header and length — Why It Is O(1)</a></li><li><a href="lecture-10.html#3-contiguous-storage-and-the-random-access-formula">3. Contiguous Storage and the Random-Access Formula</a></li><li><a href="lecture-10.html#4-homogeneity-why-one-element-type-matters">4. Homogeneity: Why One Element Type Matters</a></li><li><a href="lecture-10.html#5-bounds-checking-safety-at-runtime">5. Bounds Checking: Safety at Runtime</a></li><li><a href="lecture-10.html#6-the-cost-of-operations-a-complexity-table">6. The Cost of Operations: A Complexity Table</a></li><li><a href="lecture-10.html#7-multi-dimensional-arrays-arrays-of-arrays">7. Multi-Dimensional Arrays: Arrays of Arrays</a></li><li><a href="lecture-10.html#8-default-initialization-at-allocation">8. Default Initialization at Allocation</a></li><li><a href="lecture-10.html#9-working-with-arrays-length-iteration-printing">9. Working with Arrays: length, Iteration, Printing</a></li><li><a href="lecture-10.html#10-stack-vs-heap-a-preview">10. Stack vs Heap: A Preview</a></li><li><a href="lecture-10.html#11-garbage-collection-of-arrays">11. Garbage Collection of Arrays</a></li><li><a href="lecture-10.html#12-pitfalls-and-beginner-errors">12. Pitfalls and Beginner Errors</a></li><li><a href="lecture-10.html#13-myth-vs-reality">13. Myth vs Reality</a></li><li><a href="lecture-10.html#14-common-trap-questions">14. Common Trap Questions</a></li><li><a href="lecture-10.html#15-points-to-remember">15. Points to Remember</a></li><li><a href="lecture-10.html#16-likely-interview-questions">16. Likely Interview Questions</a></li><li><a href="lecture-10.html#17-final-summary">17. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 2 · Arrays & OOP Core · Lecture 10</p>
+<h1>How Arrays Work in Java — Heap, Contiguous Storage & Random Access</h1>
+<p class="readmeta">17 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="10" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: "How Arrays work in Java | Heap, Contiguous Storage, Random Access" (playlist map, verified). Repo evidence: notes.pdf only.</p>
+</blockquote>
+<p>An array is the first data structure every Java programmer meets, and it is also the one whose speed is easiest to explain once you see how it is stored. The Java Language Specification classifies arrays as objects, so an array lives on the heap while the variable that names it is only a reference. Because the elements of a single array sit back-to-back in one contiguous block, the address of any element can be computed arithmetically, which is the reason array access is O(1) and random. This note follows an array from allocation to garbage collection and contrasts its contiguous design with the linked structures covered later in the course.</p>
+<h2 id="1-arrays-are-objects-stack-reference-heap-storage">1. Arrays Are Objects: Stack Reference, Heap Storage</h2>
+<p>An <strong>array</strong> is a container object that holds a fixed number of values, all of a single type. Two things are created when you write <code>int[] numbers = new int[3];</code>:</p>
+<ol>
+<li>An <strong>array object</strong> on the heap, holding three <code>int</code> slots and an object header.</li>
+<li>A <strong>reference variable</strong> named <code>numbers</code>. When it is a local variable it lives on the stack; its value is the address of the heap array.</li>
+</ol>
+<p>The reference and the object are different things. Copying the reference does not copy the array — both names then point at the same object, which is the root of many aliasing bugs.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// ArrayHeapDemo.java — the reference is local, the array is on the heap</span>
+<span class="kt">int</span><span class="o">[]</span><span class="w"> </span><span class="n">numbers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="kt">int</span><span class="o">[</span><span class="mi">3</span><span class="o">]</span><span class="p">;</span><span class="w">   </span><span class="c1">// stack: numbers -- reference --&gt; heap: array object</span>
+<span class="n">numbers</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span><span class="p">;</span>
+<span class="n">numbers</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">20</span><span class="p">;</span>
+<span class="n">numbers</span><span class="o">[</span><span class="mi">2</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">30</span><span class="p">;</span>
+<span class="kt">int</span><span class="o">[]</span><span class="w"> </span><span class="n">alias</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">numbers</span><span class="p">;</span><span class="w">        </span><span class="c1">// second reference to the SAME array object</span>
+<span class="n">alias</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">99</span><span class="p">;</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">numbers</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">);</span><span class="w">   </span><span class="c1">// 99 — one array, two names</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">numbers</span><span class="p">.</span><span class="na">length</span><span class="p">);</span><span class="w">   </span><span class="c1">// 3</span>
+</code></pre></div>
+
+<blockquote class="callout callout--important">
+<p>Important
+Arrays are objects even when they hold primitives. The full stack/heap model is the subject of Lecture 45; here it is enough to know that the name is on the stack and the contents are on the heap.</p>
+</blockquote>
+<p>Memory aid: the <strong>name is the address, the array is the house</strong>.</p>
+<h2 id="2-the-object-header-and-length-why-it-is-o1">2. The Object Header and <code>length</code> — Why It Is O(1)</h2>
+<p>Every heap object begins with an <strong>object header</strong>. For an array, that header includes the array's <strong>length</strong>, fixed at creation and never changed. This is why <code>array.length</code> costs one field read no matter how large the array is: the JVM does not walk the elements to count them.</p>
+<p>Read the syntax carefully:</p>
+<ul>
+<li><code>array.length</code> is a <strong>field</strong>, so there are no parentheses.</li>
+<li><code>string.length()</code> is a <strong>method</strong>, so it has parentheses.</li>
+</ul>
+<p><code>array.length()</code> is a compile-time error, not a runtime one.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why is <code>array.length</code> O(1)?" Because the length is stored in the array object's header at allocation time. It is a single load, unlike <code>String.length()</code>, which computes from an internal count. Fixed length is also why arrays never grow: a "resize" creates a new array and copies the elements.</p>
+</blockquote>
+<h2 id="3-contiguous-storage-and-the-random-access-formula">3. Contiguous Storage and the Random-Access Formula</h2>
+<p>The elements of a single array are stored in one <strong>contiguous</strong> block: element 0, then element 1, and so on with no gaps. Because every element has the same size, the address of element <code>i</code> needs no searching:</p>
+<div class="highlight"><pre><span></span><code>element address = base address + i * element size
+</code></pre></div>
+
+<p>For an <code>int[]</code>, the element size is the width of an <code>int</code>; for a reference array, it is the width of a reference. The JVM computes one multiplication and one addition, then loads the value. That is why access by index is <strong>O(1)</strong> and why we call it <strong>random access</strong> — any element is reachable in the same constant time.</p>
+<p>Contrast a linked structure, where reaching element <code>i</code> requires following <code>i</code> links from the head, so access is <strong>O(n)</strong> (forward-ref Lecture 32, LinkedList). The array trades the flexibility of growth for the speed of arithmetic.</p>
+<blockquote class="callout callout--important">
+<p>Important
+Contiguity is what makes the formula legal. Break contiguity and index arithmetic fails; that single fact drives the next two sections.</p>
+</blockquote>
+<h2 id="4-homogeneity-why-one-element-type-matters">4. Homogeneity: Why One Element Type Matters</h2>
+<p>An array must be <strong>homogeneous</strong> — all elements share one type. This is not a stylistic rule but a requirement of the address formula. If element widths varied, <code>base + i * size</code> could not locate element <code>i</code>, because <code>size</code> would be unknown. One uniform element size is what turns lookup into arithmetic instead of a scan.</p>
+<p>Consequences worth noting:</p>
+<ol>
+<li><code>int[]</code> stores only <code>int</code>; <code>String[]</code> stores only <code>String</code> (or its subtypes, via polymorphism).</li>
+<li>An <code>Object[]</code> can hold references of many runtime types, but every slot still holds a reference of the same width — homogeneity of <em>storage size</em> is preserved even when runtime types differ.</li>
+<li>A primitive array and a reference array have the same geometry, only different element widths.</li>
+</ol>
+<p>Memory aid: <strong>same type, same size, one multiplication away</strong>.</p>
+<h2 id="5-bounds-checking-safety-at-runtime">5. Bounds Checking: Safety at Runtime</h2>
+<p>A valid index for an array of length <code>n</code> is any integer in the range <code>0 &lt;= index &lt; n</code>. On every element access, the JVM checks the index against the stored length. If the index is negative or at least <code>n</code>, the JVM throws <code>ArrayIndexOutOfBoundsException</code> instead of reading or writing memory that does not belong to the array.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// BoundsDemo.java — the JVM checks every index at runtime</span>
+<span class="kt">int</span><span class="o">[]</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="kt">int</span><span class="o">[</span><span class="mi">3</span><span class="o">]</span><span class="p">;</span><span class="w">              </span><span class="c1">// valid indices: 0, 1, 2</span>
+<span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">bad</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">a</span><span class="o">[</span><span class="mi">3</span><span class="o">]</span><span class="p">;</span><span class="w">                </span><span class="c1">// one past the end</span>
+<span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">ArrayIndexOutOfBoundsException</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;caught: &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="na">getMessage</span><span class="p">());</span><span class="w">   </span><span class="c1">// prints the index, 3</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>This is a deliberate safety feature. In C, an out-of-bounds access is undefined behaviour that may silently corrupt memory. Java pays the small cost of a check and converts a memory-safety hazard into a predictable exception.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Does Java check array bounds?" Yes, on every access, and that check is the reason you never get a wild pointer from an array. The same check underpins <code>ArrayList</code>, whose <code>get</code> delegates to the backing array.</p>
+</blockquote>
+<h2 id="6-the-cost-of-operations-a-complexity-table">6. The Cost of Operations: A Complexity Table</h2>
+<p>Because layout is fixed and contiguous, each operation has a characteristic cost. This table is the practical payoff of everything above.</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Typical cost</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Access by index <code>a[i]</code></td>
+<td>O(1)</td>
+<td>base address + index × element size</td>
+</tr>
+<tr>
+<td>Update by index <code>a[i] = x</code></td>
+<td>O(1)</td>
+<td>same arithmetic, one store</td>
+</tr>
+<tr>
+<td>Search, unsorted</td>
+<td>O(n)</td>
+<td>must scan each element</td>
+</tr>
+<tr>
+<td>Search, sorted</td>
+<td>O(log n)</td>
+<td>binary search over the ordered block</td>
+</tr>
+<tr>
+<td>Insert at an index</td>
+<td>O(n)</td>
+<td>every later element shifts right</td>
+</tr>
+<tr>
+<td>Delete at an index</td>
+<td>O(n)</td>
+<td>every later element shifts left</td>
+</tr>
+<tr>
+<td>Iterate all elements</td>
+<td>O(n)</td>
+<td>one visit per element</td>
+</tr>
+</tbody>
+</table>
+<p>The asymmetry is the lesson: <strong>the array is fast to reach and slow to restructure</strong>. Insertion and deletion are O(n) because the contiguity that gives O(1) access must be maintained by shifting. Collections that wrap arrays (for example <code>ArrayList</code>) hide the shifting behind methods, but the cost does not disappear (forward-ref the collections lectures).</p>
+<h2 id="7-multi-dimensional-arrays-arrays-of-arrays">7. Multi-Dimensional Arrays: Arrays of Arrays</h2>
+<p>Java has no true rectangular matrix type. An <code>int[][]</code> is literally an <strong>array of arrays</strong>: the outer array holds references, and each reference points to a separate inner <code>int[]</code> object. This makes <strong>jagged</strong> arrays (rows of different lengths) perfectly legal.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// MatrixDemo.java — int[][] is an array of int[] references</span>
+<span class="kt">int</span><span class="o">[][]</span><span class="w"> </span><span class="n">grid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="kt">int</span><span class="o">[</span><span class="mi">2</span><span class="o">][</span><span class="mi">3</span><span class="o">]</span><span class="p">;</span><span class="w">                 </span><span class="c1">// outer length 2, each row length 3</span>
+<span class="kt">int</span><span class="o">[][]</span><span class="w"> </span><span class="n">jagged</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{{</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">},</span><span class="w"> </span><span class="p">{</span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">},</span><span class="w"> </span><span class="p">{</span><span class="mi">6</span><span class="p">}};</span><span class="w">    </span><span class="c1">// rows may differ in length</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">jagged</span><span class="p">.</span><span class="na">length</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">jagged</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="p">.</span><span class="na">length</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">print</span><span class="p">(</span><span class="n">jagged</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The memory picture shows why rows are not guaranteed to be contiguous with each other:</p>
+<div class="highlight"><pre><span></span><code>jagged (stack) -- reference --&gt; outer int[][] (heap): [ref0, ref1, ref2]
+                                 ref0 --&gt; int[3]  (a separate heap object)
+                                 ref1 --&gt; int[2]  (a separate heap object)
+                                 ref2 --&gt; int[1]  (a separate heap object)
+</code></pre></div>
+
+<blockquote class="callout callout--note">
+<p>Common mistake
+<code>jagged[0].length</code> and <code>jagged[1].length</code> may differ. Always use <code>jagged[i].length</code> in the inner loop; assuming a common width is the classic 2D bug. Only the <code>new int[rows][cols]</code> form creates equal-length rows.</p>
+</blockquote>
+<h2 id="8-default-initialization-at-allocation">8. Default Initialization at Allocation</h2>
+<p><code>new</code> always zero-fills an array before it is handed to you, so no slot ever contains garbage from a previous use. The zero bit pattern is interpreted per element type:</p>
+<table>
+<thead>
+<tr>
+<th>Element type</th>
+<th>Default value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>byte</code>, <code>short</code>, <code>int</code>, <code>long</code></td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td><code>float</code>, <code>double</code></td>
+<td><code>0.0</code></td>
+</tr>
+<tr>
+<td><code>char</code></td>
+<td><code>'\u0000'</code> (the null character)</td>
+</tr>
+<tr>
+<td><code>boolean</code></td>
+<td><code>false</code></td>
+</tr>
+<tr>
+<td>Any reference type</td>
+<td><code>null</code></td>
+</tr>
+</tbody>
+</table>
+<p>Memory aid: <strong>numbers zero, flags false, characters null, references nothing</strong>. A freshly allocated <code>String[]</code> of length 5 holds five <code>null</code> references until you assign them, so touching <code>arr[0].length()</code> before assignment throws <code>NullPointerException</code>.</p>
+<h2 id="9-working-with-arrays-length-iteration-printing">9. Working with Arrays: <code>length</code>, Iteration, Printing</h2>
+<p>Three everyday skills trip up beginners because the syntax is not symmetric with other types:</p>
+<ol>
+<li><strong>Length</strong> — <code>a.length</code>, a field, never <code>a.length()</code>.</li>
+<li><strong>Iteration</strong> — the index loop gives you the position; the enhanced <code>for</code> loop gives you each value.</li>
+<li><strong>Printing</strong> — <code>System.out.println(a)</code> prints the object identity, not the contents; use <code>Arrays.toString</code> or <code>Arrays.deepToString</code>.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1">// PrintDemo.java — arrays do not override toString</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.Arrays</span><span class="p">;</span>
+<span class="kt">int</span><span class="o">[]</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">};</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">a</span><span class="p">);</span><span class="w">                    </span><span class="c1">// [I@... identity, not contents</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">Arrays</span><span class="p">.</span><span class="na">toString</span><span class="p">(</span><span class="n">a</span><span class="p">));</span><span class="w">   </span><span class="c1">// [1, 2, 3]</span>
+<span class="kt">int</span><span class="o">[][]</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{{</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">},</span><span class="w"> </span><span class="p">{</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">}};</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">Arrays</span><span class="p">.</span><span class="na">deepToString</span><span class="p">(</span><span class="n">m</span><span class="p">));</span><span class="w">   </span><span class="c1">// [[1, 2], [3, 4]]</span>
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Loop style</th>
+<th>Best for</th>
+<th>Limitation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Index loop <code>for (int i = 0; i &lt; a.length; i++)</code></td>
+<td>any position-dependent work</td>
+<td>more boilerplate, manual bounds care</td>
+</tr>
+<tr>
+<td>Enhanced <code>for (int v : a)</code></td>
+<td>reading every element in order</td>
+<td>no index, cannot remove or reposition</td>
+</tr>
+</tbody>
+</table>
+<p>The enhanced <code>for</code> loop over a primitive array copies each element into <code>v</code>; assigning <code>v</code> does not change the array. Assign back through <code>a[i]</code> when you need to write.</p>
+<h2 id="10-stack-vs-heap-a-preview">10. Stack vs Heap: A Preview</h2>
+<p>The array is the first place the split between automatic and heap memory becomes visible. Locals and their references live in the frame on the stack; every object and array lives on the heap.</p>
+<table>
+<thead>
+<tr>
+<th>Region</th>
+<th>Holds</th>
+<th>Lifetime</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Stack</td>
+<td>local variables, primitives, references</td>
+<td>ends with the method call</td>
+<td><code>int i</code>, the variable <code>int[] ref</code></td>
+</tr>
+<tr>
+<td>Heap</td>
+<td>all objects and arrays</td>
+<td>until garbage collected</td>
+<td><code>new int[5]</code>, <code>new String</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--important">
+<p>Important
+An array's <em>reference</em> can be on the stack while its <em>elements</em> are always on the heap. Passing an array to a method copies the reference, not the array, so the method sees the caller's elements. The complete frame and heap model is covered in Lecture 45.</p>
+</blockquote>
+<h2 id="11-garbage-collection-of-arrays">11. Garbage Collection of Arrays</h2>
+<p>An array is reclaimed like any other object: it becomes eligible for garbage collection when no reachable reference points to it. Setting the last reference to <code>null</code> or reassigning it away from the array is enough; the object header and its contiguous block are then freed together by the collector (forward-ref Lecture 46).</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// GcDemo.java — drop the last reference and the array becomes eligible</span>
+<span class="kt">int</span><span class="o">[]</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="kt">int</span><span class="o">[</span><span class="mi">1_000_000</span><span class="o">]</span><span class="p">;</span>
+<span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span><span class="w">               </span><span class="c1">// no reachable reference remains</span>
+<span class="c1">// the million-int array is now eligible for garbage collection</span>
+</code></pre></div>
+
+<p>Garbage collection never runs because an array is large; size affects <em>when</em> memory pressure triggers a collection, not <em>whether</em> an array is eligible.</p>
+<h2 id="12-pitfalls-and-beginner-errors">12. Pitfalls and Beginner Errors</h2>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>new int[-1]</code> throws <code>ArrayIndexOutOfBoundsException</code></td>
+<td>It throws <code>NegativeArraySizeException</code> at creation.</td>
+</tr>
+<tr>
+<td><code>new int[0]</code> is illegal</td>
+<td>A zero-length array is perfectly legal and <code>length</code> is <code>0</code>.</td>
+</tr>
+<tr>
+<td><code>a.length()</code></td>
+<td>Compile-time error; <code>length</code> is a field.</td>
+</tr>
+<tr>
+<td><code>a == b</code> compares contents</td>
+<td>It compares references; use <code>Arrays.equals</code>.</td>
+</tr>
+<tr>
+<td>2D rows are guaranteed contiguous</td>
+<td>Rows are separate arrays; use <code>Arrays.deepEquals</code> for contents.</td>
+</tr>
+<tr>
+<td><code>System.out.println(a)</code> prints contents</td>
+<td>It prints <code>[I@...</code>; use <code>Arrays.toString</code> or <code>Arrays.deepToString</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="13-myth-vs-reality">13. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"An array is a primitive value, not an object."</td>
+<td>Arrays are objects on the heap; only the local reference sits on the stack.</td>
+</tr>
+<tr>
+<td>"<code>array.length</code> is a method."</td>
+<td>It is a field stored in the object header; <code>array.length()</code> is a compile error.</td>
+</tr>
+<tr>
+<td>"Arrays can grow like ArrayList."</td>
+<td>The length is fixed at creation; growth means allocating a new array and copying.</td>
+</tr>
+<tr>
+<td>"Java does not check array bounds, like C."</td>
+<td>The JVM checks every access and throws <code>ArrayIndexOutOfBoundsException</code>.</td>
+</tr>
+<tr>
+<td>"A 2D array is one contiguous rectangle."</td>
+<td>It is an array of references to separate row arrays, so rows may be jagged.</td>
+</tr>
+<tr>
+<td>"<code>a == b</code> is true when the arrays hold equal values."</td>
+<td><code>==</code> compares references; value equality needs <code>Arrays.equals</code>.</td>
+</tr>
+<tr>
+<td>"An array is garbage collected immediately after <code>= null</code>."</td>
+<td>It becomes <em>eligible</em>; the collector reclaims it later.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="14-common-trap-questions">14. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — "Is <code>array.length</code> a method call, like <code>String.length()</code>?"
+No. <code>length</code> is a public final field read from the object header; <code>String.length()</code> is a method. Writing <code>array.length()</code> fails to compile.</p>
+<p>Trap 2 — "Why is <code>a[3]</code> on an <code>int[3]</code> a runtime error but writing <code>a.length()</code> is a compile error?"
+Different checkers catch different problems. The type checker rejects <code>a.length()</code>; the JVM bounds check rejects <code>a[3]</code> at runtime, because index validity cannot be proven in general at compile time.</p>
+<p>Trap 3 — "<code>new int[0]</code> must be illegal because the array is empty."
+It is legal. A zero-length array occupies only its header and is a valid object; useful as an empty result instead of <code>null</code>.</p>
+<p>Trap 4 — "Comparing two arrays with <code>==</code> tells you whether their contents match."
+No. <code>==</code> compares the references. Two distinct arrays with identical elements are <code>==</code> false. Use <code>Arrays.equals</code> (or <code>Arrays.deepEquals</code>).</p>
+<p>Trap 5 — "In <code>int[][] m</code>, the rows are laid out one after another in memory, so <code>m[0].length</code> and <code>m[1].length</code> must match."
+Rows are independently allocated arrays reached through references; only <code>new int[rows][cols]</code> makes them equal in length. Jagged arrays are legal.</p>
+<p>Trap 6 — "Array access is O(n) because the JVM scans for the index."
+It is O(1): the address is computed as base + index × element size. Only searching for a <em>value</em> in an unsorted array is O(n).</p>
+<p>Trap 7 — "Inserting into the middle of an array is cheap because access is O(1)."
+It is O(n). Access is cheap, restructuring is not: every element after the insertion point must shift.</p>
+</blockquote>
+<h2 id="15-points-to-remember">15. Points to Remember</h2>
+<ol>
+<li>Arrays are objects: the array lives on the heap, and a local array variable is a reference on the stack.</li>
+<li>The object header stores the length, so <code>array.length</code> is O(1); it is a field, not a method (<code>array.length()</code> does not compile).</li>
+<li>Elements of one array are contiguous, so address = base + index × element size, giving O(1) random access.</li>
+<li>Homogeneity — one element type and fixed element size — is what makes the index arithmetic valid.</li>
+<li>The JVM bounds-checks every access and throws <code>ArrayIndexOutOfBoundsException</code>; this is the safety C lacks.</li>
+<li>Access and update are O(1); unsorted search is O(n); insertion and deletion are O(n) because of shifting.</li>
+<li><code>int[][]</code> is an array of arrays; rows are separate heap objects and may be jagged, so use <code>m[i].length</code>.</li>
+<li><code>new</code> zero-fills: numeric arrays get <code>0</code>/<code>0.0</code>, <code>boolean[]</code> gets <code>false</code>, <code>char[]</code> gets <code>'\u0000'</code>, reference arrays get <code>null</code>.</li>
+<li>Print with <code>Arrays.toString</code> (1D) or <code>Arrays.deepToString</code> (nested); compare with <code>Arrays.equals</code>/<code>Arrays.deepEquals</code>, never <code>==</code>.</li>
+<li>An array is eligible for garbage collection when no reachable reference points to it (forward-ref Lecture 46); <code>new int[0]</code> is legal and a negative size throws <code>NegativeArraySizeException</code>.</li>
+</ol>
+<h2 id="16-likely-interview-questions">16. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Are arrays objects in Java?</td>
+<td>Yes. The array is a heap object; the variable is a reference (on the stack when local).</td>
+</tr>
+<tr>
+<td>Where does an array live in memory?</td>
+<td>The array and its contiguous elements live on the heap; the reference lives wherever it is declared.</td>
+</tr>
+<tr>
+<td>Why is <code>array.length</code> O(1)?</td>
+<td>The length is stored in the array's object header and read as a single field.</td>
+</tr>
+<tr>
+<td>Is <code>length</code> a field or a method?</td>
+<td>A field. <code>array.length</code> is correct; <code>array.length()</code> is a compile error.</td>
+</tr>
+<tr>
+<td>Why is array access O(1)?</td>
+<td>Elements are contiguous and equal-sized, so address = base + index × element size.</td>
+</tr>
+<tr>
+<td>Why must arrays be homogeneous?</td>
+<td>A fixed element size makes index arithmetic possible; mixed sizes would break it.</td>
+</tr>
+<tr>
+<td>What happens on an out-of-bounds access?</td>
+<td>The JVM throws <code>ArrayIndexOutOfBoundsException</code>; it never reads foreign memory.</td>
+</tr>
+<tr>
+<td>What is the cost of inserting into the middle?</td>
+<td>O(n), because later elements shift to preserve contiguity.</td>
+</tr>
+<tr>
+<td>Is <code>int[][]</code> a rectangular matrix?</td>
+<td>No. It is an array of references to separate row arrays; rows may be jagged.</td>
+</tr>
+<tr>
+<td>What are default array element values?</td>
+<td>Zero for numerics, <code>false</code> for boolean, <code>'\u0000'</code> for char, <code>null</code> for references.</td>
+</tr>
+<tr>
+<td>How do you print and compare arrays?</td>
+<td><code>Arrays.toString</code>/<code>deepToString</code>; <code>Arrays.equals</code>/<code>deepEquals</code> — never <code>println</code> or <code>==</code>.</td>
+</tr>
+<tr>
+<td>When is an array garbage collected?</td>
+<td>When no reachable reference points to it; then it becomes eligible (Lecture 46).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="17-final-summary">17. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>int[] a = new int[3]
+   -- reference on the stack --&gt;  array object on the heap
+   -- object header holds length --&gt;  a.length is a field read, O(1)
+   -- contiguous, equal-size elements --&gt;  address = base + index * size --&gt; access O(1)
+   -- fixed length --&gt;  insert/delete O(n) shifting, unsorted search O(n)
+   -- int[][] is an array of references --&gt;  rows are separate, jagged arrays allowed
+   -- no reachable reference --&gt;  eligible for garbage collection (Lecture 46)
+</code></pre></div>
+
+<ul>
+<li>Objects → arrays live on the heap; the name is a reference, so <code>==</code> compares references</li>
+<li>Length → stored in the header, a field, O(1), never grows</li>
+<li>Contiguity → base + index × size → random access O(1), but shifting costs O(n)</li>
+<li>Homogeneity → one element size is the precondition for the address formula</li>
+<li>Safety → the JVM bounds-checks and throws, unlike C</li>
+<li>2D → an array of arrays, so <code>m[i].length</code> and jagged rows are normal</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+An array is a fixed-size, homogeneous, contiguous block behind a single reference: contiguity buys O(1) random access and charges O(n) for every change to the block.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> an array is one heap object with its length in the header and its equal-sized elements laid end-to-end, so reaching any element is arithmetic while changing the shape is labour.</p>
+<div class="pager"><a class="prev" href="lecture-09.html"><span class="dir">Previous</span><span class="ttl">Java Arrays Explained</span></a><a class="next" href="lecture-11.html"><span class="dir">Next</span><span class="ttl">Java Functions Deep Dive</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

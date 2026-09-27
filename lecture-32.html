@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 32 · Java List Interface Deep Dive — Java Notes</title>
+<meta name="description" content="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="32" data-lecture-title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-32.html#1-the-list-interface-ordered-indexed-duplicates-allowed">1. The List Interface: Ordered, Indexed, Duplicates Allowed</a></li><li><a href="lecture-32.html#2-the-index-based-method-surface">2. The Index-Based Method Surface</a></li><li><a href="lecture-32.html#3-arraylist-internals-the-growable-array">3. ArrayList Internals: The Growable Array</a></li><li><a href="lecture-32.html#4-arraylist-in-practice">4. ArrayList in Practice</a></li><li><a href="lecture-32.html#5-linkedlist-internals-the-doubly-linked-list">5. LinkedList Internals: The Doubly Linked List</a></li><li><a href="lecture-32.html#6-linkedlist-as-a-deque-queue-and-stack-operations">6. LinkedList as a Deque: Queue and Stack Operations</a></li><li><a href="lecture-32.html#7-vector-the-legacy-synchronized-list">7. Vector: The Legacy Synchronized List</a></li><li><a href="lecture-32.html#8-stack-lifo-on-top-of-vector">8. Stack: LIFO on Top of Vector</a></li><li><a href="lecture-32.html#9-arraylist-vs-linkedlist-vs-vector-vs-stack">9. ArrayList vs LinkedList vs Vector vs Stack</a></li><li><a href="lecture-32.html#10-big-o-of-the-core-list-operations">10. Big-O of the Core List Operations</a></li><li><a href="lecture-32.html#11-arraylist-vs-a-plain-array">11. ArrayList vs a Plain Array</a></li><li><a href="lecture-32.html#12-the-classic-trap-removeint-vs-removeobject">12. The Classic Trap: remove(int) vs remove(Object)</a></li><li><a href="lecture-32.html#13-pitfalls-and-common-errors">13. Pitfalls and Common Errors</a></li><li><a href="lecture-32.html#14-myth-vs-reality">14. Myth vs Reality</a></li><li><a href="lecture-32.html#15-common-trap-questions">15. Common Trap Questions</a></li><li><a href="lecture-32.html#16-points-to-remember">16. Points to Remember</a></li><li><a href="lecture-32.html#17-likely-interview-questions">17. Likely Interview Questions</a></li><li><a href="lecture-32.html#18-final-summary">18. Final Summary</a></li></ul></li></ul></details><details class="part"><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 4 · Strings, Generics & Collections · Lecture 32</p>
+<h1>Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack</h1>
+<p class="readmeta">18 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="32" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: "Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack" (playlist map, verified). Repo evidence: code/Demo.java.</p>
+</blockquote>
+<p>Lecture 31 introduced the <code>Collection</code> interface as the root contract of the framework. This lecture drills into <code>List</code>, its first and most used subinterface: an ordered, index-addressed sequence that permits duplicates. It then opens the four classic implementations that ship with the JDK and shows how their internals decide which one to reach for: the growable array behind <code>ArrayList</code>, the doubly linked chain behind <code>LinkedList</code>, the synchronized legacy of <code>Vector</code>, and the LIFO <code>Stack</code> built on top of it. The constant theme is that the same interface promises the same operations while the four backings deliver very different costs.</p>
+<h2 id="1-the-list-interface-ordered-indexed-duplicates-allowed">1. The List Interface: Ordered, Indexed, Duplicates Allowed</h2>
+<p>A <strong><code>List</code></strong> is a subinterface of <code>Collection</code> that adds <strong>positional access</strong>. Where a plain <code>Collection</code> only knows membership, a <code>List</code> imposes a strict order: every element sits at a zero-based index, the order is stable unless you change it, and the same value may appear many times. The nesting is:</p>
+<div class="highlight"><pre><span></span><code>Iterable  ⊃  Collection  ⊃  List  ⊃  (ArrayList, LinkedList, Vector, Stack)
+</code></pre></div>
+
+<p>Three guarantees define it:</p>
+<ol>
+<li><strong>Ordered</strong> — iteration returns elements in index order, not an arbitrary set order.</li>
+<li><strong>Indexed</strong> — every element is reachable by an <code>int</code> position, so <code>get(3)</code> is meaningful.</li>
+<li><strong>Duplicates allowed</strong> — <code>[a, a, b]</code> is a valid list, unlike a <code>Set</code>.</li>
+</ol>
+<p>A <code>List</code> also permits <code>null</code> elements in general, though how many and where depends on the implementation (<code>LinkedList</code> allows many; <code>List.of(...)</code> allows none because it is immutable). Because position matters, <code>List</code> complements <code>Collection</code> with its own cursor, the <code>ListIterator</code>, which can walk both directions and change elements in place.</p>
+<blockquote class="callout callout--important">
+<p>Important
+<code>List</code> is an interface, not a data structure. It promises behaviour; <code>ArrayList</code>, <code>LinkedList</code>, <code>Vector</code> and <code>Stack</code> decide the performance. Choosing the interface type for a variable (<code>List&lt;String&gt; names = new ArrayList&lt;&gt;();</code>) keeps callers free to swap the implementation later.</p>
+</blockquote>
+<h2 id="2-the-index-based-method-surface">2. The Index-Based Method Surface</h2>
+<p>The methods that make a <code>List</code> a list are the ones that take an index:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Meaning</th>
+<th>Cost note (ArrayList)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>E get(int index)</code></td>
+<td>read the element at a position</td>
+<td>O(1)</td>
+</tr>
+<tr>
+<td><code>E set(int index, E element)</code></td>
+<td>replace, returns the old element</td>
+<td>O(1)</td>
+</tr>
+<tr>
+<td><code>void add(int index, E element)</code></td>
+<td>insert at a position, shifting the tail right</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td><code>boolean add(E e)</code></td>
+<td>append at the end</td>
+<td>amortized O(1)</td>
+</tr>
+<tr>
+<td><code>E remove(int index)</code></td>
+<td>delete a position, shifting the tail left</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td><code>boolean remove(Object o)</code></td>
+<td>delete the first matching element</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td><code>int indexOf(Object o)</code></td>
+<td>first index of a value, or -1</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td><code>int lastIndexOf(Object o)</code></td>
+<td>last index of a value, or -1</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td><code>List&lt;E&gt; subList(int from, int to)</code></td>
+<td>a <strong>view</strong> of a range, <code>from</code> inclusive, <code>to</code> exclusive</td>
+<td>O(1) view</td>
+</tr>
+<tr>
+<td><code>ListIterator&lt;E&gt; listIterator()</code></td>
+<td>bidirectional cursor with <code>add</code>/<code>set</code>/<code>remove</code></td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>void sort(Comparator&lt;? super E&gt; c)</code></td>
+<td>stable in-place sort (Java 8 default)</td>
+<td>O(n log n)</td>
+</tr>
+</tbody>
+</table>
+<p>Two subtleties matter early. First, <code>set</code> returns the element it displaced, so the old value is not lost. Second, <code>add(E e)</code> and <code>remove(Object o)</code> return a <code>boolean</code>, while <code>remove(int index)</code> returns the removed element — a difference that powers the ambiguity of Section 12.</p>
+<blockquote class="callout callout--note">
+<p>Memory aid
+The <code>List</code> extras are exactly the methods that mention an <strong>index</strong>. If an operation does not need a position, it already lived on <code>Collection</code>.</p>
+</blockquote>
+<h2 id="3-arraylist-internals-the-growable-array">3. ArrayList Internals: The Growable Array</h2>
+<p><code>ArrayList</code> is backed by a plain <code>Object[] elementData</code> plus an <code>int size</code>. Its whole design is "array, but resizable".</p>
+<ul>
+<li><strong>Lazy default capacity.</strong> <code>new ArrayList&lt;&gt;()</code> does <strong>not</strong> immediately allocate ten slots. <code>DEFAULT_CAPACITY</code> is 10, but the backing array starts as a shared empty array and is only allocated on the first <code>add</code>. This avoids wasting memory on lists that stay empty.</li>
+<li><strong>Growth by 1.5x.</strong> When the array is full, a new one is created with <code>newCapacity = oldCapacity + (oldCapacity &gt;&gt; 1)</code> — the shift adds half, so capacity grows by roughly 50 percent. The elements are copied with <code>System.arraycopy</code> (or <code>Arrays.copyOf</code>).</li>
+<li><strong>O(1) random access.</strong> Indexing is pointer arithmetic: <code>elementData[index]</code>. Reading or replacing any position is constant time.</li>
+<li><strong>O(n) middle insertion and deletion.</strong> Inserting at the front shifts every following element one slot right; deleting at the front shifts them left. Both are done by <code>System.arraycopy</code>.</li>
+<li><strong>Amortized O(1) append.</strong> A single append is usually O(1); occasionally it triggers the 1.5x copy, and averaging those rare copies over many appends yields amortized constant time.</li>
+<li><strong>Fail-fast.</strong> A <code>modCount</code> field tracks structural changes. An iterator created from the list remembers <code>modCount</code> and throws <code>ConcurrentModificationException</code> if the list is modified through any other route while iterating.</li>
+</ul>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why is <code>add</code> at the end described as amortized O(1)?" Because growth is geometric, not linear. Doubling-style growth means the total copying for n appends is bounded by a constant multiple of n, so the average per append is constant.</p>
+</blockquote>
+<h2 id="4-arraylist-in-practice">4. ArrayList in Practice</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — the core List operations on an ArrayList</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">list</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">list</span><span class="p">.</span><span class="na">add</span><span class="p">(</span><span class="s">&quot;Ada&quot;</span><span class="p">);</span><span class="w">            </span><span class="c1">// append</span>
+<span class="w">        </span><span class="n">list</span><span class="p">.</span><span class="na">add</span><span class="p">(</span><span class="s">&quot;Alan&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">list</span><span class="p">.</span><span class="na">add</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Grace&quot;</span><span class="p">);</span><span class="w">       </span><span class="c1">// insert at index 0 (shifts right)</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">list</span><span class="p">);</span><span class="w">   </span><span class="c1">// [Grace, Ada, Alan]</span>
+
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">list</span><span class="p">.</span><span class="na">get</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span><span class="w">        </span><span class="c1">// Ada</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">list</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Edsger&quot;</span><span class="p">));</span><span class="w"> </span><span class="c1">// Ada (returned old value)</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">list</span><span class="p">.</span><span class="na">indexOf</span><span class="p">(</span><span class="s">&quot;Alan&quot;</span><span class="p">));</span><span class="w"> </span><span class="c1">// 2</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">list</span><span class="p">.</span><span class="na">subList</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">));</span><span class="w">   </span><span class="c1">// [Edsger, Alan] (a view)</span>
+
+<span class="w">        </span><span class="n">list</span><span class="p">.</span><span class="na">sort</span><span class="p">(</span><span class="n">Comparator</span><span class="p">.</span><span class="na">naturalOrder</span><span class="p">());</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">list</span><span class="p">);</span><span class="w">   </span><span class="c1">// [Alan, Edsger, Grace]</span>
+
+<span class="w">        </span><span class="n">Iterator</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">it</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">list</span><span class="p">.</span><span class="na">iterator</span><span class="p">();</span>
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">it</span><span class="p">.</span><span class="na">hasNext</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">it</span><span class="p">.</span><span class="na">next</span><span class="p">().</span><span class="na">equals</span><span class="p">(</span><span class="s">&quot;Alan&quot;</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">it</span><span class="p">.</span><span class="na">remove</span><span class="p">();</span><span class="w">        </span><span class="c1">// legal: removal through the iterator</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">list</span><span class="p">);</span><span class="w">   </span><span class="c1">// [Edsger, Grace]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Notice the last block: removal happens through <code>Iterator.remove()</code>, not <code>list.remove(...)</code>. Calling the list directly during iteration is the fail-fast violation described in Section 13.</p>
+<h2 id="5-linkedlist-internals-the-doubly-linked-list">5. LinkedList Internals: The Doubly Linked List</h2>
+<p><code>LinkedList</code> stores each element in a <code>Node</code> object holding three fields: <code>item</code>, <code>prev</code> and <code>next</code>. The list keeps references to <code>first</code> and <code>last</code>, so it can reach either end instantly, but reaching the middle means walking node by node.</p>
+<ul>
+<li><strong>O(1) at the ends.</strong> Adding or removing at the head or tail is constant time: relink a few references.</li>
+<li><strong>O(n) random access.</strong> <code>get(i)</code> walks from whichever end is closer, counting until it reaches <code>i</code>. There is no index arithmetic.</li>
+<li><strong>Per-node overhead.</strong> Every element costs a node object with two references on top of the value — heavy compared with a bare array slot.</li>
+<li><strong>Implements <code>Deque</code>.</strong> It is simultaneously a <code>List</code>, a <code>Queue</code> and a <code>Deque</code>, which is why it works well as a queue or a stack.</li>
+</ul>
+<blockquote class="callout callout--important">
+<p>Important
+<code>LinkedList</code> shines when the workload is "add and remove at the ends". It is the wrong tool for "read index i repeatedly", because each <code>get(i)</code> is a fresh walk. Section 13 shows the quadratic trap this creates.</p>
+</blockquote>
+<h2 id="6-linkedlist-as-a-deque-queue-and-stack-operations">6. LinkedList as a Deque: Queue and Stack Operations</h2>
+<p>Because <code>LinkedList</code> implements <code>Deque</code>, it exposes both end-friendly APIs directly:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — the same LinkedList used as a queue and as a stack</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Deque</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">queue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">LinkedList</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">queue</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="s">&quot;first&quot;</span><span class="p">);</span><span class="w">            </span><span class="c1">// enqueue at tail</span>
+<span class="w">        </span><span class="n">queue</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="s">&quot;second&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">poll</span><span class="p">());</span><span class="w"> </span><span class="c1">// first  (FIFO: head out)</span>
+
+<span class="w">        </span><span class="n">Deque</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">stack</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">LinkedList</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">stack</span><span class="p">.</span><span class="na">push</span><span class="p">(</span><span class="s">&quot;bottom&quot;</span><span class="p">);</span><span class="w">            </span><span class="c1">// push to head</span>
+<span class="w">        </span><span class="n">stack</span><span class="p">.</span><span class="na">push</span><span class="p">(</span><span class="s">&quot;top&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">stack</span><span class="p">.</span><span class="na">peek</span><span class="p">());</span><span class="w"> </span><span class="c1">// top    (LIFO: head in)</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">stack</span><span class="p">.</span><span class="na">pop</span><span class="p">());</span><span class="w">  </span><span class="c1">// top</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>offer</code>/<code>poll</code>/<code>peek</code> are the queue vocabulary (they return <code>null</code> on empty rather than throwing); <code>push</code>/<code>pop</code> are the stack vocabulary. Both act on the head for stack semantics and on opposite ends for queue semantics.</p>
+<blockquote class="callout callout--note">
+<p>Memory aid
+<code>LinkedList</code> = "cheap ends, expensive middle". <code>ArrayList</code> = "cheap middle-by-index, expensive middle-by-insert".</p>
+</blockquote>
+<h2 id="7-vector-the-legacy-synchronized-list">7. Vector: The Legacy Synchronized List</h2>
+<p><code>Vector</code> predates the Collections Framework (Java 1.0) and is, structurally, an <code>ArrayList</code> that makes a different concurrency choice.</p>
+<ul>
+<li><strong>Every public method is <code>synchronized</code>.</strong> A single lock guards the whole object, so concurrent calls are serialized. This makes individual operations thread-safe but limits throughput.</li>
+<li><strong>Growth by 2x (or by <code>capacityIncrement</code>).</strong> When full, <code>Vector</code> doubles its capacity, or grows by the <code>capacityIncrement</code> you passed to the constructor if it is non-zero. This is more aggressive than <code>ArrayList</code>'s 1.5x.</li>
+<li><strong><code>Enumeration</code>.</strong> It exposes the older <code>elements()</code> cursor returning an <code>Enumeration</code>, alongside the modern <code>Iterator</code>.</li>
+<li><strong>Largely obsolete.</strong> Synchronizing every method is coarse and slow; modern code prefers <code>ArrayList</code> for single-threaded use and <code>CopyOnWriteArrayList</code> or <code>Collections.synchronizedList</code> for concurrent use (Lecture 33 and Lecture 56).</li>
+</ul>
+<blockquote class="callout callout--important">
+<p>Important
+<code>Vector</code> being synchronized does <strong>not</strong> make compound actions atomic. Checking <code>size()</code> then calling <code>get(...)</code> is still a race unless you hold the same lock across both calls. Synchronization on each method is not the same as synchronization on your sequence of methods.</p>
+</blockquote>
+<h2 id="8-stack-lifo-on-top-of-vector">8. Stack: LIFO on Top of Vector</h2>
+<p><code>Stack</code> extends <code>Vector</code> and adds the last-in-first-out discipline: <code>push</code>, <code>pop</code>, <code>peek</code>, <code>empty</code> and <code>search</code>. Inheriting from <code>Vector</code> means it also inherits all the <code>List</code> methods, including indexed access and insertion — so you can legally <code>add(0, x)</code> a <code>Stack</code>, which breaks the LIFO abstraction.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — legacy Stack versus the modern replacement ArrayDeque</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Stack</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">legacy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Stack</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">legacy</span><span class="p">.</span><span class="na">push</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="w">        </span><span class="n">legacy</span><span class="p">.</span><span class="na">push</span><span class="p">(</span><span class="mi">2</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">legacy</span><span class="p">.</span><span class="na">pop</span><span class="p">());</span><span class="w">   </span><span class="c1">// 2</span>
+
+<span class="w">        </span><span class="n">Deque</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">modern</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayDeque</span><span class="o">&lt;&gt;</span><span class="p">();</span><span class="w">  </span><span class="c1">// preferred stack</span>
+<span class="w">        </span><span class="n">modern</span><span class="p">.</span><span class="na">push</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="w">        </span><span class="n">modern</span><span class="p">.</span><span class="na">push</span><span class="p">(</span><span class="mi">2</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">modern</span><span class="p">.</span><span class="na">pop</span><span class="p">());</span><span class="w">   </span><span class="c1">// 2</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The standard advice is to prefer <code>ArrayDeque</code> for a stack: it is not synchronized, it is backed by a resizable circular array, and it is not encumbered with the <code>List</code> methods that corrupt LIFO semantics.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why is <code>Stack</code> considered a design mistake?" Because it extends <code>Vector</code> rather than composing it. Inheriting <code>List</code> means callers can insert and remove by index, leaving a <code>Stack</code> in a state that is no longer a stack. <code>ArrayDeque</code> avoids the inheritance leak.</p>
+</blockquote>
+<h2 id="9-arraylist-vs-linkedlist-vs-vector-vs-stack">9. ArrayList vs LinkedList vs Vector vs Stack</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>ArrayList</th>
+<th>LinkedList</th>
+<th>Vector</th>
+<th>Stack</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Structure</td>
+<td>Resizable <code>Object[]</code></td>
+<td>Doubly linked nodes</td>
+<td>Resizable <code>Object[]</code></td>
+<td><code>Vector</code> subclass</td>
+</tr>
+<tr>
+<td>Random access <code>get(i)</code></td>
+<td>O(1)</td>
+<td>O(n)</td>
+<td>O(1)</td>
+<td>O(1)</td>
+</tr>
+<tr>
+<td>Add/remove at ends</td>
+<td>amortized O(1) at tail</td>
+<td>O(1) at either end</td>
+<td>amortized O(1) at tail</td>
+<td>O(1) at tail</td>
+</tr>
+<tr>
+<td>Add/remove in middle</td>
+<td>O(n)</td>
+<td>O(n) (walk plus relink)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td>Synchronized</td>
+<td>No</td>
+<td>No</td>
+<td>Yes (every method)</td>
+<td>Yes (inherited)</td>
+</tr>
+<tr>
+<td>Legacy</td>
+<td>No</td>
+<td>No</td>
+<td>Yes (Java 1.0)</td>
+<td>Yes (Java 1.0)</td>
+</tr>
+<tr>
+<td>Special API</td>
+<td><code>ensureCapacity</code>, <code>trimToSize</code></td>
+<td><code>Deque</code> queue/stack methods</td>
+<td><code>Enumeration</code></td>
+<td><code>push</code>/<code>pop</code>/<code>peek</code>/<code>empty</code>/<code>search</code></td>
+</tr>
+<tr>
+<td>Best used when</td>
+<td>Frequent indexed reads, appends</td>
+<td>Frequent add/remove at ends, queue or stack</td>
+<td>Almost never; legacy code only</td>
+<td>Almost never; use <code>ArrayDeque</code></td>
+</tr>
+</tbody>
+</table>
+<p>Reading the table: <code>ArrayList</code> wins the common case of "read a lot, append a lot". <code>LinkedList</code> wins a narrow case of end edits. <code>Vector</code> and <code>Stack</code> survive mostly for backward compatibility.</p>
+<h2 id="10-big-o-of-the-core-list-operations">10. Big-O of the Core List Operations</h2>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>ArrayList</th>
+<th>LinkedList</th>
+<th>Vector</th>
+<th>Stack</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>get(index)</code></td>
+<td>O(1)</td>
+<td>O(n)</td>
+<td>O(1)</td>
+<td>O(1)</td>
+</tr>
+<tr>
+<td><code>add(end)</code></td>
+<td>amortized O(1)</td>
+<td>O(1)</td>
+<td>amortized O(1)</td>
+<td>amortized O(1)</td>
+</tr>
+<tr>
+<td><code>add(index)</code></td>
+<td>O(n)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td><code>remove(index)</code></td>
+<td>O(n)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td><code>remove(Object)</code></td>
+<td>O(n)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td><code>contains(Object)</code></td>
+<td>O(n)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td><code>add(front)</code></td>
+<td>O(n)</td>
+<td>O(1)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td><code>remove(front)</code></td>
+<td>O(n)</td>
+<td>O(1)</td>
+<td>O(n)</td>
+<td>O(n)</td>
+</tr>
+</tbody>
+</table>
+<p>The asymmetry is the whole lesson: <code>ArrayList</code> is index-cheap and shift-expensive; <code>LinkedList</code> is end-cheap and index-expensive. Neither is universally "faster".</p>
+<h2 id="11-arraylist-vs-a-plain-array">11. ArrayList vs a Plain Array</h2>
+<p>An array is the primitive structure; <code>ArrayList</code> is a wrapper that trades a little overhead for flexibility.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th><code>int[]</code> / <code>E[]</code> array</th>
+<th><code>ArrayList&lt;E&gt;</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Size</td>
+<td>Fixed at creation</td>
+<td>Resizable</td>
+</tr>
+<tr>
+<td>Length / size</td>
+<td><code>arr.length</code> (field)</td>
+<td><code>list.size()</code> (method)</td>
+</tr>
+<tr>
+<td>Primitives</td>
+<td>Holds <code>int</code>, <code>double</code>, ... directly</td>
+<td>Holds only objects; primitives are boxed</td>
+</tr>
+<tr>
+<td>Generics</td>
+<td>No; arrays are covariant and unchecked</td>
+<td>Yes; compile-time type safety</td>
+</tr>
+<tr>
+<td>Fixed overhead</td>
+<td>None beyond the data</td>
+<td>Object header plus capacity slack</td>
+</tr>
+<tr>
+<td>Capacity vs size</td>
+<td>Same thing</td>
+<td><code>capacity</code> &gt;= <code>size()</code>; slack is spare room</td>
+</tr>
+<tr>
+<td>Shrink / reserve</td>
+<td>Not possible</td>
+<td><code>trimToSize()</code>, <code>ensureCapacity(n)</code></td>
+</tr>
+<tr>
+<td>Indexed read</td>
+<td><code>arr[i]</code></td>
+<td><code>list.get(i)</code></td>
+</tr>
+<tr>
+<td>Header position</td>
+<td><code>arr[0]</code></td>
+<td><code>list.get(0)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Two tuning levers follow. <code>trimToSize()</code> shrinks the backing array down to the current <code>size</code> to release the slack, and <code>ensureCapacity(n)</code> pre-allocates room up front so a burst of appends does not trigger repeated 1.5x copies. When the final size is known in advance, passing an initial capacity (for example <code>new ArrayList&lt;&gt;(10_000)</code>) avoids all the intermediate reallocations.</p>
+<blockquote class="callout callout--note">
+<p>Memory aid
+<strong>Array = length, fixed, primitives. ArrayList = size(), resizable, objects.</strong> The extra layer buys growth and methods at the cost of boxing and overhead.</p>
+</blockquote>
+<h2 id="12-the-classic-trap-removeint-vs-removeobject">12. The Classic Trap: remove(int) vs remove(Object)</h2>
+<p>The same call looks like it does one thing and does another, depending purely on the argument's static type.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — index removal versus object removal</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">list</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">20</span><span class="p">,</span><span class="w"> </span><span class="mi">30</span><span class="p">,</span><span class="w"> </span><span class="mi">20</span><span class="p">));</span>
+
+<span class="w">        </span><span class="n">list</span><span class="p">.</span><span class="na">remove</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w">                     </span><span class="c1">// remove INDEX 1 -&gt; removes 20</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">list</span><span class="p">);</span><span class="w">           </span><span class="c1">// [10, 30, 20]</span>
+
+<span class="w">        </span><span class="n">list</span><span class="p">.</span><span class="na">remove</span><span class="p">(</span><span class="n">Integer</span><span class="p">.</span><span class="na">valueOf</span><span class="p">(</span><span class="mi">20</span><span class="p">));</span><span class="w">   </span><span class="c1">// remove OBJECT 20 -&gt; first match</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">list</span><span class="p">);</span><span class="w">           </span><span class="c1">// [10, 30]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The compiler picks the most specific overload. The literal <code>1</code> is an <code>int</code>, so it matches <code>remove(int index)</code> and deletes position 1. Wrapping the value with <code>Integer.valueOf(20)</code> produces an <code>Integer</code> object, so it matches <code>remove(Object)</code> and deletes the first element equal to 20.</p>
+<blockquote class="callout callout--trap">
+<p>Trap
+With <code>List&lt;Integer&gt;</code>, <code>list.remove(1)</code> deletes the value at index 1, not the number 1. To delete the object 1, write <code>list.remove(Integer.valueOf(1))</code>. The same confusion exists between <code>add(int index, E)</code> and <code>add(E)</code> when <code>E</code> is <code>Integer</code>.</p>
+</blockquote>
+<h2 id="13-pitfalls-and-common-errors">13. Pitfalls and Common Errors</h2>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>What goes wrong</th>
+<th>Correct approach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>for (int i = 0; i &lt; list.size(); i++) list.get(i)</code> on a <code>LinkedList</code></td>
+<td>Each <code>get(i)</code> walks from an end, so the loop is O(n^2)</td>
+<td>Use the for-each loop or an <code>Iterator</code> (O(n) total)</td>
+</tr>
+<tr>
+<td>Removing during a for-each loop</td>
+<td><code>ConcurrentModificationException</code> from the fail-fast iterator</td>
+<td>Remove through <code>Iterator.remove()</code> or <code>removeIf(...)</code></td>
+</tr>
+<tr>
+<td>Treating <code>subList</code> as a copy</td>
+<td>It is a <strong>view</strong>; a structural change to the parent invalidates it</td>
+<td>Copy the range with <code>new ArrayList&lt;&gt;(parent.subList(a, b))</code> when you need an independent list</td>
+</tr>
+<tr>
+<td>Forgetting <code>Vector</code> and <code>Stack</code> lock every method</td>
+<td>Slower than <code>ArrayList</code> with no benefit in single-threaded code</td>
+<td>Use <code>ArrayList</code>; use <code>CopyOnWriteArrayList</code> for concurrency</td>
+</tr>
+<tr>
+<td>Assuming <code>ArrayList</code> is thread-safe</td>
+<td>Concurrent writes corrupt state or throw</td>
+<td>Synchronize externally or use a concurrent list (Lectures 33, 56)</td>
+</tr>
+<tr>
+<td>Autoboxing on every write and read</td>
+<td><code>List&lt;Integer&gt;</code> allocates/boxes each value; reading a <code>null</code> unboxes to <code>NullPointerException</code></td>
+<td>Prefer plain arrays or primitives when the loop is hot; guard nulls</td>
+</tr>
+<tr>
+<td>Passing a type to <code>remove</code> by accident</td>
+<td><code>remove(int)</code> fires when you meant <code>remove(Object)</code></td>
+<td>Use <code>Integer.valueOf(...)</code> to force object removal</td>
+</tr>
+<tr>
+<td>Trusting <code>ensureCapacity</code> to set <code>size</code></td>
+<td>Capacity is spare room, not elements; <code>size()</code> stays 0</td>
+<td>Capacity is not content; use <code>add</code> to populate</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+Pick the implementation from the operation you do most: index reads point to <code>ArrayList</code>, end edits point to <code>LinkedList</code>, and concurrency points to a concurrent collection — never to <code>Vector</code> by reflex.</p>
+</blockquote>
+<h2 id="14-myth-vs-reality">14. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"All <code>List</code> implementations perform the same."</td>
+<td>Same interface, very different costs: <code>ArrayList</code> is O(1) random access, <code>LinkedList</code> is O(n).</td>
+</tr>
+<tr>
+<td>"<code>new ArrayList&lt;&gt;()</code> immediately allocates ten slots."</td>
+<td>Default capacity is 10, but the array is allocated lazily on the first <code>add</code>.</td>
+</tr>
+<tr>
+<td>"<code>LinkedList</code> is always faster for insertion."</td>
+<td>Only at the ends. Inserting in the middle still needs an O(n) walk to find the position.</td>
+</tr>
+<tr>
+<td>"<code>Vector</code> is the thread-safe choice, so prefer it."</td>
+<td>Its coarse per-method lock is slow; <code>CopyOnWriteArrayList</code> / <code>Collections.synchronizedList</code> are the modern options.</td>
+</tr>
+<tr>
+<td>"<code>subList</code> returns a new independent list."</td>
+<td>It returns a view backed by the parent; structural changes to the parent invalidate it.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="15-common-trap-questions">15. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — Index or object: "For <code>List&lt;Integer&gt; l = new ArrayList&lt;&gt;(List.of(5, 6, 7));</code>, what does <code>l.remove(1)</code> do?"
+It removes the element at <strong>index 1</strong> (the value 6), returning the removed element. To remove the value 1, call <code>l.remove(Integer.valueOf(1))</code>.</p>
+<p>Trap 2 — The linked-list loop: "Is <code>for (int i = 0; i &lt; list.size(); i++) sum += list.get(i);</code> fine on a <code>LinkedList</code>?"
+No. Each <code>get(i)</code> walks the chain, making the loop O(n^2). Use the for-each loop, which uses the iterator and is O(n).</p>
+<p>Trap 3 — Capacity versus size: "After <code>new ArrayList&lt;&gt;(100)</code>, what is <code>size()</code>?"
+0. The constructor sets the initial <strong>capacity</strong> to 100; no elements exist yet, so <code>size()</code> is 0.</p>
+<p>Trap 4 — The subList view: "<code>List&lt;Integer&gt; sub = list.subList(0, 2); list.add(99);</code> then <code>sub.get(0)</code> — what happens?"
+Accessing the view after a structural change to the parent generally throws <code>ConcurrentModificationException</code>. It is a view, not a snapshot.</p>
+<p>Trap 5 — Fail-fast during iteration: "Can I call <code>list.remove(...)</code> inside a for-each over the same list?"
+No: the iterator detects the structural change and throws <code>ConcurrentModificationException</code>. Remove through the iterator, or use <code>removeIf</code>.</p>
+<p>Trap 6 — Growth factor: "How much does <code>ArrayList</code> grow by, and how much does <code>Vector</code>?"
+<code>ArrayList</code>: 1.5x (<code>oldCapacity + (oldCapacity &gt;&gt; 1)</code>). <code>Vector</code>: 2x, or by <code>capacityIncrement</code> if one was supplied.</p>
+<p>Trap 7 — Unboxing a null: "<code>List&lt;Integer&gt; l</code> contains <code>null</code>; what does <code>int x = l.get(0);</code> do?"
+It unboxes <code>null</code>, throwing <code>NullPointerException</code> at the assignment. Use <code>Integer x = l.get(0);</code> to avoid the unboxing.</p>
+</blockquote>
+<h2 id="16-points-to-remember">16. Points to Remember</h2>
+<ol>
+<li><code>List</code> is an ordered, index-addressed <code>Collection</code>; it allows duplicates and (usually) <code>null</code>.</li>
+<li>Index methods are <code>get</code>, <code>set</code>, <code>add(int, E)</code>, <code>remove(int)</code>, <code>indexOf</code>, <code>lastIndexOf</code>, <code>subList</code>, <code>listIterator</code> and <code>sort</code>.</li>
+<li><code>ArrayList</code> is backed by a resizable <code>Object[]</code>; default capacity is 10, allocated lazily on first <code>add</code>.</li>
+<li><code>ArrayList</code> grows by 1.5x via <code>oldCapacity + (oldCapacity &gt;&gt; 1)</code> and shifts elements with <code>System.arraycopy</code>.</li>
+<li><code>ArrayList</code> gives O(1) random access, amortized O(1) append, and O(n) middle insert/delete, and is fail-fast.</li>
+<li><code>LinkedList</code> is a doubly linked list: O(1) at both ends, O(n) random access, per-node memory overhead, and it implements <code>Deque</code>.</li>
+<li><code>Vector</code> is legacy: every method is <code>synchronized</code>, growth is 2x (or by <code>capacityIncrement</code>), and it exposes <code>Enumeration</code>.</li>
+<li><code>Stack</code> extends <code>Vector</code> and adds LIFO <code>push</code>/<code>pop</code>/<code>peek</code>/<code>empty</code>/<code>search</code>; prefer <code>ArrayDeque</code> for a stack.</li>
+<li><code>subList</code> returns a view, not a copy; a structural change to the parent invalidates it.</li>
+<li><code>remove(int)</code> removes by index while <code>remove(Object)</code> removes by value — with <code>List&lt;Integer&gt;</code>, use <code>Integer.valueOf(...)</code> to force the object overload; prefer <code>ArrayDeque</code> and concurrent collections over <code>Vector</code>/<code>Stack</code>.</li>
+</ol>
+<h2 id="17-likely-interview-questions">17. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What is the <code>List</code> interface?</td>
+<td>A subinterface of <code>Collection</code> that adds ordering, zero-based indexing and duplicate tolerance.</td>
+</tr>
+<tr>
+<td>ArrayList vs LinkedList?</td>
+<td><code>ArrayList</code> is a resizable array with O(1) random access; <code>LinkedList</code> is a doubly linked list with O(1) end edits but O(n) access.</td>
+</tr>
+<tr>
+<td>Why is <code>ArrayList</code> good for random access?</td>
+<td>Its backing array allows index arithmetic in constant time: <code>elementData[index]</code>.</td>
+</tr>
+<tr>
+<td>How does <code>ArrayList</code> grow?</td>
+<td>When full, a new array of <code>oldCapacity + (oldCapacity &gt;&gt; 1)</code> (about 1.5x) is created and the elements copied.</td>
+</tr>
+<tr>
+<td>Why is <code>ArrayList.add</code> amortized O(1)?</td>
+<td>Geometric growth bounds total copying by a constant multiple of n, so the average append is constant.</td>
+</tr>
+<tr>
+<td>When would you choose <code>LinkedList</code>?</td>
+<td>When most operations add or remove at the ends, or when you need the <code>Deque</code> queue/stack API.</td>
+</tr>
+<tr>
+<td>What is <code>Vector</code>, and why is it obsolete?</td>
+<td>A legacy synchronized list from Java 1.0; its per-method lock is coarse and slow, so <code>ArrayList</code> plus a concurrent list is preferred.</td>
+</tr>
+<tr>
+<td>Why prefer <code>ArrayDeque</code> over <code>Stack</code>?</td>
+<td><code>Stack</code> extends <code>Vector</code>, so it leaks <code>List</code> methods that break LIFO; <code>ArrayDeque</code> is faster and not synchronized.</td>
+</tr>
+<tr>
+<td>What does <code>remove(1)</code> do on <code>List&lt;Integer&gt;</code>?</td>
+<td>It removes the element at index 1. Use <code>remove(Integer.valueOf(1))</code> to remove the value 1.</td>
+</tr>
+<tr>
+<td>Is <code>subList</code> a copy?</td>
+<td>No, it is a view backed by the parent list; structural changes to the parent invalidate it.</td>
+</tr>
+<tr>
+<td>What is fail-fast iteration?</td>
+<td>An iterator throws <code>ConcurrentModificationException</code> when it detects a structural change made outside the iterator.</td>
+</tr>
+<tr>
+<td>Are <code>ArrayList</code> and <code>LinkedList</code> thread-safe?</td>
+<td>No. Use <code>Collections.synchronizedList</code>, <code>CopyOnWriteArrayList</code>, or external locking (Lectures 33 and 56).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="18-final-summary">18. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>Collection  ⊃  List            (ordered, indexed, duplicates allowed)
+   |
+   +-- ArrayList  : Object[]   -&gt; O(1) get, amortized O(1) add, 1.5x growth, fail-fast, not synchronized
+   +-- LinkedList : nodes      -&gt; O(1) ends, O(n) get, implements Deque (queue/stack), not synchronized
+   +-- Vector     : Object[]   -&gt; every method synchronized, 2x growth, Enumeration, legacy
+   +-- Stack      : Vector     -&gt; LIFO push/pop/peek, legacy; prefer ArrayDeque
+
+index methods: get set add(i) remove(i) indexOf lastIndexOf subList listIterator sort
+classic trap: remove(int) = index   ≠   remove(Object) = value
+array vs ArrayList: fixed vs resizable · primitives vs boxed · length vs size()
+                    capacity &gt;= size() · trimToSize · ensureCapacity
+</code></pre></div>
+
+<ul>
+<li><code>List</code> → the interface: order, index, duplicates; the implementation decides the cost.</li>
+<li><code>ArrayList</code> → default choice: array-backed, O(1) access, amortized O(1) append, lazy capacity 10, 1.5x growth.</li>
+<li><code>LinkedList</code> → end-editing and <code>Deque</code>: O(1) ends, O(n) access, extra node memory.</li>
+<li><code>Vector</code> / <code>Stack</code> → legacy: synchronized everywhere, 2x growth, LIFO on a leaky <code>List</code> base; prefer <code>ArrayDeque</code> and concurrent lists.</li>
+<li>Trap → <code>remove(int)</code> is by index, <code>remove(Object)</code> is by value; <code>subList</code> is a view; fail-fast iterators punish mid-loop edits.</li>
+<li>Array vs ArrayList → fixed versus resizable, primitives versus boxed, <code>length</code> versus <code>size()</code>, with <code>trimToSize</code> and <code>ensureCapacity</code> as tuning levers.</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+The <code>List</code> interface fixes the contract, never the cost: choose <code>ArrayList</code> for indexed reads, <code>LinkedList</code> for end edits, and reach for a concurrent collection — not <code>Vector</code> — when threads are involved.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> <code>List</code> promises order, index and duplicates; <code>ArrayList</code>, <code>LinkedList</code>, <code>Vector</code> and <code>Stack</code> each pay for that promise differently, so the right pick is the one whose weak operation you never call.</p>
+<div class="pager"><a class="prev" href="lecture-31.html"><span class="dir">Previous</span><span class="ttl">Java Collection Interface Deep Dive</span></a><a class="next" href="lecture-33.html"><span class="dir">Next</span><span class="ttl">Set & Map Interface in Java</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

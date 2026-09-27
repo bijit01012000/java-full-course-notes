@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 35 · Java Queue Interface Deep Dive — Java Notes</title>
+<meta name="description" content="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="35" data-lecture-title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-35.html#1-the-queue-interface-fifo-and-the-paired-methods">1. The Queue Interface: FIFO and the Paired Methods</a></li><li><a href="lecture-35.html#2-deque-the-double-ended-queue-as-queue-and-as-stack">2. Deque: The Double-Ended Queue, as Queue and as Stack</a></li><li><a href="lecture-35.html#3-priorityqueue-a-min-heap-not-a-fifo-queue">3. PriorityQueue: A Min-Heap, Not a FIFO Queue</a></li><li><a href="lecture-35.html#4-binary-heap-theory-the-array-behind-priorityqueue">4. Binary Heap Theory: The Array Behind PriorityQueue</a></li><li><a href="lecture-35.html#5-custom-priorities-comparator-and-comparable">5. Custom Priorities: Comparator and Comparable</a></li><li><a href="lecture-35.html#6-the-heap-as-an-engine-scheduling-dijkstra-top-k">6. The Heap as an Engine: Scheduling, Dijkstra, Top-K</a></li><li><a href="lecture-35.html#7-arraydeque-vs-linkedlist-vs-priorityqueue">7. ArrayDeque vs LinkedList vs PriorityQueue</a></li><li><a href="lecture-35.html#8-heap-operation-complexities">8. Heap Operation Complexities</a></li><li><a href="lecture-35.html#9-pitfalls-and-common-errors">9. Pitfalls and Common Errors</a></li><li><a href="lecture-35.html#10-myth-vs-reality">10. Myth vs Reality</a></li><li><a href="lecture-35.html#11-common-trap-questions">11. Common Trap Questions</a></li><li><a href="lecture-35.html#12-points-to-remember">12. Points to Remember</a></li><li><a href="lecture-35.html#13-likely-interview-questions">13. Likely Interview Questions</a></li><li><a href="lecture-35.html#14-final-summary">14. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 5 · Collections, Lambdas & Streams · Lecture 35</p>
+<h1>Java Queue Interface Deep Dive | PriorityQueue & Heap Explained</h1>
+<p class="readmeta">14 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="35" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: "Java Queue Interface Deep Dive | PriorityQueue &amp; Heap Explained" (playlist map, verified). Repo evidence: 2 Demo files.</p>
+</blockquote>
+<p>Lecture 34 closed the <code>Set</code> and <code>Map</code> conversation; this lecture opens the third branch of the Collection hierarchy, the <code>Queue</code>. A queue is a <code>Collection</code> with a discipline: elements leave in a defined order rather than in whatever order they were inserted. The lecture builds that idea in three steps — the FIFO <code>Queue</code> interface and its paired method families, the double-ended <code>Deque</code> and its preferred implementation <code>ArrayDeque</code>, and finally the <code>PriorityQueue</code>, which abandons FIFO entirely and serves elements by priority using a binary heap. The heap is the real subject underneath: once its array representation and two repair operations (sift-up and sift-down) are clear, <code>PriorityQueue</code> stops being a mystery and becomes a predictable structure.</p>
+<h2 id="1-the-queue-interface-fifo-and-the-paired-methods">1. The Queue Interface: FIFO and the Paired Methods</h2>
+<p>A <strong><code>Queue&lt;E&gt;</code></strong> is a subinterface of <code>Collection&lt;E&gt;</code> that models a first-in-first-out (FIFO) line: elements are inserted at the <strong>tail</strong> and removed from the <strong>head</strong>, so the element that waited longest leaves first. It adds insertion, removal and inspection at the head while keeping everything inherited from <code>Collection</code>. The nesting is:</p>
+<div class="highlight"><pre><span></span><code>Iterable  ⊃  Collection  ⊃  Queue  ⊃  Deque  ⊃  (ArrayDeque, LinkedList)
+                                   +--  PriorityQueue   (implements Queue, not Deque)
+</code></pre></div>
+
+<p>What makes <code>Queue</code> distinctive is that every basic operation comes in <strong>two forms</strong>:</p>
+<ol>
+<li>One form <strong>throws</strong> an exception when the operation cannot be carried out (an empty queue, or a capacity-limited queue that is full).</li>
+<li>The other form <strong>returns a sentinel</strong> — <code>null</code> or <code>false</code> — instead of throwing, which makes it convenient in loops and conditionals.</li>
+</ol>
+<p>The full pairing:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Throwing form</th>
+<th>Returns sentinel on failure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Insert at tail</td>
+<td><code>add(e)</code> → throws <code>IllegalStateException</code> if no capacity</td>
+<td><code>offer(e)</code> → returns <code>false</code></td>
+</tr>
+<tr>
+<td>Remove head</td>
+<td><code>remove()</code> → throws <code>NoSuchElementException</code> if empty</td>
+<td><code>poll()</code> → returns <code>null</code></td>
+</tr>
+<tr>
+<td>Examine head (no removal)</td>
+<td><code>element()</code> → throws <code>NoSuchElementException</code> if empty</td>
+<td><code>peek()</code> → returns <code>null</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--important">
+<p>Important
+The sentinel form is usually the right default. <code>offer</code>, <code>poll</code> and <code>peek</code> never throw for an empty queue, so the classic drain loop is <code>while ((e = q.poll()) != null) { ... }</code>. The throwing forms exist mainly for bounded queues where a full queue is a genuine programming error.</p>
+<p>Memory aid
+<strong>offer = "try to insert", poll = "take or null", peek = "look don't touch".</strong> Throwing twins: add, remove, element.</p>
+</blockquote>
+<h2 id="2-deque-the-double-ended-queue-as-queue-and-as-stack">2. Deque: The Double-Ended Queue, as Queue and as Stack</h2>
+<p>A <strong><code>Deque&lt;E&gt;</code></strong> ("deck", double-ended queue) extends <code>Queue</code> and adds operations at <strong>both</strong> ends. It exposes a full set of first/last methods: <code>addFirst</code>, <code>addLast</code>, <code>offerFirst</code>, <code>offerLast</code>, <code>removeFirst</code>, <code>removeLast</code>, <code>pollFirst</code>, <code>pollLast</code>, <code>getFirst</code>, <code>getLast</code>, <code>peekFirst</code>, <code>peekLast</code>. It also carries the stack vocabulary <code>push</code> (equivalent to <code>addFirst</code>) and <code>pop</code> (equivalent to <code>removeFirst</code>).</p>
+<p>Two implementations ship with the JDK:</p>
+<ul>
+<li><strong><code>ArrayDeque</code></strong> — backed by a <strong>resizable circular array</strong> with <code>head</code> and <code>tail</code> indices. It is not synchronized, is fast, and is the JDK-recommended default for both queue and stack use. <code>ArrayDeque</code> forbids <code>null</code> elements.</li>
+<li><strong><code>LinkedList</code></strong> — backed by doubly linked nodes (Lecture 32). It also implements <code>List</code>, so it is a versatile but heavier choice with per-node memory overhead.</li>
+</ul>
+<p>Used as a <strong>queue</strong>, elements enter at the tail and leave at the head; used as a <strong>stack</strong>, both entry and exit happen at the head (LIFO). Because <code>ArrayDeque</code> implements both vocabularies without inheriting the <code>List</code> methods that corrupt LIFO (the flaw of legacy <code>Stack</code>), it is the modern replacement for <code>Stack</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — ArrayDeque as a queue (FIFO) and as a stack (LIFO)</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Deque</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">queue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayDeque</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">queue</span><span class="p">.</span><span class="na">offerLast</span><span class="p">(</span><span class="s">&quot;first&quot;</span><span class="p">);</span><span class="w">   </span><span class="c1">// enqueue at tail</span>
+<span class="w">        </span><span class="n">queue</span><span class="p">.</span><span class="na">offerLast</span><span class="p">(</span><span class="s">&quot;second&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">peekFirst</span><span class="p">());</span><span class="w"> </span><span class="c1">// first</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">pollFirst</span><span class="p">());</span><span class="w"> </span><span class="c1">// first (FIFO: head out)</span>
+
+<span class="w">        </span><span class="n">Deque</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">stack</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayDeque</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">stack</span><span class="p">.</span><span class="na">push</span><span class="p">(</span><span class="s">&quot;bottom&quot;</span><span class="p">);</span><span class="w">       </span><span class="c1">// push to head</span>
+<span class="w">        </span><span class="n">stack</span><span class="p">.</span><span class="na">push</span><span class="p">(</span><span class="s">&quot;top&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">stack</span><span class="p">.</span><span class="na">peek</span><span class="p">());</span><span class="w"> </span><span class="c1">// top</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">stack</span><span class="p">.</span><span class="na">pop</span><span class="p">());</span><span class="w">  </span><span class="c1">// top (LIFO: head in)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why prefer <code>ArrayDeque</code> over <code>Stack</code> and over <code>LinkedList</code> for a queue?" <code>Stack</code> extends <code>Vector</code>, so it leaks indexed <code>List</code> operations and is synchronized method by method; <code>LinkedList</code> pays per-node allocation. <code>ArrayDeque</code> is a plain circular array — O(1) amortized at both ends, no locking, no list leakage.</p>
+</blockquote>
+<h2 id="3-priorityqueue-a-min-heap-not-a-fifo-queue">3. PriorityQueue: A Min-Heap, Not a FIFO Queue</h2>
+<p>A <strong><code>PriorityQueue&lt;E&gt;</code></strong> is a queue whose order is <strong>priority</strong> rather than arrival. Its head is always the <strong>least</strong> element according to natural ordering (a <strong>min-heap</strong>), or according to a supplied <code>Comparator</code>. It is explicitly <strong>not FIFO</strong>: two elements inserted in order A then B may leave B then A if B has higher priority. Ties are broken <strong>arbitrarily</strong> by the heap layout.</p>
+<p>Its core costs:</p>
+<ul>
+<li><code>peek()</code> — O(1); the minimum sits at index 0.</li>
+<li><code>offer(e)</code> / <code>add(e)</code> — O(log n); the new element is placed at the end and sifted <strong>up</strong>.</li>
+<li><code>poll()</code> / <code>remove()</code> — O(log n); the root is taken, the last element is moved to the root and sifted <strong>down</strong>.</li>
+<li><code>contains(o)</code> / <code>remove(o)</code> — O(n); locating an arbitrary element requires a linear scan because the array is only partially ordered.</li>
+</ul>
+<p>It is <strong>unbounded</strong> — it grows automatically as elements are added (an <code>int</code> capacity argument sets only an initial size). It is <strong>not thread-safe</strong>; use <code>PriorityBlockingQueue</code> when threads share it. Crucially, its <strong>iteration order is not sorted</strong>: <code>iterator()</code> walks the backing array in heap order, which is only guaranteed to have the minimum first. Only removing elements through <code>poll()</code> yields priority order.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — PriorityQueue is a min-heap: smallest first, iteration is not sorted</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">PriorityQueue</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">minHeap</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">PriorityQueue</span><span class="o">&lt;&gt;</span><span class="p">();</span>
+<span class="w">        </span><span class="n">minHeap</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="mi">50</span><span class="p">);</span>
+<span class="w">        </span><span class="n">minHeap</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span>
+<span class="w">        </span><span class="n">minHeap</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="mi">30</span><span class="p">);</span>
+<span class="w">        </span><span class="n">minHeap</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="mi">20</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">minHeap</span><span class="p">.</span><span class="na">peek</span><span class="p">());</span><span class="w">    </span><span class="c1">// 10 (minimum at the root)</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">minHeap</span><span class="p">);</span><span class="w">           </span><span class="c1">// heap order, NOT sorted</span>
+
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">minHeap</span><span class="p">.</span><span class="na">isEmpty</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">print</span><span class="p">(</span><span class="n">minHeap</span><span class="p">.</span><span class="na">poll</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="p">);</span><span class="w"> </span><span class="c1">// 10 20 30 50 (priority order)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<blockquote class="callout callout--trap">
+<p>Trap
+<code>System.out.println(pq)</code> and <code>for (int x : pq)</code> show the <strong>heap array</strong>, which is not sorted. Students routinely print a <code>PriorityQueue</code> and conclude it is broken. Draining with <code>poll()</code> is the only operation that reveals priority order.</p>
+</blockquote>
+<h2 id="4-binary-heap-theory-the-array-behind-priorityqueue">4. Binary Heap Theory: The Array Behind PriorityQueue</h2>
+<p><code>PriorityQueue</code> is built on a <strong>binary heap</strong>: a complete binary tree stored compactly in an array, with the <strong>heap property</strong> that every parent is no greater than its children (min-heap). The array indices encode the tree without pointers:</p>
+<table>
+<thead>
+<tr>
+<th>Relationship</th>
+<th>Index formula</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Parent of node <code>i</code></td>
+<td><code>(i - 1) / 2</code></td>
+</tr>
+<tr>
+<td>Left child of node <code>i</code></td>
+<td><code>2 * i + 1</code></td>
+</tr>
+<tr>
+<td>Right child of node <code>i</code></td>
+<td><code>2 * i + 2</code></td>
+</tr>
+<tr>
+<td>Root</td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td>Last element</td>
+<td><code>size - 1</code></td>
+</tr>
+</tbody>
+</table>
+<p>Two repair operations keep the property intact:</p>
+<ul>
+<li><strong>Sift-up (bubble-up)</strong> on insert: put the new element at <code>size</code> and repeatedly swap it with its parent while it is smaller. At most the height of the tree, so O(log n).</li>
+<li><strong>Sift-down (bubble-down)</strong> on extract: move the last element to the root, then repeatedly swap it with its smaller child while it is larger than that child. Also O(log n).</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — heap index arithmetic mirroring PriorityQueue&#39;s internal array</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">parent</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">left</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="p">)</span><span class="w">   </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">right</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="p">)</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">parent</span><span class="p">(</span><span class="n">i</span><span class="p">));</span><span class="w"> </span><span class="c1">// 1</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">left</span><span class="p">(</span><span class="n">i</span><span class="p">));</span><span class="w">   </span><span class="c1">// 9</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">right</span><span class="p">(</span><span class="n">i</span><span class="p">));</span><span class="w">  </span><span class="c1">// 10</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Building</strong> a heap from n unordered elements costs <strong>O(n)</strong>, not O(n log n): the bottom-up <strong>build-heap</strong> sifts down only the internal nodes, and the total work telescopes to linear. <strong>Heapsort</strong> then extracts the minimum n times at O(log n) each, giving O(n log n) with O(1) extra space — the theoretical ancestor of <code>PriorityQueue</code>.</p>
+<blockquote class="callout callout--note">
+<p>Memory aid
+<strong>Insert swims up; extract sinks down.</strong> The parent of <code>i</code> is its floor-half, and a heap is only <em>partially</em> ordered: parent &lt;= children, siblings and cousins unconstrained.</p>
+</blockquote>
+<h2 id="5-custom-priorities-comparator-and-comparable">5. Custom Priorities: Comparator and Comparable</h2>
+<p>The natural ordering of a <code>PriorityQueue</code> is ascending (min-first). To get a <strong>max-heap</strong>, pass <code>Comparator.reverseOrder()</code>. For user-defined types, <code>PriorityQueue</code> needs a way to compare them, and there are two routes:</p>
+<ul>
+<li>Make the class implement <strong><code>Comparable</code></strong> and define <code>compareTo</code> — natural ordering (cross-ref <strong>Lecture 36</strong>, Comparable and the <code>Collections</code> class).</li>
+<li>Pass a <strong><code>Comparator</code></strong> to the constructor, overriding natural order — including lambdas and method references (cross-ref <strong>Lecture 37/38</strong>, Comparator and lambdas).</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — a max-heap via Comparator.reverseOrder()</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">PriorityQueue</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">maxHeap</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">PriorityQueue</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">Comparator</span><span class="p">.</span><span class="na">reverseOrder</span><span class="p">());</span>
+<span class="w">        </span><span class="n">maxHeap</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="mi">50</span><span class="p">);</span>
+<span class="w">        </span><span class="n">maxHeap</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span>
+<span class="w">        </span><span class="n">maxHeap</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="mi">30</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">maxHeap</span><span class="p">.</span><span class="na">peek</span><span class="p">());</span><span class="w"> </span><span class="c1">// 50 (largest first)</span>
+
+<span class="w">        </span><span class="c1">// Custom priority: longer strings first, via a lambda Comparator</span>
+<span class="w">        </span><span class="n">PriorityQueue</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">byLength</span><span class="w"> </span><span class="o">=</span>
+<span class="w">            </span><span class="k">new</span><span class="w"> </span><span class="n">PriorityQueue</span><span class="o">&lt;&gt;</span><span class="p">((</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">b</span><span class="p">.</span><span class="na">length</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="na">length</span><span class="p">());</span>
+<span class="w">        </span><span class="n">byLength</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="s">&quot;hi&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">byLength</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="s">&quot;hello&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">byLength</span><span class="p">.</span><span class="na">offer</span><span class="p">(</span><span class="s">&quot;hey&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">byLength</span><span class="p">.</span><span class="na">poll</span><span class="p">());</span><span class="w"> </span><span class="c1">// hello</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<blockquote class="callout callout--important">
+<p>Important
+A <code>Comparator</code> must be <strong>consistent</strong> with the elements it compares; a comparator that contradicts <code>equals</code> is legal but surprising, and one that contradicts itself (e.g., subtracting large <code>int</code>s and overflowing) can leave the heap in an order the JVM never promised. If elements are not <code>Comparable</code> and no <code>Comparator</code> is supplied, <code>offer</code> throws <code>ClassCastException</code> at insertion time.</p>
+</blockquote>
+<h2 id="6-the-heap-as-an-engine-scheduling-dijkstra-top-k">6. The Heap as an Engine: Scheduling, Dijkstra, Top-K</h2>
+<p>The heap is not an academic artifact; it is the workhorse behind several canonical algorithms:</p>
+<ul>
+<li><strong>Priority scheduling</strong> — an operating system or task runner picks the highest-priority ready job next; a heap gives O(log n) insertion and O(log n) extraction.</li>
+<li><strong>Dijkstra's shortest path</strong> — the frontier of unvisited vertices is a min-priority queue keyed by tentative distance; each relaxation is an <code>offer</code> or a decrease-key, giving O((V + E) log V) with a binary heap.</li>
+<li><strong>Top-k</strong> — to find the k largest items from a stream, keep a <strong>min-heap of size k</strong>; the root is the smallest of the current best, so any new element larger than the root replaces it in O(log k), and the final heap holds the k largest.</li>
+<li><strong>Event simulation, Huffman coding, A* search</strong> — all select the minimum (or maximum) from a changing set as their inner loop.</li>
+</ul>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why a <strong>min</strong>-heap for the <strong>largest</strong> k elements?" Because the root is the weakest member of the current top-k. If the new element beats the root, evict the root and insert the newcomer; if it does not, discard it. A max-heap would force you to scan the whole heap to find the weakest.</p>
+</blockquote>
+<h2 id="7-arraydeque-vs-linkedlist-vs-priorityqueue">7. ArrayDeque vs LinkedList vs PriorityQueue</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th><code>ArrayDeque</code></th>
+<th><code>LinkedList</code></th>
+<th><code>PriorityQueue</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Backing structure</td>
+<td>Resizable circular array</td>
+<td>Doubly linked nodes</td>
+<td>Binary heap in an array</td>
+</tr>
+<tr>
+<td>Ordering</td>
+<td>FIFO as queue, LIFO as stack</td>
+<td>FIFO as queue, LIFO as stack</td>
+<td>Priority order (min-heap by default)</td>
+</tr>
+<tr>
+<td>Access to middle</td>
+<td>Not supported</td>
+<td>O(n) by walk</td>
+<td>O(n) by scan</td>
+</tr>
+<tr>
+<td>Ends / head</td>
+<td>Amortized O(1) at both ends</td>
+<td>O(1) at both ends</td>
+<td>O(1) peek, O(log n) insert/extract</td>
+</tr>
+<tr>
+<td><code>null</code> allowed</td>
+<td>No</td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Synchronized</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Iteration order</td>
+<td>Insertion order (front to back)</td>
+<td>Insertion order</td>
+<td>Heap order, <strong>not sorted</strong></td>
+</tr>
+<tr>
+<td>Best used when</td>
+<td>Default queue/stack</td>
+<td>Mixed <code>List</code> plus <code>Deque</code> needs</td>
+<td>Serving elements by priority</td>
+</tr>
+</tbody>
+</table>
+<p>Reading the table: <code>ArrayDeque</code> and <code>LinkedList</code> preserve arrival order and differ only in backing; <code>PriorityQueue</code> is a different contract altogether and should never be described as a queue that "also happens" to reorder.</p>
+<h2 id="8-heap-operation-complexities">8. Heap Operation Complexities</h2>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Cost</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>peek()</code> / <code>element()</code></td>
+<td>O(1)</td>
+<td>Minimum is the root at index 0</td>
+</tr>
+<tr>
+<td><code>offer(e)</code> / <code>add(e)</code></td>
+<td>O(log n)</td>
+<td>Append then sift-up along the height</td>
+</tr>
+<tr>
+<td><code>poll()</code> / <code>remove()</code></td>
+<td>O(log n)</td>
+<td>Replace root with last, sift-down</td>
+</tr>
+<tr>
+<td><code>contains(o)</code></td>
+<td>O(n)</td>
+<td>Heap is only partially ordered; linear scan</td>
+</tr>
+<tr>
+<td><code>remove(o)</code></td>
+<td>O(n)</td>
+<td>Find in O(n), then repair the heap</td>
+</tr>
+<tr>
+<td>Build heap from n items</td>
+<td>O(n)</td>
+<td>Bottom-up build-heap, linear total</td>
+</tr>
+<tr>
+<td>Heapsort (build + n extracts)</td>
+<td>O(n log n)</td>
+<td>n extractions at O(log n) each</td>
+</tr>
+<tr>
+<td>Iterate all elements</td>
+<td>O(n)</td>
+<td>Array walk, <strong>not</strong> sorted</td>
+</tr>
+</tbody>
+</table>
+<p>The asymmetry to remember: the heap optimizes <strong>repeatedly taking the extreme</strong>, not searching for an arbitrary value. The moment your workload asks "is X in here?" more often than "give me the smallest", a heap is the wrong tool.</p>
+<h2 id="9-pitfalls-and-common-errors">9. Pitfalls and Common Errors</h2>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>What goes wrong</th>
+<th>Correct approach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Expecting sorted iteration</td>
+<td>The backing array is heap-ordered, not sorted</td>
+<td>Drain with <code>poll()</code>, or copy and sort</td>
+</tr>
+<tr>
+<td>Adding <code>null</code></td>
+<td><code>PriorityQueue</code> and <code>ArrayDeque</code> forbid <code>null</code>; insertion fails with <code>NullPointerException</code> (<code>NotAllowedException</code> for some queue types)</td>
+<td>Guard for <code>null</code> before offering</td>
+</tr>
+<tr>
+<td>Assuming thread safety</td>
+<td>Concurrent access corrupts the heap silently</td>
+<td>Use <code>PriorityBlockingQueue</code> or external locking (Lectures 51, 56)</td>
+</tr>
+<tr>
+<td>Treating <code>contains</code>/<code>remove(o)</code> as cheap</td>
+<td>Both are O(n) scans</td>
+<td>Keep a companion <code>Set</code> when membership queries dominate</td>
+</tr>
+<tr>
+<td>An inconsistent <code>Comparator</code></td>
+<td>Elements become unreachable or order is violated</td>
+<td>Make the comparator total and consistent</td>
+</tr>
+<tr>
+<td>Non-comparable elements</td>
+<td><code>offer</code> throws <code>ClassCastException</code> at runtime</td>
+<td>Implement <code>Comparable</code> or pass a <code>Comparator</code></td>
+</tr>
+<tr>
+<td>Reaching for <code>Stack</code> or <code>LinkedList</code> by habit</td>
+<td>Slower, and <code>Stack</code> leaks <code>List</code> methods</td>
+<td>Prefer <code>ArrayDeque</code> for queue and stack</td>
+</tr>
+<tr>
+<td>Assuming deterministic ties</td>
+<td>Equal-priority elements may come out in any order</td>
+<td>Add a tie-breaker field to the comparator</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+Choose the queue from its ordering contract, not its convenience: use <code>ArrayDeque</code> when arrival order matters, and <code>PriorityQueue</code> only when the next element must be the most important one.</p>
+</blockquote>
+<h2 id="10-myth-vs-reality">10. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"A <code>PriorityQueue</code> is a FIFO queue."</td>
+<td>It is not FIFO; it serves the least element (or the <code>Comparator</code> ordering), regardless of arrival.</td>
+</tr>
+<tr>
+<td>"Iterating a <code>PriorityQueue</code> prints elements in priority order."</td>
+<td>Iteration is heap order, not sorted; only <code>poll()</code> yields priority order.</td>
+</tr>
+<tr>
+<td>"<code>PriorityQueue</code> is thread-safe."</td>
+<td>It is not; use <code>PriorityBlockingQueue</code> for concurrent use.</td>
+</tr>
+<tr>
+<td>"<code>peek()</code> returns the smallest element in O(log n)."</td>
+<td><code>peek()</code> is O(1) — the minimum is always the root.</td>
+</tr>
+<tr>
+<td>"Finding an element in a heap is fast because the heap is ordered."</td>
+<td>The heap is only partially ordered, so <code>contains</code> and <code>remove(Object)</code> are O(n).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="11-common-trap-questions">11. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — Sorted or not: "After inserting <code>50, 10, 30, 20</code> into a <code>PriorityQueue</code>, what does printing it show?"
+The heap array in heap order (for example <code>[10, 20, 30, 50]</code> for this input), which is <strong>not</strong> a general sorted traversal. Only repeated <code>poll()</code> returns sorted order.</p>
+<p>Trap 2 — Default direction: "By default, is a <code>PriorityQueue</code> a min-heap or a max-heap?"
+Min-heap: the head is the <strong>smallest</strong> element under natural ordering. For a max-heap pass <code>Comparator.reverseOrder()</code>.</p>
+<p>Trap 3 — Null elements: "Can a <code>PriorityQueue</code> or <code>ArrayDeque</code> hold <code>null</code>?"
+No. Both reject <code>null</code> (typically <code>NullPointerException</code>); <code>LinkedList</code> as a <code>Deque</code> does allow <code>null</code>.</p>
+<p>Trap 4 — The complex op: "What is the complexity of <code>pq.contains(x)</code>?"
+O(n). The heap only guarantees parent &lt;= children, so an arbitrary value can be anywhere and must be found by scan.</p>
+<p>Trap 5 — Priority first: "Elements inserted in the order <code>A, B, C</code> with priorities <code>3, 1, 2</code> — what is <code>poll()</code>?"
+<code>B</code>. The smallest priority wins, so arrival order is irrelevant.</p>
+<p>Trap 6 — Ties: "Two elements share the highest priority. Which leaves first?"
+Either. Ties are broken arbitrarily by the heap layout; add a secondary key to the <code>Comparator</code> for a deterministic order.</p>
+<p>Trap 7 — Deque as stack: "Which <code>Deque</code> methods implement stack push and pop?"
+<code>push</code> maps to <code>addFirst</code>; <code>pop</code> maps to <code>removeFirst</code>. <code>peek</code> maps to <code>peekFirst</code>.</p>
+</blockquote>
+<h2 id="12-points-to-remember">12. Points to Remember</h2>
+<ol>
+<li><code>Queue</code> adds FIFO insertion at the tail and removal/inspection at the head to <code>Collection</code>.</li>
+<li>Each core operation has two forms: <code>add</code>/<code>remove</code>/<code>element</code> throw, while <code>offer</code>/<code>poll</code>/<code>peek</code> return <code>false</code> or <code>null</code>.</li>
+<li><code>Deque</code> extends <code>Queue</code> with operations at both ends and adds <code>push</code>/<code>pop</code> for stack use.</li>
+<li><code>ArrayDeque</code> is a circular-array <code>Deque</code>; it is the preferred queue and stack, and it rejects <code>null</code>.</li>
+<li><code>LinkedList</code> is a node-backed <code>Deque</code> and <code>List</code>; it allows <code>null</code> but carries per-node overhead.</li>
+<li><code>PriorityQueue</code> is a <strong>min-heap</strong> ordered naturally or by a <code>Comparator</code>; it is not FIFO.</li>
+<li><code>peek</code> is O(1); <code>offer</code> and <code>poll</code> are O(log n); <code>contains</code> and <code>remove(Object)</code> are O(n).</li>
+<li>A <code>PriorityQueue</code> is unbounded, not thread-safe, and its iteration order is <strong>not</strong> sorted.</li>
+<li>A binary heap stores a complete tree in an array: parent <code>(i-1)/2</code>, children <code>2i+1</code> and <code>2i+2</code>.</li>
+<li>Insert uses <strong>sift-up</strong>; extract uses <strong>sift-down</strong>; build-heap is O(n) and heapsort is O(n log n).</li>
+</ol>
+<h2 id="13-likely-interview-questions">13. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What is the <code>Queue</code> interface?</td>
+<td>A <code>Collection</code> subinterface with FIFO insertion at the tail and removal/inspection at the head.</td>
+</tr>
+<tr>
+<td><code>add</code> vs <code>offer</code>, <code>remove</code> vs <code>poll</code>, <code>element</code> vs <code>peek</code>?</td>
+<td>The first of each pair throws on failure; the second returns <code>false</code> or <code>null</code>.</td>
+</tr>
+<tr>
+<td>What is a <code>Deque</code>?</td>
+<td>A double-ended queue that supports insertion and removal at both ends.</td>
+</tr>
+<tr>
+<td>Why prefer <code>ArrayDeque</code> over <code>Stack</code>?</td>
+<td><code>Stack</code> extends <code>Vector</code> and leaks indexed <code>List</code> methods plus per-method synchronization; <code>ArrayDeque</code> is a faster, lock-free circular array.</td>
+</tr>
+<tr>
+<td>How does <code>PriorityQueue</code> order elements?</td>
+<td>By priority: natural ordering (min-heap) or a supplied <code>Comparator</code>.</td>
+</tr>
+<tr>
+<td>Is <code>PriorityQueue</code> FIFO?</td>
+<td>No. It always serves the least element, so a later insertion can leave before an earlier one.</td>
+</tr>
+<tr>
+<td>What is the complexity of <code>PriorityQueue.offer</code> and <code>poll</code>?</td>
+<td>O(log n) each, because of sift-up and sift-down.</td>
+</tr>
+<tr>
+<td>Why is <code>peek</code> O(1)?</td>
+<td>The minimum is at index 0, the root of the heap array.</td>
+</tr>
+<tr>
+<td>Why is <code>contains</code> O(n)?</td>
+<td>A heap is only partially ordered, so an arbitrary element must be located by linear scan.</td>
+</tr>
+<tr>
+<td>Does iterating a <code>PriorityQueue</code> produce sorted output?</td>
+<td>No — iteration is heap order; only repeated <code>poll()</code> yields priority order.</td>
+</tr>
+<tr>
+<td>How do you build a max-heap with <code>PriorityQueue</code>?</td>
+<td>Pass <code>Comparator.reverseOrder()</code> (or a custom descending comparator) to the constructor.</td>
+</tr>
+<tr>
+<td>How does a binary heap map to an array?</td>
+<td>Parent <code>(i-1)/2</code>, left child <code>2i+1</code>, right child <code>2i+2</code>, root at 0.</td>
+</tr>
+<tr>
+<td>Is <code>PriorityQueue</code> thread-safe?</td>
+<td>No; use <code>PriorityBlockingQueue</code> for concurrent access.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="14-final-summary">14. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>Queue   -&gt; FIFO: add/offer (tail), remove/poll, element/peek (head)
+   throws: add remove element        null-safe: offer poll peek
+Deque   -&gt; both ends: ArrayDeque (preferred, circular array) · LinkedList (nodes)
+           queue: offerLast + pollFirst     stack: push + pop (head)
+PriorityQueue -&gt; min-heap by natural order or Comparator; NOT FIFO
+           peek O(1) · offer/poll O(log n) · contains/remove(Object) O(n)
+           iteration NOT sorted · unbounded · not thread-safe · no null
+Binary heap -&gt; array: parent (i-1)/2 · children 2i+1, 2i+2
+           insert: sift-up · extract: sift-down · build-heap O(n) · heapsort O(n log n)
+max-heap -&gt; Comparator.reverseOrder()      custom types -&gt; Comparable (L36) or Comparator (L37/38)
+</code></pre></div>
+
+<ul>
+<li><code>Queue</code> → the FIFO contract; paired throwing and sentinel methods (<code>add</code>/<code>offer</code>, <code>remove</code>/<code>poll</code>, <code>element</code>/<code>peek</code>).</li>
+<li><code>Deque</code> → double-ended; <code>ArrayDeque</code> is the preferred queue and stack, <code>LinkedList</code> the node-backed alternative.</li>
+<li><code>PriorityQueue</code> → a min-heap, not FIFO; O(1) peek, O(log n) insert/extract, O(n) search, unsorted iteration.</li>
+<li>Heap → array-encoded complete tree; sift-up on insert, sift-down on extract, O(n) build, O(n log n) heapsort.</li>
+<li>Priorities → <code>Comparator.reverseOrder()</code> for a max-heap; custom objects need <code>Comparable</code> or a <code>Comparator</code>.</li>
+<li>Trap → printing or iterating a <code>PriorityQueue</code> shows heap order, never sorted order; only <code>poll()</code> is ordered.</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+A <code>Queue</code> promises arrival order, a <code>PriorityQueue</code> promises priority order — and only <code>poll()</code> ever reveals it, never <code>println</code> or a for-each loop.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> <code>ArrayDeque</code> is the right FIFO/LIFO line and <code>PriorityQueue</code> is a binary heap for serving the most important element next, so trust <code>poll</code> for order and never the iterator.</p>
+<div class="pager"><a class="prev" href="lecture-34.html"><span class="dir">Previous</span><span class="ttl">Set & Map Methods Explained</span></a><a class="next" href="lecture-36.html"><span class="dir">Next</span><span class="ttl">Comparable Interface in Java</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

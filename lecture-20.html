@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 20 · Java I/O Deep Dive — Java Notes</title>
+<meta name="description" content="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="20" data-lecture-title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-20.html#1-the-io-model-streams-direction-and-unit">1. The I/O Model: Streams, Direction and Unit</a></li><li><a href="lecture-20.html#2-byte-streams-and-the-inputstream-hierarchy">2. Byte Streams and the InputStream Hierarchy</a></li><li><a href="lecture-20.html#3-character-streams-the-encoding-bridge-and-inputstreamreader">3. Character Streams, the Encoding Bridge and InputStreamReader</a></li><li><a href="lecture-20.html#4-byte-vs-character-streams">4. Byte vs Character Streams</a></li><li><a href="lecture-20.html#5-systemin-systemout-and-systemerr">5. System.in, System.out and System.err</a></li><li><a href="lecture-20.html#6-scanner-tokenizing-and-parsing-console-input">6. Scanner: Tokenizing and Parsing Console Input</a></li><li><a href="lecture-20.html#7-the-nextint-then-nextline-trap">7. The nextInt() - then - nextLine() Trap</a></li><li><a href="lecture-20.html#8-bufferedreader-inputstreamreader-line-oriented-reading">8. BufferedReader + InputStreamReader: Line-Oriented Reading</a></li><li><a href="lecture-20.html#9-scanner-vs-bufferedreader">9. Scanner vs BufferedReader</a></li><li><a href="lecture-20.html#10-try-with-resources-closing-flush-and-ioexception">10. try-with-resources, Closing, flush and IOException</a></li><li><a href="lecture-20.html#11-the-pitfall-catalogue">11. The Pitfall Catalogue</a></li><li><a href="lecture-20.html#12-myth-vs-reality">12. Myth vs Reality</a></li><li><a href="lecture-20.html#13-common-trap-questions">13. Common Trap Questions</a></li><li><a href="lecture-20.html#14-points-to-remember">14. Points to Remember</a></li><li><a href="lecture-20.html#15-likely-interview-questions">15. Likely Interview Questions</a></li><li><a href="lecture-20.html#16-final-summary">16. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 3 · OOP Deep Dive · Lecture 20</p>
+<h1>Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader</h1>
+<p class="readmeta">16 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="20" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: lecture title "Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader" (playlist map, verified). Repo evidence: 4 Demo files (<code>Demo.java</code>, <code>Demo2.java</code>, <code>Demo3.java</code>, <code>Demo4.java</code>). The cached lecture PDF is image-only and is ignored per project rules.</p>
+</blockquote>
+<p>Every useful program must move data in and out of itself, and Java models that movement with streams. This lecture separates the two axes of any stream — direction (input or output) and unit (byte or character) — then follows the byte roots <code>InputStream</code>/<code>OutputStream</code> and the character roots <code>Reader</code>/<code>Writer</code>, the standard <code>System.in</code>/<code>System.out</code>/<code>System.err</code> trio, and the two console-reading tools every beginner meets: <code>Scanner</code> and <code>BufferedReader</code>. It also dissects the most notorious console bug in the language, the <code>nextInt()</code>-then-<code>nextLine()</code> trap, and closes with resource management through try-with-resources. Exceptions raised by I/O (<code>IOException</code>) are checked and are handled in depth in Lecture 43.</p>
+<h2 id="1-the-io-model-streams-direction-and-unit">1. The I/O Model: Streams, Direction and Unit</h2>
+<p>A <strong>stream</strong> is an ordered sequence of data that flows from a source to a destination, one unit at a time. Java describes every stream along exactly two independent axes:</p>
+<ol>
+<li><strong>Direction</strong> — an <strong>input stream</strong> reads data into the program; an <strong>output stream</strong> writes data out of the program. A source or destination may be the console, a file, a socket, or memory.</li>
+<li><strong>Unit</strong> — a <strong>byte stream</strong> moves 8-bit bytes (binary data); a <strong>character stream</strong> moves 16-bit <code>char</code> values (text, with an encoding behind it).</li>
+</ol>
+<p>The four abstract roots follow from those axes:</p>
+<div class="highlight"><pre><span></span><code>                 Input                Output
+Byte      InputStream         OutputStream
+Character Reader              Writer
+</code></pre></div>
+
+<p>Because the axes are independent, four base classes cover the whole library, and every concrete class (<code>FileInputStream</code>, <code>FileReader</code>, <code>BufferedReader</code>, <code>PrintStream</code>, ...) specializes one of the four cells. Memory aid: <strong>I</strong>nput/<strong>O</strong>utput for direction, <strong>S</strong>tream bytes / <strong>R</strong>eader-Writer chars for unit.</p>
+<blockquote class="callout callout--important">
+<p>Important
+A stream is consumed as it is read. Unless the underlying class explicitly supports <code>mark()</code>/<code>reset()</code>, you cannot rewind and read the same data twice — a fact the Pitfall Catalogue (Section 11) returns to.</p>
+</blockquote>
+<h2 id="2-byte-streams-and-the-inputstream-hierarchy">2. Byte Streams and the InputStream Hierarchy</h2>
+<p>Byte streams are the foundation: every character stream is ultimately built on top of byte streams. <code>InputStream</code> (input) and <code>OutputStream</code> (output) are abstract classes; concrete classes either connect to a data source directly or <strong>wrap</strong> another stream to add behaviour (buffering, parsing, filtering).</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — the byte level: System.in.read() returns one byte (0..255) or -1 at EOF</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.io.IOException</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="kd">throws</span><span class="w"> </span><span class="n">IOException</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">b</span><span class="p">;</span>
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="p">((</span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="na">in</span><span class="p">.</span><span class="na">read</span><span class="p">())</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">   </span><span class="c1">// -1 marks end of input</span>
+<span class="w">            </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">print</span><span class="p">((</span><span class="kt">char</span><span class="p">)</span><span class="w"> </span><span class="n">b</span><span class="p">);</span><span class="w">          </span><span class="c1">// narrow byte cast to char</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>InputStream</code>'s central method is <code>int read()</code>, which returns the next byte as an <code>int</code> in <code>0</code>..<code>255</code>, or <code>-1</code> at end of stream. The <code>int</code> return type exists so <code>-1</code> can be distinguished from a legitimate byte value <code>0xFF</code>; this is a classic design detail interviewers probe.</p>
+<p>The <code>InputStream</code> family is a tree, and knowing who wraps whom prevents the double-buffering mistake:</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Kind</th>
+<th>Extends / wraps</th>
+<th>Unit produced</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>InputStream</code></td>
+<td>Abstract root</td>
+<td><code>Object</code></td>
+<td>byte</td>
+<td>Base contract for all byte input</td>
+</tr>
+<tr>
+<td><code>FileInputStream</code></td>
+<td>Concrete source</td>
+<td><code>InputStream</code></td>
+<td>byte</td>
+<td>Reads bytes from a file</td>
+</tr>
+<tr>
+<td><code>ByteArrayInputStream</code></td>
+<td>Concrete source</td>
+<td><code>InputStream</code></td>
+<td>byte</td>
+<td>Reads bytes held in a <code>byte[]</code></td>
+</tr>
+<tr>
+<td><code>FilterInputStream</code></td>
+<td>Abstract decorator</td>
+<td><code>InputStream</code></td>
+<td>byte</td>
+<td>Base for streams that wrap another stream</td>
+</tr>
+<tr>
+<td><code>BufferedInputStream</code></td>
+<td>Decorator</td>
+<td><code>FilterInputStream</code></td>
+<td>byte</td>
+<td>Adds an in-memory buffer to cut syscalls</td>
+</tr>
+<tr>
+<td><code>DataInputStream</code></td>
+<td>Decorator</td>
+<td><code>FilterInputStream</code></td>
+<td>byte</td>
+<td>Reads typed primitives (<code>readInt</code>, <code>readDouble</code>)</td>
+</tr>
+<tr>
+<td><code>System.in</code></td>
+<td>Static field</td>
+<td><code>InputStream</code> (typically <code>BufferedInputStream</code>)</td>
+<td>byte</td>
+<td>Reads from the process console/pipe</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why does <code>read()</code> return <code>int</code>, not <code>byte</code>?" Because the stream must signal end-of-input. A <code>byte</code> has no spare value, but an <code>int</code> can carry <code>0</code>..<code>255</code> plus the sentinel <code>-1</code>. The same <code>-1</code>-at-EOF convention applies to <code>Reader.read()</code>.</p>
+</blockquote>
+<h2 id="3-character-streams-the-encoding-bridge-and-inputstreamreader">3. Character Streams, the Encoding Bridge and InputStreamReader</h2>
+<p><code>Reader</code> and <code>Writer</code> are the abstract roots for text. Their unit is the 16-bit <code>char</code>, and the crucial difference from byte streams is <strong>encoding</strong>: bytes are just numbers, while characters have to be decoded and encoded against a <strong>charset</strong> (UTF-8, UTF-16, ISO-8859-1, ...). <code>InputStreamReader</code> (bytes in) and <code>OutputStreamWriter</code> (bytes out) are the <strong>bridges</strong> that translate between the two worlds.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo2.java — bridge bytes to chars with an explicit charset</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.io.InputStreamReader</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.io.IOException</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.nio.charset.StandardCharsets</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo2</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="kd">throws</span><span class="w"> </span><span class="n">IOException</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">InputStreamReader</span><span class="w"> </span><span class="n">reader</span><span class="w"> </span><span class="o">=</span>
+<span class="w">                </span><span class="k">new</span><span class="w"> </span><span class="n">InputStreamReader</span><span class="p">(</span><span class="n">System</span><span class="p">.</span><span class="na">in</span><span class="p">,</span><span class="w"> </span><span class="n">StandardCharsets</span><span class="p">.</span><span class="na">UTF_8</span><span class="p">);</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">c</span><span class="p">;</span>
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="p">((</span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">reader</span><span class="p">.</span><span class="na">read</span><span class="p">())</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">   </span><span class="c1">// -1 at end of stream</span>
+<span class="w">            </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">print</span><span class="p">((</span><span class="kt">char</span><span class="p">)</span><span class="w"> </span><span class="n">c</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The bridge has two jobs:</p>
+<ol>
+<li><strong>Chunking</strong> — it reads enough bytes to assemble whole characters, which matters for multi-byte encodings such as UTF-8 where a single letter can span several bytes.</li>
+<li><strong>Translation</strong> — it maps byte values to <code>char</code> values through the chosen charset. Choosing the wrong charset is the source of the "mojibake" garbage text seen when a UTF-8 file is read as the platform default.</li>
+</ol>
+<blockquote class="callout callout--important">
+<p>Important
+Both bridge constructors have a no-charset overload that uses the <strong>default platform charset</strong>. That default differs between operating systems and JVM launches, so the same program can read the same file correctly on one machine and corrupt it on another. Pass the charset explicitly whenever text may cross a machine boundary.</p>
+</blockquote>
+<h2 id="4-byte-vs-character-streams">4. Byte vs Character Streams</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Byte streams</th>
+<th>Character streams</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Root classes</td>
+<td><code>InputStream</code> / <code>OutputStream</code></td>
+<td><code>Reader</code> / <code>Writer</code></td>
+</tr>
+<tr>
+<td>Unit</td>
+<td>8-bit byte</td>
+<td>16-bit <code>char</code></td>
+</tr>
+<tr>
+<td>Encoding-aware</td>
+<td>No — raw bytes</td>
+<td>Yes — via a charset at the bridge</td>
+</tr>
+<tr>
+<td>Bridge classes</td>
+<td>—</td>
+<td><code>InputStreamReader</code> / <code>OutputStreamWriter</code></td>
+</tr>
+<tr>
+<td>Common classes</td>
+<td><code>FileInputStream</code>, <code>BufferedInputStream</code>, <code>DataInputStream</code></td>
+<td><code>FileReader</code>, <code>BufferedReader</code>, <code>PrintWriter</code></td>
+</tr>
+<tr>
+<td>End of stream</td>
+<td><code>read()</code> returns <code>-1</code></td>
+<td><code>read()</code> returns <code>-1</code>, <code>readLine()</code> returns <code>null</code></td>
+</tr>
+<tr>
+<td>Best for</td>
+<td>Images, audio, archives, serialized bytes</td>
+<td>Text files, console, network text</td>
+</tr>
+<tr>
+<td>Typical console wrap</td>
+<td><code>System.in</code> used directly</td>
+<td><code>BufferedReader(new InputStreamReader(System.in))</code></td>
+</tr>
+</tbody>
+</table>
+<p>Reading the table by rows: the two families are not competitors but layers — character streams sit on top of byte streams. When you see text, use characters and name the charset; when you see binary, stay at the byte level.</p>
+<h2 id="5-systemin-systemout-and-systemerr">5. System.in, System.out and System.err</h2>
+<p><code>java.lang.System</code> exposes three ready-made streams as static fields. They are ordinary streams (not magic), which is why they can be wrapped and redirected.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Java type</th>
+<th>Direction</th>
+<th>Unit</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>System.in</code></td>
+<td><code>InputStream</code></td>
+<td>Input</td>
+<td>byte</td>
+<td>Process standard input; usually a <code>BufferedInputStream</code> with an unbuffered <code>FileInputStream</code> underneath</td>
+</tr>
+<tr>
+<td><code>System.out</code></td>
+<td><code>PrintStream</code></td>
+<td>Output</td>
+<td>byte</td>
+<td>Standard output; a <code>PrintStream</code> with <code>print</code>/<code>println</code>/<code>printf</code></td>
+</tr>
+<tr>
+<td><code>System.err</code></td>
+<td><code>PrintStream</code></td>
+<td>Output</td>
+<td>byte</td>
+<td>Standard error; keep error text off the normal output channel</td>
+</tr>
+</tbody>
+</table>
+<p>Two details matter in practice:</p>
+<ol>
+<li><code>System.out</code> is a <code>PrintStream</code>, and a <code>PrintStream</code> <strong>auto-flushes</strong> when a newline is written on a console — that is why <code>println</code> output appears immediately during debugging. Its auto-flush does not trigger on every <code>print</code>; <code>flush()</code> forces it.</li>
+<li><code>System.err</code> is separate so that error messages can be separated from normal output and captured independently.</li>
+</ol>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Is <code>System.out</code> a character stream or a byte stream?" It is a <code>PrintStream</code>, hence a byte output stream, but it offers <code>print(char)</code>/<code>println(String)</code> conveniences that internally encode characters to bytes. <code>Scanner</code> and <code>BufferedReader</code> are reading tools, not printing tools; their output counterpart is <code>PrintWriter</code>, which is a <code>Writer</code> and therefore character-based.</p>
+</blockquote>
+<h2 id="6-scanner-tokenizing-and-parsing-console-input">6. Scanner: Tokenizing and Parsing Console Input</h2>
+<p><code>java.util.Scanner</code> is the beginner-friendly reader. It does not hand you bytes or lines; it <strong>tokenizes</strong> the input using a delimiter (whitespace by default) and parses each token into a typed value. <code>nextInt()</code>, <code>nextDouble()</code>, <code>nextBoolean()</code> read and convert; <code>next()</code> returns the next whitespace-delimited token; <code>nextLine()</code> returns the rest of the current line.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo3.java — parse a number, then read the rest of the line (with the fix)</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.Scanner</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo3</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Scanner</span><span class="w"> </span><span class="n">sc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Scanner</span><span class="p">(</span><span class="n">System</span><span class="p">.</span><span class="na">in</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">print</span><span class="p">(</span><span class="s">&quot;Age: &quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">age</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sc</span><span class="p">.</span><span class="na">nextInt</span><span class="p">();</span><span class="w">      </span><span class="c1">// consumes the digits only, not the newline</span>
+<span class="w">        </span><span class="n">sc</span><span class="p">.</span><span class="na">nextLine</span><span class="p">();</span><span class="w">               </span><span class="c1">// FIX: consume the leftover newline</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">print</span><span class="p">(</span><span class="s">&quot;Name: &quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sc</span><span class="p">.</span><span class="na">nextLine</span><span class="p">();</span><span class="w"> </span><span class="c1">// now reads the real line</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">name</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; is &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">age</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Without the <code>sc.nextLine()</code> on the fix line, <code>name</code> would be the empty string and the program would print <code>" is 42"</code>. Section 7 explains exactly why.</p>
+<p>The parse methods are strict about types: calling <code>nextInt()</code> on non-numeric input throws <code>InputMismatchException</code> and the offending token is <strong>not</strong> consumed, so an unhandled mismatch can leave the scanner stuck on the same bad input forever.</p>
+<h2 id="7-the-nextint-then-nextline-trap">7. The nextInt() - then - nextLine() Trap</h2>
+<p>This is the single most reported console bug in first-year Java. The input <code>42\nAlice\n</code> is not two tokens to the scanner; it is characters, and each call consumes only the part it needs. In sequence, <code>int age = sc.nextInt();</code> reads <code>"42"</code> and stops before the newline; <code>String name = sc.nextLine();</code> reads the remainder of that same line, which is an empty string <code>""</code>; and the following <code>sc.nextLine()</code> is what actually returns <code>"Alice"</code>. The mechanism has four steps:</p>
+<ol>
+<li><code>nextInt()</code> reads digits and stops at the first non-digit — the newline <code>\n</code>.</li>
+<li>That newline stays in the buffer.</li>
+<li><code>nextLine()</code> returns everything up to and including the newline, and "everything" is nothing, so it returns an empty string <code>""</code>.</li>
+<li>The <strong>next</strong> <code>nextLine()</code> therefore returns <code>"Alice"</code>, and every subsequent answer appears shifted by one question.</li>
+</ol>
+<p>Two canonical fixes exist:</p>
+<table>
+<thead>
+<tr>
+<th>Fix</th>
+<th>Code</th>
+<th>Trade-off</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Consume the leftover newline</td>
+<td><code>int age = sc.nextInt(); sc.nextLine(); String name = sc.nextLine();</code></td>
+<td>One extra line; the idiomatic answer</td>
+</tr>
+<tr>
+<td>Read the whole line and parse it</td>
+<td><code>int age = Integer.parseInt(sc.nextLine()); String name = sc.nextLine();</code></td>
+<td>Consistent line-based reading; bad input throws <code>NumberFormatException</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why does <code>nextLine()</code> return an empty string after <code>nextInt()</code>?" Because <code>nextInt()</code> leaves the line terminator in the buffer and <code>nextLine()</code> reads up to the terminator — nothing but the terminator is left, so the line is empty. The fix is the extra <code>nextLine()</code>, or reading everything as a line and parsing it with <code>Integer.parseInt</code>.</p>
+</blockquote>
+<h2 id="8-bufferedreader-inputstreamreader-line-oriented-reading">8. BufferedReader + InputStreamReader: Line-Oriented Reading</h2>
+<p><code>BufferedReader</code> reads text through an internal character buffer and offers <code>readLine()</code>, which returns a whole line <strong>without</strong> its terminator, or <code>null</code> at end of input. Because it works in characters, it is paired with the <code>InputStreamReader</code> bridge over raw <code>System.in</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo4.java — line-oriented reading; readLine() returns null at EOF</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.io.BufferedReader</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.io.InputStreamReader</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.io.IOException</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo4</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="kd">throws</span><span class="w"> </span><span class="n">IOException</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">BufferedReader</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="o">=</span>
+<span class="w">                </span><span class="k">new</span><span class="w"> </span><span class="n">BufferedReader</span><span class="p">(</span><span class="k">new</span><span class="w"> </span><span class="n">InputStreamReader</span><span class="p">(</span><span class="n">System</span><span class="p">.</span><span class="na">in</span><span class="p">));</span>
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="n">line</span><span class="p">;</span>
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="p">((</span><span class="n">line</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">in</span><span class="p">.</span><span class="na">readLine</span><span class="p">())</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">null</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">   </span><span class="c1">// null means no more input</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">line</span><span class="p">.</span><span class="na">isEmpty</span><span class="p">())</span><span class="w"> </span><span class="k">break</span><span class="p">;</span><span class="w">             </span><span class="c1">// blank line ends the session</span>
+<span class="w">            </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;&gt;&quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">line</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Why it is faster than <code>Scanner</code> for large input:</p>
+<ol>
+<li><strong>Fewer system calls</strong> — <code>BufferedReader</code> pulls a block of characters at a time, so the program makes far fewer trips into the operating system.</li>
+<li><strong>No per-token parsing</strong> — it returns raw <code>String</code> lines; <code>Scanner</code> runs delimiter matching and numeric conversion on every token, which dominates the cost on large inputs.</li>
+<li><strong>Predictable buffering</strong> — a default 8K character buffer smooths out slow producers such as terminals and pipes.</li>
+</ol>
+<p>The cost of that speed is convenience: <code>readLine()</code> gives strings, so numeric parsing is your job (<code>Integer.parseInt</code>), and the <code>null</code>-at-EOF return must be checked before use.</p>
+<h2 id="9-scanner-vs-bufferedreader">9. Scanner vs BufferedReader</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th><code>Scanner</code></th>
+<th><code>BufferedReader</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Package</td>
+<td><code>java.util</code></td>
+<td><code>java.io</code></td>
+</tr>
+<tr>
+<td>Parsing</td>
+<td>Built in: <code>nextInt()</code>, <code>nextDouble()</code>, <code>next()</code></td>
+<td>None — returns <code>String</code>; parse yourself</td>
+</tr>
+<tr>
+<td>Reading model</td>
+<td>Delimiter-based tokenizing (whitespace by default)</td>
+<td><code>readLine()</code> reads a whole line</td>
+</tr>
+<tr>
+<td>Buffering</td>
+<td>Small internal buffer, regex scanning per token</td>
+<td>Large character buffer (8K default)</td>
+</tr>
+<tr>
+<td>Speed</td>
+<td>Slower on large input</td>
+<td>Faster — fewer syscalls, no parsing</td>
+</tr>
+<tr>
+<td>End of input</td>
+<td><code>hasNext()</code> false / <code>NoSuchElementException</code></td>
+<td><code>readLine()</code> returns <code>null</code></td>
+</tr>
+<tr>
+<td>Bad input</td>
+<td><code>InputMismatchException</code>, token not consumed</td>
+<td><code>NumberFormatException</code> at <code>parseInt</code></td>
+</tr>
+<tr>
+<td>Thread-safe</td>
+<td>Not thread-safe</td>
+<td>Not thread-safe</td>
+</tr>
+<tr>
+<td>Typical use</td>
+<td>Beginners, typed parsing, small console input</td>
+<td>Large files, competitive input, line processing</td>
+</tr>
+<tr>
+<td>Construction</td>
+<td><code>new Scanner(System.in)</code></td>
+<td><code>new BufferedReader(new InputStreamReader(System.in))</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"When would you choose <code>BufferedReader</code> over <code>Scanner</code>?" When throughput matters: large files or competitive-programming input, where <code>Scanner</code>'s regex tokenizing becomes the bottleneck. Choose <code>Scanner</code> when you want typed tokens with minimal code, and <code>BufferedReader</code> when you want speed or raw lines. A strong answer also notes that <code>Scanner</code> can be tuned with <code>useDelimiter</code> and <code>useLocale</code>.</p>
+</blockquote>
+<h2 id="10-try-with-resources-closing-flush-and-ioexception">10. try-with-resources, Closing, flush and IOException</h2>
+<p>Streams and readers hold operating-system resources, so they must be released. Since Java 7, <strong>try-with-resources</strong> does this automatically for any <code>AutoCloseable</code> (the <code>Closeable</code> streams and readers are all <code>AutoCloseable</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// try-with-resources closes the reader even if an exception is thrown</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.io.BufferedReader</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.io.FileReader</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.io.IOException</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo5</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">try</span><span class="w"> </span><span class="p">(</span><span class="n">BufferedReader</span><span class="w"> </span><span class="n">br</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">BufferedReader</span><span class="p">(</span><span class="k">new</span><span class="w"> </span><span class="n">FileReader</span><span class="p">(</span><span class="s">&quot;data.txt&quot;</span><span class="p">)))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">String</span><span class="w"> </span><span class="n">line</span><span class="p">;</span>
+<span class="w">            </span><span class="k">while</span><span class="w"> </span><span class="p">((</span><span class="n">line</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">br</span><span class="p">.</span><span class="na">readLine</span><span class="p">())</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">null</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">line</span><span class="p">);</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">IOException</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">          </span><span class="c1">// IOException is a checked exception</span>
+<span class="w">            </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;I/O error: &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="na">getMessage</span><span class="p">());</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Rules worth memorizing:</p>
+<ol>
+<li><strong>Declare it in the parentheses</strong> and the resource is closed automatically at block exit, in reverse order of declaration, even on exception.</li>
+<li><strong>Closing flushes.</strong> A <code>Writer</code>/<code>PrintWriter</code> may hold data in its buffer; <code>close()</code> flushes and releases, while <code>flush()</code> only pushes buffered data out and keeps the stream open.</li>
+<li><strong><code>IOException</code> is checked.</strong> The compiler forces you either to catch it or to declare it with <code>throws</code> (Lecture 43).</li>
+<li><strong>Closing a wrapper closes the stream underneath.</strong> Closing a <code>BufferedReader</code> over <code>System.in</code> closes <code>System.in</code>, so later reads fail — do not close a console reader you still need.</li>
+</ol>
+<blockquote class="callout callout--important">
+<p>Important
+Only the outermost wrapper must be closed. Closing <code>BufferedReader(new InputStreamReader(System.in))</code> closes the <code>InputStreamReader</code>, which closes <code>System.in</code>; you do not (and must not) close each layer separately.</p>
+</blockquote>
+<h2 id="11-the-pitfall-catalogue">11. The Pitfall Catalogue</h2>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>Example</th>
+<th>What happens</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nextLine</code> skipping</td>
+<td><code>nextInt(); nextLine();</code></td>
+<td><code>nextLine()</code> returns <code>""</code>; answers shift by one</td>
+<td>Add an extra <code>nextLine()</code> or parse whole lines</td>
+</tr>
+<tr>
+<td>Closing <code>System.in</code></td>
+<td><code>try (Scanner sc = new Scanner(System.in))</code></td>
+<td>The scanner closes <code>System.in</code>; later reads throw</td>
+<td>Do not close a reader over <code>System.in</code>, or flush instead</td>
+</tr>
+<tr>
+<td><code>Scanner</code> on huge input</td>
+<td><code>new Scanner(System.in)</code> for 10^6 tokens</td>
+<td>Slow — regex parse per token</td>
+<td>Use <code>BufferedReader</code> and parse manually</td>
+</tr>
+<tr>
+<td>Forgetting to close</td>
+<td>No <code>close()</code>/try-with-resources</td>
+<td>File handles leak</td>
+<td>Use try-with-resources</td>
+</tr>
+<tr>
+<td>Mixing byte/char</td>
+<td><code>(char) System.in.read()</code> on UTF-8 text</td>
+<td>Multi-byte letters corrupt</td>
+<td>Wrap in <code>InputStreamReader</code> with a charset</td>
+</tr>
+<tr>
+<td>Default charset</td>
+<td><code>new InputStreamReader(System.in)</code></td>
+<td>Platform-dependent decoding; mojibake</td>
+<td>Pass <code>StandardCharsets.UTF_8</code></td>
+</tr>
+<tr>
+<td>Double buffering</td>
+<td><code>BufferedReader</code> over <code>BufferedInputStream</code> over <code>System.in</code></td>
+<td>Redundant layers; no benefit, more confusion</td>
+<td>Wrap once, at the character level</td>
+</tr>
+<tr>
+<td>Reading twice</td>
+<td>Reading a consumed stream again</td>
+<td>Data already gone; empty result</td>
+<td>Reopen the source; use <code>mark</code>/<code>reset</code> only if supported</td>
+</tr>
+<tr>
+<td>Non-numeric <code>nextInt</code></td>
+<td><code>nextInt()</code> on <code>"abc"</code></td>
+<td><code>InputMismatchException</code>; token not consumed</td>
+<td>Validate with <code>hasNextInt()</code> first</td>
+</tr>
+<tr>
+<td><code>readLine</code> at EOF</td>
+<td><code>System.out.println(in.readLine().length())</code></td>
+<td><code>NullPointerException</code> at EOF</td>
+<td>Test <code>!= null</code> before using the line</td>
+</tr>
+</tbody>
+</table>
+<h2 id="12-myth-vs-reality">12. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"<code>System.in</code> gives me text"</td>
+<td>It is an <code>InputStream</code>: raw bytes. Text needs <code>InputStreamReader</code>/<code>Scanner</code> on top.</td>
+</tr>
+<tr>
+<td>"<code>nextInt()</code> then <code>nextLine()</code> works fine"</td>
+<td>The newline is left in the buffer; <code>nextLine()</code> returns empty. Consume it first.</td>
+</tr>
+<tr>
+<td>"<code>Scanner</code> is faster than <code>BufferedReader</code>"</td>
+<td>The reverse for large input: tokenizing with regex is expensive; buffered lines are cheap.</td>
+</tr>
+<tr>
+<td>"<code>System.in</code> and <code>System.out</code> are character streams"</td>
+<td><code>System.in</code> is an <code>InputStream</code> (bytes); <code>System.out</code>/<code>err</code> are <code>PrintStream</code>s (bytes with text conveniences).</td>
+</tr>
+<tr>
+<td>"<code>close()</code> and <code>flush()</code> are the same"</td>
+<td><code>flush()</code> pushes buffered output but keeps the stream open; <code>close()</code> flushes and releases the resource.</td>
+</tr>
+<tr>
+<td>"<code>Scanner</code> is thread-safe because it is convenient"</td>
+<td>Neither <code>Scanner</code> nor <code>BufferedReader</code> is thread-safe; synchronize externally if shared.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="13-common-trap-questions">13. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — The leftover newline: "After <code>sc.nextInt()</code>, why does <code>sc.nextLine()</code> return an empty string?"
+<code>nextInt()</code> consumes the digits but stops before the line terminator, so the newline remains unread. <code>nextLine()</code> reads up to that terminator, leaving nothing but the terminator, hence <code>""</code>. Fix: consume the newline with an extra <code>nextLine()</code>, or read the line and use <code>Integer.parseInt</code>.</p>
+<p>Trap 2 — Closing System.in: "A program wraps <code>System.in</code> in a <code>Scanner</code> inside try-with-resources; the next read throws. Why?"
+<code>Scanner.close()</code> closes the underlying <code>System.in</code>. Once the process standard input is closed it cannot be reopened, so later reads fail. Do not close a reader over <code>System.in</code>, or read it only once.</p>
+<p>Trap 3 — Non-numeric input: "<code>nextInt()</code> is given <code>"abc"</code>. What happens, and is the token consumed?"
+It throws <code>InputMismatchException</code> and does <strong>not</strong> consume the offending token. Guard with <code>hasNextInt()</code> before calling <code>nextInt()</code> if the input may be dirty.</p>
+<p>Trap 4 — Byte or char: "Does <code>(char) System.in.read()</code> correctly read a non-English letter?"
+No. <code>read()</code> returns a single byte; a UTF-8 letter can span multiple bytes, so casting one byte to <code>char</code> corrupts it. Wrap <code>System.in</code> in an <code>InputStreamReader</code> with an explicit charset.</p>
+<p>Trap 5 — Charset drift: "The same file text is readable on one machine and garbage on another. Why?"
+A bridge constructor without a charset uses the platform default, which varies by OS and locale. Always pass the charset explicitly (<code>StandardCharsets.UTF_8</code>).</p>
+<p>Trap 6 — EOF sentinel: "<code>readLine()</code> and <code>read()</code> both announce the end of input — how do they differ?"
+<code>read()</code> returns the <code>int</code> value <code>-1</code>; <code>readLine()</code> returns the reference <code>null</code>. Using the wrong check (or none) leads either to an infinite loop or to a <code>NullPointerException</code>.</p>
+<p>Trap 7 — Double wrapping: "Is <code>BufferedReader(new InputStreamReader(new BufferedInputStream(System.in)))</code> better?"
+No. <code>System.in</code> is already buffered, and the character-level <code>BufferedReader</code> is the buffer that matters for <code>readLine()</code>. The inner <code>BufferedInputStream</code> adds a redundant layer. Wrap once, at the character level.</p>
+</blockquote>
+<h2 id="14-points-to-remember">14. Points to Remember</h2>
+<ol>
+<li>A stream is an ordered sequence of data; classify it by direction (input/output) and unit (byte/character).</li>
+<li>Byte streams use <code>InputStream</code>/<code>OutputStream</code> and move 8-bit bytes; character streams use <code>Reader</code>/<code>Writer</code> and move 16-bit <code>char</code>s.</li>
+<li><code>System.in</code> is an <code>InputStream</code> (bytes); <code>System.out</code> and <code>System.err</code> are <code>PrintStream</code>s with auto-flush on newline during console output.</li>
+<li><code>InputStreamReader</code>/<code>OutputStreamWriter</code> bridge bytes to characters using a charset; always name the charset, never rely on the platform default.</li>
+<li><code>Scanner</code> tokenizes with delimiters and parses typed tokens; <code>nextInt()</code> leaves the newline, so a following <code>nextLine()</code> returns <code>""</code>.</li>
+<li>The standard fix for the trap is one extra <code>nextLine()</code> to consume the newline, or reading whole lines and parsing with <code>Integer.parseInt</code>.</li>
+<li><code>BufferedReader.readLine()</code> returns a line without its terminator, or <code>null</code> at end of input; check for <code>null</code> before use.</li>
+<li><code>BufferedReader</code> is faster for large input because it buffers in big blocks and skips per-token parsing; <code>Scanner</code> is convenient but slower.</li>
+<li>Use try-with-resources for <code>AutoCloseable</code> streams; <code>close()</code> flushes and releases, <code>flush()</code> only pushes buffered data; closing a wrapper closes the underlying stream.</li>
+<li><code>IOException</code> is a checked exception (Lecture 43): catch it or declare it, and never treat it as an unchecked runtime failure.</li>
+</ol>
+<h2 id="15-likely-interview-questions">15. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What is a stream in Java I/O?</td>
+<td>An ordered sequence of data moving between a program and a source/destination; classified by direction and by byte-versus-character unit.</td>
+</tr>
+<tr>
+<td>Difference between byte and character streams?</td>
+<td>Byte streams (<code>InputStream</code>/<code>OutputStream</code>) move raw 8-bit bytes; character streams (<code>Reader</code>/<code>Writer</code>) move 16-bit chars and are encoding-aware.</td>
+</tr>
+<tr>
+<td>What type is <code>System.in</code>?</td>
+<td>An <code>InputStream</code> — a byte stream — typically backed by a <code>BufferedInputStream</code>.</td>
+</tr>
+<tr>
+<td>What are <code>System.out</code> and <code>System.err</code>?</td>
+<td>Both are <code>PrintStream</code>s: byte output streams with <code>print</code>/<code>println</code>/<code>printf</code> conveniences and console auto-flush on newline.</td>
+</tr>
+<tr>
+<td>What does <code>InputStreamReader</code> do?</td>
+<td>It bridges a byte input stream to a character reader, decoding bytes into chars using a charset.</td>
+</tr>
+<tr>
+<td>Scanner vs BufferedReader — which is faster and why?</td>
+<td><code>BufferedReader</code>, for large input: it reads big buffered blocks and skips <code>Scanner</code>'s per-token regex parsing.</td>
+</tr>
+<tr>
+<td>Explain the <code>nextInt()</code> then <code>nextLine()</code> problem.</td>
+<td><code>nextInt()</code> leaves the line terminator unread, so <code>nextLine()</code> returns an empty string; consume the newline (or parse whole lines) to fix it.</td>
+</tr>
+<tr>
+<td>What does <code>readLine()</code> return at end of input?</td>
+<td><code>null</code> — not <code>-1</code> and not an empty string. Check for <code>null</code> before using the line.</td>
+</tr>
+<tr>
+<td>How do you read a line from <code>System.in</code> without <code>Scanner</code>?</td>
+<td><code>new BufferedReader(new InputStreamReader(System.in)).readLine()</code>.</td>
+</tr>
+<tr>
+<td>What is try-with-resources?</td>
+<td>A syntax that declares <code>AutoCloseable</code> resources in a <code>try</code> header and closes them automatically, even on exception.</td>
+</tr>
+<tr>
+<td>Difference between <code>flush()</code> and <code>close()</code>?</td>
+<td><code>flush()</code> forces buffered output out and keeps the stream usable; <code>close()</code> flushes and releases the resource.</td>
+</tr>
+<tr>
+<td>Is <code>IOException</code> checked or unchecked?</td>
+<td>Checked — the compiler requires catching it or declaring it with <code>throws</code> (Lecture 43).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="16-final-summary">16. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>System.in (bytes) --InputStreamReader(charset)--&gt; chars
+                     |
+                     +--&gt; Scanner        --&gt; tokens (nextInt, next, nextLine)
+                     +--&gt; BufferedReader --&gt; lines  (readLine, null at EOF)
+
+System.out / System.err (PrintStreams, bytes) &lt;-- encoded text &lt;-- print/println/printf
+
+byte streams: InputStream / OutputStream   |   character streams: Reader / Writer
+</code></pre></div>
+
+<ul>
+<li>Direction -&gt; input reads in, output writes out; the four roots are <code>InputStream</code>, <code>OutputStream</code>, <code>Reader</code>, <code>Writer</code>.</li>
+<li>Unit -&gt; bytes for binary data, characters plus a charset for text; <code>InputStreamReader</code> is the bridge.</li>
+<li>Standard streams -&gt; <code>System.in</code> (byte <code>InputStream</code>), <code>System.out</code>/<code>System.err</code> (<code>PrintStream</code>s, auto-flush on newline).</li>
+<li>Scanner -&gt; tokenizing and typed parsing, convenient but slower; always mind the leftover newline.</li>
+<li>BufferedReader -&gt; buffered, line-oriented, fast, <code>null</code> at EOF; the tool for large input.</li>
+<li>Resource handling -&gt; try-with-resources; <code>close()</code> flushes and releases; closing a wrapper closes <code>System.in</code> too.</li>
+<li>Failure -&gt; <code>IOException</code> is checked (Lecture 43); guard against <code>InputMismatchException</code> and <code>NullPointerException</code>.</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+Choose the stream by unit: bytes for binary, characters (with an explicit charset) for text. Then choose the reader by need: <code>Scanner</code> for parsed tokens, <code>BufferedReader</code> for fast lines.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> Java I/O is a 2x2 grid of direction and unit, and console mastery reduces to wrapping the byte-level <code>System.in</code> in a character reader — <code>Scanner</code> when you want parsed tokens, <code>BufferedReader</code> when you want speed — while watching the leftover newline and the closed-stream trap.</p>
+<div class="pager"><a class="prev" href="lecture-19.html"><span class="dir">Previous</span><span class="ttl">Java Nested Classes</span></a><a class="next" href="lecture-21.html"><span class="dir">Next</span><span class="ttl">Immutable Classes in Java</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

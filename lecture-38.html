@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 38 · Lambdas & Functional Interface Deep Dive — Java Notes</title>
+<meta name="description" content="Lambdas & Functional Interface Deep Dive | Method References & Composition — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="38" data-lecture-title="Lambdas & Functional Interface Deep Dive | Method References & Composition">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-38.html#1-why-method-references-exist">1. Why Method References Exist</a></li><li><a href="lecture-38.html#2-the-operator-and-the-five-kinds">2. The :: Operator and the Five Kinds</a></li><li><a href="lecture-38.html#3-mapping-method-references-to-lambdas">3. Mapping Method References to Lambdas</a></li><li><a href="lecture-38.html#4-target-typing-for-method-references">4. Target Typing for Method References</a></li><li><a href="lecture-38.html#5-bound-vs-unbound-receivers-the-classic-confusion">5. Bound vs Unbound Receivers (the classic confusion)</a></li><li><a href="lecture-38.html#6-function-composition-andthen-vs-compose">6. Function Composition: andThen vs compose</a></li><li><a href="lecture-38.html#7-predicate-composition-and-or-negate-isequal">7. Predicate Composition: and, or, negate, isEqual</a></li><li><a href="lecture-38.html#8-consumerandthen-and-the-identity-methods">8. Consumer.andThen and the identity Methods</a></li><li><a href="lecture-38.html#9-building-pipelines">9. Building Pipelines</a></li><li><a href="lecture-38.html#10-higher-order-functions-and-a-custom-functional-interface">10. Higher-Order Functions and a Custom Functional Interface</a></li><li><a href="lecture-38.html#11-effectively-final-capture-and-receiver-capture">11. Effectively-Final Capture and Receiver Capture</a></li><li><a href="lecture-38.html#12-method-reference-gallery">12. Method Reference Gallery</a></li><li><a href="lecture-38.html#13-composing-predicates-and-functions">13. Composing Predicates and Functions</a></li><li><a href="lecture-38.html#14-a-custom-functional-interface-with-andthen">14. A Custom Functional Interface with andThen</a></li><li><a href="lecture-38.html#15-common-pitfalls-and-errors">15. Common Pitfalls and Errors</a></li><li><a href="lecture-38.html#16-myth-vs-reality">16. Myth vs Reality</a></li><li><a href="lecture-38.html#17-common-trap-questions">17. Common Trap Questions</a></li><li><a href="lecture-38.html#18-points-to-remember">18. Points to Remember</a></li><li><a href="lecture-38.html#19-likely-interview-questions">19. Likely Interview Questions</a></li><li><a href="lecture-38.html#20-final-summary">20. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 5 · Collections, Lambdas & Streams · Lecture 38</p>
+<h1>Lambdas & Functional Interface Deep Dive | Method References & Composition</h1>
+<p class="readmeta">20 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="38" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: "Lambdas &amp; Functional Interface Deep Dive | Method References &amp; Composition" (playlist map, verified). Repo evidence: 6 Demo files.</p>
+</blockquote>
+<p>Lecture 37 introduced lambdas as anonymous functions and functional interfaces as their target types. This lecture goes one level deeper: the <code>::</code> operator (method references), target typing when a reference must match a functional interface, and the composition toolkit (<code>andThen</code>, <code>compose</code>, <code>and</code>, <code>or</code>, <code>negate</code>) that turns small functions into pipelines. It also revisits effectively-final capture from Lecture 37 and shows higher-order functions built from a custom <code>@FunctionalInterface</code>. Everything here is the vocabulary that streams (Lecture 39) and collectors (Lecture 40) are built on.</p>
+<h2 id="1-why-method-references-exist">1. Why Method References Exist</h2>
+<p>A lambda expresses behaviour as a body. Very often that body does nothing except call a method that already exists:</p>
+<div class="highlight"><pre><span></span><code><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="na">length</span><span class="p">();</span>
+</code></pre></div>
+
+<p>The lambda adds no logic; it only forwards its argument to <code>String.length()</code>. The <code>::</code> operator writes exactly this forwarding shape without repeating the parameter names:</p>
+<div class="highlight"><pre><span></span><code><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">String</span><span class="p">::</span><span class="n">length</span><span class="p">;</span>
+</code></pre></div>
+
+<p>A method reference is therefore not a new kind of value. It is a shorter, more readable lambda whose body is a single existing method. The compiler desugars it back into the equivalent lambda, so anything a lambda can target, a method reference can target too.</p>
+<p>The two forms trade explicitness for brevity:</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Lambda</th>
+<th>Method Reference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Shape</td>
+<td>parameter list plus body</td>
+<td>owner plus <code>::</code> plus name</td>
+</tr>
+<tr>
+<td>Best when</td>
+<td>body does real work</td>
+<td>body is one method call</td>
+</tr>
+<tr>
+<td>Names reused</td>
+<td>rewrites the logic</td>
+<td>reuses an existing method</td>
+</tr>
+<tr>
+<td>Target type</td>
+<td>required</td>
+<td>required (same rule)</td>
+</tr>
+<tr>
+<td>Capture</td>
+<td>captures used variables</td>
+<td>captures the receiver for bound refs</td>
+</tr>
+<tr>
+<td>Readability risk</td>
+<td>verbose but explicit</td>
+<td>cryptic when overloaded</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--important">
+<p>Important
+A method reference does not call the method at the point of writing. It creates an object that implements the functional interface; the referenced method is invoked only when the interface method (for example <code>apply</code> or <code>test</code>) is called.</p>
+</blockquote>
+<h2 id="2-the-operator-and-the-five-kinds">2. The <code>::</code> Operator and the Five Kinds</h2>
+<p>Java supports five syntactically distinct method references. They differ only in where the receiver (the object or class the method is called on) comes from.</p>
+<ol>
+<li><strong>Static method reference</strong> — <code>Class::staticMethod</code>. The receiver is the class itself; the arguments of the functional interface are passed straight through.</li>
+<li><strong>Bound instance method reference</strong> — <code>obj::method</code>. The receiver is a specific object captured at the moment the reference is created.</li>
+<li><strong>Unbound instance method reference</strong> — <code>Class::instanceMethod</code>. There is no captured receiver; the first argument of the functional interface becomes the receiver, and the remaining arguments become the method arguments.</li>
+<li><strong>Constructor reference</strong> — <code>Class::new</code>. Produces a new instance; arguments go to the matching constructor.</li>
+<li><strong>Array constructor reference</strong> — <code>Type[]::new</code>. Produces a new array sized by the single <code>int</code> argument.</li>
+</ol>
+<p>The words <strong>bound</strong> and <strong>unbound</strong> describe the receiver, not the method. <code>bound</code> means "this exact object, fixed now"; <code>unbound</code> means "whatever object is supplied later as the first argument".</p>
+<h2 id="3-mapping-method-references-to-lambdas">3. Mapping Method References to Lambdas</h2>
+<p>This table is the whole <code>::</code> operator in one place. Read the middle column as "what the receiver does", and the right column as the lambda you could have written.</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Syntax</th>
+<th>Lambda equivalent</th>
+<th>Receiver source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Static</td>
+<td><code>Class::staticMethod</code></td>
+<td><code>x -&gt; Class.staticMethod(x)</code></td>
+<td>the class</td>
+</tr>
+<tr>
+<td>Bound instance</td>
+<td><code>obj::method</code></td>
+<td><code>x -&gt; obj.method(x)</code></td>
+<td>a captured object</td>
+</tr>
+<tr>
+<td>Unbound instance</td>
+<td><code>Class::instanceMethod</code></td>
+<td><code>(obj, x) -&gt; obj.method(x)</code></td>
+<td>first argument</td>
+</tr>
+<tr>
+<td>Constructor</td>
+<td><code>Class::new</code></td>
+<td><code>x -&gt; new Class(x)</code></td>
+<td>none (creates one)</td>
+</tr>
+<tr>
+<td>Array constructor</td>
+<td><code>Type[]::new</code></td>
+<td><code>n -&gt; new Type[n]</code></td>
+<td>none (creates one)</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--note">
+<p>Memory aid
+Static takes no receiver; bound bakes in a receiver; unbound borrows the first argument as its receiver.</p>
+</blockquote>
+<h2 id="4-target-typing-for-method-references">4. Target Typing for Method References</h2>
+<p>A method reference is a bare name, so by itself it has no type. The compiler infers its type from the assignment or parameter it is placed in — the <strong>target type</strong>, which must be a functional interface with a compatible single abstract method (SAM).</p>
+<div class="highlight"><pre><span></span><code><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">String</span><span class="p">::</span><span class="n">length</span><span class="p">;</span><span class="w">   </span><span class="c1">// length() returns int, autoboxed to Integer</span>
+<span class="n">ToIntFunction</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">g</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="n">String</span><span class="p">::</span><span class="n">length</span><span class="p">;</span><span class="w">    </span><span class="c1">// primitive int result, no boxing</span>
+</code></pre></div>
+
+<p>Both lines reference the same method, but the target decides the SAM signature and therefore the result type. When a method is overloaded, the compiler uses the target's SAM signature to choose the overload; if no overload fits, you must write an explicit lambda or cast, because a method reference cannot express disambiguation on its own.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why does <code>String::length</code> compile as <code>ToIntFunction&lt;String&gt;</code>?" Because the target type supplies the parameter list and return type. The reference only needs a method whose signature is compatible with the target's SAM — this is target typing, not inference of the reference in isolation.</p>
+</blockquote>
+<h2 id="5-bound-vs-unbound-receivers-the-classic-confusion">5. Bound vs Unbound Receivers (the classic confusion)</h2>
+<p>The same method name can produce two very different references.</p>
+<div class="highlight"><pre><span></span><code><span class="n">String</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;hello&quot;</span><span class="p">;</span>
+<span class="n">Supplier</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">bound</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="p">::</span><span class="n">length</span><span class="p">;</span><span class="w">        </span><span class="c1">// () -&gt; int, receiver is s</span>
+<span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">unbound</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">String</span><span class="p">::</span><span class="n">length</span><span class="p">;</span><span class="w"> </span><span class="c1">// (String) -&gt; int, receiver is the argument</span>
+</code></pre></div>
+
+<ul>
+<li><code>s::length</code> is <strong>bound</strong>: the receiver <code>s</code> is captured now, so the interface method takes no arguments (<code>Supplier</code>).</li>
+<li><code>String::length</code> is <strong>unbound</strong>: the receiver arrives later as the first argument, so the interface method takes one argument (<code>Function</code>).</li>
+</ul>
+<p>The unbound form is why <code>String::length</code> needs a <code>String</code> argument. Reading <code>String::length</code> as "call <code>length</code> on the class" is the single most common misunderstanding of <code>::</code>.</p>
+<h2 id="6-function-composition-andthen-vs-compose">6. Function Composition: andThen vs compose</h2>
+<p><code>Function&lt;T, R&gt;</code> provides two default methods that chain two functions.</p>
+<div class="highlight"><pre><span></span><code><span class="n">Function</span><span class="o">&lt;</span><span class="n">Integer</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="n">Function</span><span class="o">&lt;</span><span class="n">Integer</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+
+<span class="n">f</span><span class="p">.</span><span class="na">andThen</span><span class="p">(</span><span class="n">g</span><span class="p">).</span><span class="na">apply</span><span class="p">(</span><span class="mi">4</span><span class="p">);</span><span class="w">   </span><span class="c1">// (4 + 1) * 2 = 10</span>
+<span class="n">f</span><span class="p">.</span><span class="na">compose</span><span class="p">(</span><span class="n">g</span><span class="p">).</span><span class="na">apply</span><span class="p">(</span><span class="mi">4</span><span class="p">);</span><span class="w">   </span><span class="c1">// (4 * 2) + 1 = 9</span>
+</code></pre></div>
+
+<ul>
+<li><code>f.andThen(g)</code> runs <code>f</code> first, then feeds its result to <code>g</code>. Data flows left to right.</li>
+<li><code>f.compose(g)</code> runs <code>g</code> first, then feeds its result to <code>f</code>. Data flows right to left.</li>
+</ul>
+<p>The two are mirror images: <code>f.andThen(g)</code> is the same function as <code>g.compose(f)</code>.</p>
+<blockquote class="callout callout--note">
+<p>Memory aid
+<strong>andThen</strong> follows the reading order (this, then that). <strong>compose</strong> works backwards, like the word says — the argument is the inner function.</p>
+</blockquote>
+<h2 id="7-predicate-composition-and-or-negate-isequal">7. Predicate Composition: and, or, negate, isEqual</h2>
+<p><code>Predicate&lt;T&gt;</code> composes boolean tests with short-circuit logic.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Signature shape</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>and</code></td>
+<td><code>this &amp;&amp; other</code></td>
+<td>true only when both tests are true</td>
+</tr>
+<tr>
+<td><code>or</code></td>
+<td><code>this \|\| other</code></td>
+<td>true when either test is true</td>
+</tr>
+<tr>
+<td><code>negate</code></td>
+<td><code>!this</code></td>
+<td>logical complement</td>
+</tr>
+<tr>
+<td><code>isEqual</code> (static)</td>
+<td><code>Predicate.isEqual(target)</code></td>
+<td>true when the argument equals <code>target</code>, null-safe</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="n">Predicate</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">nonNull</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
+<span class="n">Predicate</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">nonEmpty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">!</span><span class="n">s</span><span class="p">.</span><span class="na">isEmpty</span><span class="p">();</span>
+<span class="n">Predicate</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">valid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nonNull</span><span class="p">.</span><span class="na">and</span><span class="p">(</span><span class="n">nonEmpty</span><span class="p">);</span>
+<span class="n">Predicate</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">blank</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">valid</span><span class="p">.</span><span class="na">negate</span><span class="p">();</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">valid</span><span class="p">.</span><span class="na">test</span><span class="p">(</span><span class="s">&quot;ok&quot;</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">blank</span><span class="p">.</span><span class="na">test</span><span class="p">(</span><span class="s">&quot;&quot;</span><span class="p">));</span>
+</code></pre></div>
+
+<p><code>and</code> and <code>or</code> evaluate the left test first and short-circuit, so the right test is never reached when the result is already decided — the same safety <code>&amp;&amp;</code> and <code>||</code> give in ordinary code.</p>
+<h2 id="8-consumerandthen-and-the-identity-methods">8. Consumer.andThen and the identity Methods</h2>
+<p><code>Consumer&lt;T&gt;</code> returns nothing, but it can still be chained. <code>Consumer.andThen</code> runs the first consumer, then the second on the same input, in order.</p>
+<div class="highlight"><pre><span></span><code><span class="n">Consumer</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">log</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;log: &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">s</span><span class="p">);</span>
+<span class="n">Consumer</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;len: &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="na">length</span><span class="p">());</span>
+<span class="n">Consumer</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">both</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">log</span><span class="p">.</span><span class="na">andThen</span><span class="p">(</span><span class="n">count</span><span class="p">);</span>
+<span class="n">both</span><span class="p">.</span><span class="na">accept</span><span class="p">(</span><span class="s">&quot;java&quot;</span><span class="p">);</span>
+</code></pre></div>
+
+<p>Two identity constants appear constantly in pipelines:</p>
+<ul>
+<li><code>Function.identity()</code> returns its argument unchanged — a <code>Function&lt;T, T&gt;</code> used as the key or value mapper in collectors (forward reference: Lecture 40).</li>
+<li><code>UnaryOperator.identity()</code> is the same idea for <code>UnaryOperator&lt;T&gt;</code>, which is just <code>Function&lt;T, T&gt;</code> with a clearer name.</li>
+</ul>
+<h2 id="9-building-pipelines">9. Building Pipelines</h2>
+<p>The composition methods seen so far, gathered in one place:</p>
+<table>
+<thead>
+<tr>
+<th>Interface</th>
+<th>Method</th>
+<th>Chain semantics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Function</code></td>
+<td><code>andThen</code></td>
+<td>this first, then the argument</td>
+</tr>
+<tr>
+<td><code>Function</code></td>
+<td><code>compose</code></td>
+<td>the argument first, then this</td>
+</tr>
+<tr>
+<td><code>Predicate</code></td>
+<td><code>and</code></td>
+<td>true only if both are true</td>
+</tr>
+<tr>
+<td><code>Predicate</code></td>
+<td><code>or</code></td>
+<td>true if either is true</td>
+</tr>
+<tr>
+<td><code>Predicate</code></td>
+<td><code>negate</code></td>
+<td>logical complement</td>
+</tr>
+<tr>
+<td><code>Consumer</code></td>
+<td><code>andThen</code></td>
+<td>run this, then the argument</td>
+</tr>
+<tr>
+<td><code>Function</code> / <code>UnaryOperator</code></td>
+<td><code>identity</code></td>
+<td>return the input unchanged</td>
+</tr>
+</tbody>
+</table>
+<p>Composition is how small named steps become one named pipeline. Read each statement as "this step, and then that step".</p>
+<div class="highlight"><pre><span></span><code><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">trim</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">String</span><span class="p">::</span><span class="n">trim</span><span class="p">;</span>
+<span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">upper</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">String</span><span class="p">::</span><span class="n">toUpperCase</span><span class="p">;</span>
+<span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">clean</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">trim</span><span class="p">.</span><span class="na">andThen</span><span class="p">(</span><span class="n">upper</span><span class="p">);</span>
+
+<span class="n">Predicate</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">nonNull</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">Objects</span><span class="p">::</span><span class="n">nonNull</span><span class="p">;</span>
+<span class="n">Predicate</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">nonEmpty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">!</span><span class="n">s</span><span class="p">.</span><span class="na">isEmpty</span><span class="p">();</span>
+<span class="n">Predicate</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">valid</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="n">nonNull</span><span class="p">.</span><span class="na">and</span><span class="p">(</span><span class="n">nonEmpty</span><span class="p">);</span>
+</code></pre></div>
+
+<p><code>clean.apply("  java  ")</code> is <code>"JAVA"</code>; <code>valid.test(null)</code> is <code>false</code> without a <code>NullPointerException</code>, because <code>and</code> short-circuits before <code>nonEmpty</code> runs. Pipelines are also reusable: <code>clean</code> and <code>valid</code> are values that can be stored, passed, and combined again.</p>
+<h2 id="10-higher-order-functions-and-a-custom-functional-interface">10. Higher-Order Functions and a Custom Functional Interface</h2>
+<p>A <strong>higher-order function</strong> is a method that accepts a functional interface as a parameter, or returns one, or both. Composition methods are themselves higher-order: <code>andThen</code> accepts a function and returns a function.</p>
+<p>You can define your own functional interface, give it a default composition method, and then use it exactly like the JDK ones.</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@FunctionalInterface</span>
+<span class="kd">interface</span> <span class="nc">IntOp</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="nf">apply</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">default</span><span class="w"> </span><span class="n">IntOp</span><span class="w"> </span><span class="nf">andThen</span><span class="p">(</span><span class="n">IntOp</span><span class="w"> </span><span class="n">after</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">after</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="k">this</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="n">x</span><span class="p">));</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<blockquote class="callout callout--important">
+<p>Important
+<code>@FunctionalInterface</code> is a compiler check, not a runtime requirement. It enforces that the interface has exactly one abstract method; default and static methods do not count, which is why <code>andThen</code> above is allowed.</p>
+</blockquote>
+<h2 id="11-effectively-final-capture-and-receiver-capture">11. Effectively-Final Capture and Receiver Capture</h2>
+<p>Recall from Lecture 37: a lambda may use a local variable from the enclosing scope only if that variable is final or <strong>effectively final</strong> (assigned exactly once). A method reference obeys the same rule for what it captures.</p>
+<ul>
+<li>A <strong>bound instance reference</strong> (<code>obj::method</code>) captures the receiver <code>obj</code>. The reference holds that object for as long as the reference lives.</li>
+<li>An <strong>unbound reference</strong> (<code>Class::instanceMethod</code>) captures nothing; the receiver is supplied per call.</li>
+<li><code>this::method</code> inside an instance captures the current object, which is why it behaves like a bound reference to <code>this</code>.</li>
+</ul>
+<h2 id="12-method-reference-gallery">12. Method Reference Gallery</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">java.util.function.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">len</span><span class="p">(</span><span class="n">String</span><span class="w"> </span><span class="n">s</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="na">length</span><span class="p">();</span><span class="w"> </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Demo</span><span class="p">::</span><span class="n">len</span><span class="p">;</span><span class="w">        </span><span class="c1">// static</span>
+<span class="w">        </span><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">String</span><span class="p">::</span><span class="n">length</span><span class="p">;</span><span class="w">   </span><span class="c1">// unbound instance</span>
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="n">prefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;Hi &quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f3</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">prefix</span><span class="p">::</span><span class="n">concat</span><span class="p">;</span><span class="w">    </span><span class="c1">// bound instance</span>
+<span class="w">        </span><span class="n">Supplier</span><span class="o">&lt;</span><span class="n">StringBuilder</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f4</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">StringBuilder</span><span class="p">::</span><span class="k">new</span><span class="p">;</span><span class="w"> </span><span class="c1">// constructor</span>
+<span class="w">        </span><span class="n">IntFunction</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">[]&gt;</span><span class="w"> </span><span class="n">f5</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kt">int</span><span class="o">[]</span><span class="p">::</span><span class="k">new</span><span class="p">;</span><span class="w">              </span><span class="c1">// array constructor</span>
+
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">f1</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="s">&quot;abc&quot;</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">f2</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="s">&quot;abcd&quot;</span><span class="p">));</span><span class="w"> </span><span class="c1">// 3 + 4</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">f3</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="s">&quot;Sam&quot;</span><span class="p">));</span><span class="w">                    </span><span class="c1">// Hi Sam</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">f4</span><span class="p">.</span><span class="na">get</span><span class="p">().</span><span class="na">append</span><span class="p">(</span><span class="s">&quot;x&quot;</span><span class="p">));</span><span class="w">               </span><span class="c1">// x</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">f5</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="mi">3</span><span class="p">).</span><span class="na">length</span><span class="p">);</span><span class="w">                 </span><span class="c1">// 3</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="13-composing-predicates-and-functions">13. Composing Predicates and Functions</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">java.util.function.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo3</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">trim</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">String</span><span class="p">::</span><span class="n">trim</span><span class="p">;</span>
+<span class="w">        </span><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">upper</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">String</span><span class="p">::</span><span class="n">toUpperCase</span><span class="p">;</span>
+<span class="w">        </span><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">clean</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">trim</span><span class="p">.</span><span class="na">andThen</span><span class="p">(</span><span class="n">upper</span><span class="p">);</span>
+<span class="w">        </span><span class="n">Function</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">same</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">upper</span><span class="p">.</span><span class="na">compose</span><span class="p">(</span><span class="n">trim</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">clean</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="s">&quot;  java  &quot;</span><span class="p">));</span><span class="w"> </span><span class="c1">// JAVA</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">same</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="s">&quot;  java  &quot;</span><span class="p">));</span><span class="w">  </span><span class="c1">// JAVA</span>
+
+<span class="w">        </span><span class="n">Predicate</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">nonNull</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
+<span class="w">        </span><span class="n">Predicate</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">nonEmpty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">!</span><span class="n">s</span><span class="p">.</span><span class="na">isEmpty</span><span class="p">();</span>
+<span class="w">        </span><span class="n">Predicate</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">valid</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="n">nonNull</span><span class="p">.</span><span class="na">and</span><span class="p">(</span><span class="n">nonEmpty</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">valid</span><span class="p">.</span><span class="na">test</span><span class="p">(</span><span class="s">&quot;ok&quot;</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">valid</span><span class="p">.</span><span class="na">test</span><span class="p">(</span><span class="s">&quot;&quot;</span><span class="p">));</span><span class="w"> </span><span class="c1">// true false</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="14-a-custom-functional-interface-with-andthen">14. A Custom Functional Interface with andThen</h2>
+<div class="highlight"><pre><span></span><code><span class="nd">@FunctionalInterface</span>
+<span class="kd">interface</span> <span class="nc">IntOp</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="nf">apply</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">default</span><span class="w"> </span><span class="n">IntOp</span><span class="w"> </span><span class="nf">andThen</span><span class="p">(</span><span class="n">IntOp</span><span class="w"> </span><span class="n">after</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">after</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="k">this</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="n">x</span><span class="p">));</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo6</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">IntOp</span><span class="w"> </span><span class="n">inc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">        </span><span class="n">IntOp</span><span class="w"> </span><span class="n">dbl</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">        </span><span class="n">IntOp</span><span class="w"> </span><span class="n">pipeline</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">inc</span><span class="p">.</span><span class="na">andThen</span><span class="p">(</span><span class="n">dbl</span><span class="p">);</span><span class="w">      </span><span class="c1">// dbl(inc(x))</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">pipeline</span><span class="p">.</span><span class="na">apply</span><span class="p">(</span><span class="mi">5</span><span class="p">));</span><span class="w">  </span><span class="c1">// (5 + 1) * 2 = 12</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="15-common-pitfalls-and-errors">15. Common Pitfalls and Errors</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>String::length</code> "cannot be applied"</td>
+<td>Treated as bound when it is unbound</td>
+<td>Give it a <code>String</code> argument via <code>Function&lt;String, Integer&gt;</code></td>
+</tr>
+<tr>
+<td>Reference is ambiguous</td>
+<td>Overloaded method, unclear target</td>
+<td>Use an explicit lambda or cast to the target interface</td>
+</tr>
+<tr>
+<td><code>this</code> unexpectedly bound</td>
+<td><code>this::m</code> captures the enclosing instance</td>
+<td>Use a lambda, or capture a different receiver explicitly</td>
+</tr>
+<tr>
+<td>Wrong order in a pipeline</td>
+<td><code>compose</code> runs backwards</td>
+<td>Swap to <code>andThen</code>, or reverse the operands</td>
+</tr>
+<tr>
+<td>Unexpected side effects</td>
+<td>Consumers in an <code>andThen</code> chain all run</td>
+<td>Keep pipeline steps pure; isolate side effects</td>
+</tr>
+<tr>
+<td><code>cannot infer type arguments</code></td>
+<td>Generic method with no target hint</td>
+<td>Supply explicit type arguments, e.g. <code>this::&lt;String&gt;m</code></td>
+</tr>
+<tr>
+<td>Compile error on the interface</td>
+<td>Target is not a functional interface</td>
+<td>Use an interface with exactly one abstract method</td>
+</tr>
+</tbody>
+</table>
+<h2 id="16-myth-vs-reality">16. Myth vs Reality</h2>
+<p>Myth | Reality
+"<code>::</code> calls the method immediately." | It creates an interface instance; the method runs when the SAM is invoked.
+"<code>String::length</code> means length on the class." | It is unbound: the first argument supplies the receiver.
+"Method references and lambdas are different types." | They are two syntaxes for the same functional-interface value; the compiler desugars one to the other.
+"<code>compose</code> and <code>andThen</code> are the same." | They differ in order: <code>andThen</code> is left-to-right, <code>compose</code> is right-to-left.
+"Method references always improve readability." | For non-trivial logic an explicit lambda is clearer and safer.</p>
+<h2 id="17-common-trap-questions">17. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — "Is <code>System.out::println</code> static or bound?" It is a <strong>bound instance</strong> reference: the receiver is the <code>System.out</code> object, captured now.</p>
+<p>Trap 2 — "Can a method reference capture a non-final local?" No — the receiver must be effectively final, exactly like a captured lambda variable.</p>
+<p>Trap 3 — "What does <code>f.andThen(g).apply(x)</code> return?" <code>g(f(x))</code>. <code>andThen</code> executes the receiver first.</p>
+<p>Trap 4 — "Does <code>Predicate.and</code> evaluate both predicates?" No — it short-circuits, so the second runs only if the first is true.</p>
+<p>Trap 5 — "Where do variable arguments go in <code>Class::new</code>?" To the constructor whose signature matches the target's SAM; <code>Supplier</code> picks the no-arg constructor.</p>
+<p>Trap 6 — "Is <code>@FunctionalInterface</code> required to use a lambda?" No — it is optional documentation and a compile-time guard; only the SAM shape matters.</p>
+<p>Trap 7 — "Does <code>super::method</code> capture the same object as <code>this::method</code>?" It captures the same instance but dispatches to the superclass method.</p>
+</blockquote>
+<h2 id="18-points-to-remember">18. Points to Remember</h2>
+<ol>
+<li>A method reference is a lambda whose body is a single existing method call.</li>
+<li>Five kinds exist: static, bound instance, unbound instance, constructor, array constructor.</li>
+<li>Bound captures the receiver now; unbound takes the receiver as the first argument later.</li>
+<li>A method reference needs a target functional interface; the target's SAM fixes its type.</li>
+<li>Overload resolution for <code>::</code> follows the target's SAM signature, not the name alone.</li>
+<li><code>andThen</code> runs left-to-right; <code>compose</code> runs right-to-left; they are mirror images.</li>
+<li><code>Predicate</code> composes with <code>and</code>, <code>or</code>, <code>negate</code>, and the static <code>isEqual</code>, and short-circuits.</li>
+<li><code>Consumer.andThen</code> chains side effects; <code>Function.identity</code> and <code>UnaryOperator.identity</code> pass values through.</li>
+<li>Higher-order functions accept or return a functional interface; composition methods are higher-order.</li>
+<li>Captured locals must be effectively final, and a bound reference captures its receiver.</li>
+</ol>
+<h2 id="19-likely-interview-questions">19. Likely Interview Questions</h2>
+<p>Question | Crisp Answer
+What is a method reference? | A compact syntax (<code>::</code>) for a lambda that forwards to an existing method; the compiler desugars it to the equivalent lambda.
+Name the kinds of method references. | Static, bound instance, unbound instance, constructor, and array constructor.
+Difference between bound and unbound? | Bound captures a specific receiver and takes no receiver argument; unbound takes the receiver as the first argument.
+How is <code>String::length</code> typed? | By its target: <code>Function&lt;String, Integer&gt;</code>, <code>ToIntFunction&lt;String&gt;</code>, etc. The target fixes the SAM signature.
+What is target typing? | The compiler derives the type of a lambda or method reference from the functional interface it is assigned to.
+<code>andThen</code> vs <code>compose</code>? | <code>f.andThen(g)</code> is <code>g(f(x))</code>; <code>f.compose(g)</code> is <code>f(g(x))</code>. Order is opposite.
+How do you combine predicates? | <code>Predicate.and</code>, <code>Predicate.or</code>, <code>Predicate.negate</code>, and static <code>Predicate.isEqual</code>.
+What is <code>Function.identity()</code> for? | A <code>Function&lt;T, T&gt;</code> that returns its input; used as a mapper in collectors (Lecture 40).
+What is a higher-order function? | A method that takes and/or returns a functional interface, such as <code>andThen</code>.
+Why does <code>@FunctionalInterface</code> allow default methods? | Only abstract methods count toward the single-abstract-method rule; default and static methods are ignored.
+Can a method reference be ambiguous? | Yes, with overloaded methods; resolve it with an explicit lambda or a cast.
+What does a bound reference capture? | The receiver object, which must be effectively final, held for the reference's lifetime.</p>
+<h2 id="20-final-summary">20. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>lambda body: s -&gt; s.length()      ==     method reference: String::length
+five kinds:  static · bound · unbound · constructor · array-constructor
+composition: f.andThen(g) = g(f(x))      f.compose(g) = f(g(x))
+             predicate.and / or / negate / isEqual
+             consumer.andThen · Function.identity · UnaryOperator.identity
+pipelines:   trim.andThen(upper)      nonNull.and(nonEmpty)
+</code></pre></div>
+
+<ul>
+<li><code>::</code> → a short lambda pointing at one existing method, typed by its target interface</li>
+<li>Bound vs unbound → who supplies the receiver (captured now vs first argument)</li>
+<li><code>andThen</code> → left-to-right; <code>compose</code> → right-to-left; predicate <code>and/or/negate</code> short-circuit</li>
+<li>Higher-order → accepts or returns a functional interface; custom <code>@FunctionalInterface</code> + default <code>andThen</code></li>
+<li>Capture → effectively-final locals; a bound reference captures its receiver</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+Reach for <code>::</code> when the whole body is one method call; reach for a lambda when the body does anything more.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> a method reference is a named forwarding lambda, and composition methods turn those single steps into reusable pipelines.</p>
+<div class="pager"><a class="prev" href="lecture-37.html"><span class="dir">Previous</span><span class="ttl">Java Lambdas & Functional Interfaces</span></a><a class="next" href="lecture-39.html"><span class="dir">Next</span><span class="ttl">Introduction to Java Streams</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

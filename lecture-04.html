@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 04 · How Java Stores Negative & Floating Point Numbers — Java Notes</title>
+<meta name="description" content="How Java Stores Negative & Floating Point Numbers — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="4" data-lecture-title="How Java Stores Negative & Floating Point Numbers">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part" open><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-04.html#1-the-core-problem-pure-bits-carry-no-sign">1. The Core Problem: Pure Bits Carry No Sign</a></li><li><a href="lecture-04.html#2-two-candidate-designs-for-signed-integers">2. Two Candidate Designs for Signed Integers</a></li><li><a href="lecture-04.html#3-deriving-twos-complement-on-a-4-bit-machine">3. Deriving Two's Complement on a 4-Bit Machine</a></li><li><a href="lecture-04.html#4-scaling-up-the-32-bit-int-and-its-siblings">4. Scaling Up: the 32-Bit int and Its Siblings</a></li><li><a href="lecture-04.html#5-overflow-silent-wraparound-and-mathaddexact">5. Overflow: Silent Wraparound and Math.addExact</a></li><li><a href="lecture-04.html#6-the-bitwise-view-of-negatives">6. The Bitwise View of Negatives</a></li><li><a href="lecture-04.html#7-floating-point-the-ieee-754-layout">7. Floating Point: The IEEE 754 Layout</a></li><li><a href="lecture-04.html#8-special-values-infinity-nan-and-signed-zero">8. Special Values: Infinity, NaN and Signed Zero</a></li><li><a href="lecture-04.html#9-precision-problems-01-02-and-bigdecimal-for-money">9. Precision Problems: 0.1 + 0.2 and BigDecimal for Money</a></li><li><a href="lecture-04.html#10-comparison-and-rounding-traps">10. Comparison and Rounding Traps</a></li><li><a href="lecture-04.html#11-myth-vs-reality">11. Myth vs Reality</a></li><li><a href="lecture-04.html#12-common-trap-questions">12. Common Trap Questions</a></li><li><a href="lecture-04.html#13-points-to-remember">13. Points to Remember</a></li><li><a href="lecture-04.html#14-likely-interview-questions">14. Likely Interview Questions</a></li><li><a href="lecture-04.html#15-final-summary">15. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 1 · Java Basics · Lecture 04</p>
+<h1>How Java Stores Negative & Floating Point Numbers</h1>
+<p class="readmeta">15 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="4" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: lecture title "How Java Stores Negative &amp; Floating Point Numbers" (playlist map, verified). Repo lecture-04 folder contains one code file, <code>Demo.java</code>.</p>
+</blockquote>
+<p>Every variable in a Java program is just a finite sequence of bits, and a bit pattern carries no sign of its own. Two conventions decide what those bits mean: two's complement for integers and IEEE 754 for floating point. This topic matters whenever code sits near its limits — overflow bugs, money calculations, and precision questions fail silently, with no exception thrown. Interviewers use these boundaries precisely because they expose whether a candidate understands the machine underneath the language.</p>
+<h2 id="1-the-core-problem-pure-bits-carry-no-sign">1. The Core Problem: Pure Bits Carry No Sign</h2>
+<p>A bit can be 0 or 1. Memory has no "-" glyph and no decimal point. So the language must answer two independent questions by convention:</p>
+<ol>
+<li>How is the sign of an integer encoded? (Java's answer: two's complement.)</li>
+<li>How are fractions such as 0.1 stored in binary? (Java's answer: IEEE 754 sign + biased exponent + mantissa.)</li>
+</ol>
+<p>Definitions used throughout this note:</p>
+<ul>
+<li><strong>Two's complement</strong> — the integer encoding where the negation of a value is computed as "invert all bits, then add 1".</li>
+<li><strong>Biased exponent</strong> — an exponent stored as <code>actual exponent + bias</code> (a plain unsigned field), so negative exponents need no separate sign.</li>
+<li><strong>Mantissa (fraction)</strong> — the digit part of a floating point number; the exponent scales it by a power of two.</li>
+<li><strong>Precision</strong> — how many bits hold significant digits: 24 for <code>float</code>, 53 for <code>double</code>.</li>
+</ul>
+<p>Getting either convention wrong does not crash the program. It quietly produces wrong numbers, which is the more dangerous failure.</p>
+<h2 id="2-two-candidate-designs-for-signed-integers">2. Two Candidate Designs for Signed Integers</h2>
+<p>History offers three ways to fold a sign into bits:</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Sign-Magnitude</th>
+<th>One's Complement</th>
+<th>Two's Complement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>How to negate</td>
+<td>Flip the sign bit</td>
+<td>Invert all bits</td>
+<td>Invert all bits, then add 1</td>
+</tr>
+<tr>
+<td>Representation of zero</td>
+<td>Two zeros (+0, -0)</td>
+<td>Two zeros (+0, -0)</td>
+<td>One zero</td>
+</tr>
+<tr>
+<td>Hardware adder</td>
+<td>Needs special sign logic</td>
+<td>Needs end-around carry fix</td>
+<td>Plain binary adder works for all cases</td>
+</tr>
+<tr>
+<td>Zero pattern</td>
+<td><code>0000</code> and <code>1000</code></td>
+<td><code>0000</code> and <code>1111</code></td>
+<td><code>0000</code> only</td>
+</tr>
+<tr>
+<td>Used by Java</td>
+<td>No</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<p>Memory aid — the winning design keeps it singular: one zero, one adder, one rule ("invert and add 1").</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why two's complement and not a plain sign bit?" The crisp answer has three parts: there is exactly one zero (no +0/-0 ambiguity), the same adder circuit performs addition and subtraction because <code>a - b</code> becomes <code>a + (-b)</code>, and wrapping behaves like modular arithmetic, which keeps range checks simple. Two engineering consequences, not an aesthetic choice.</p>
+</blockquote>
+<h2 id="3-deriving-twos-complement-on-a-4-bit-machine">3. Deriving Two's Complement on a 4-Bit Machine</h2>
+<p>Four bits give 16 patterns. Read them as unsigned, then as two's complement:</p>
+<table>
+<thead>
+<tr>
+<th>Bit pattern</th>
+<th>As unsigned</th>
+<th>As two's complement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0000</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0001</td>
+<td>1</td>
+<td>1</td>
+</tr>
+<tr>
+<td>0010</td>
+<td>2</td>
+<td>2</td>
+</tr>
+<tr>
+<td>0011</td>
+<td>3</td>
+<td>3</td>
+</tr>
+<tr>
+<td>0100</td>
+<td>4</td>
+<td>4</td>
+</tr>
+<tr>
+<td>0101</td>
+<td>5</td>
+<td>5</td>
+</tr>
+<tr>
+<td>0110</td>
+<td>6</td>
+<td>6</td>
+</tr>
+<tr>
+<td>0111</td>
+<td>7</td>
+<td>maximum</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>8</td>
+<td>-8 (most negative)</td>
+</tr>
+<tr>
+<td>1001</td>
+<td>9</td>
+<td>-7</td>
+</tr>
+<tr>
+<td>1010</td>
+<td>10</td>
+<td>-6</td>
+</tr>
+<tr>
+<td>1011</td>
+<td>11</td>
+<td>-5</td>
+</tr>
+<tr>
+<td>1100</td>
+<td>12</td>
+<td>-4</td>
+</tr>
+<tr>
+<td>1101</td>
+<td>13</td>
+<td>-3</td>
+</tr>
+<tr>
+<td>1110</td>
+<td>14</td>
+<td>-2</td>
+</tr>
+<tr>
+<td>1111</td>
+<td>15</td>
+<td>-1</td>
+</tr>
+</tbody>
+</table>
+<p>Forming -5 in 4 bits: write 5 as <code>0101</code>, invert to get <code>1010</code>, add 1 to get <code>1011</code>. Verify by addition: <code>0101 + 1011 = 1 0000</code> — the carry out is discarded, the result is <code>0000</code>, exactly zero. That is the design goal: a value plus its negation must be zero with no special casing.</p>
+<p>Subtraction reuses the same trick. <code>7 - 5</code> becomes <code>7 + (-5)</code>: <code>0111 + 1011 = 1 0010</code> — discard the carry, read <code>0010</code> = 2. One adder handles both operations.</p>
+<p>Negative patterns are recognisable at a glance: every negative number has 1s in the leading positions. <code>-1</code> is all ones, <code>-2</code> is all ones except a trailing 0, and so on.</p>
+<h2 id="4-scaling-up-the-32-bit-int-and-its-siblings">4. Scaling Up: the 32-Bit int and Its Siblings</h2>
+<p>The same table scales by width. For n bits the range is [-2^(n-1), 2^(n-1) - 1]:</p>
+<ul>
+<li>4 bits: [-8, 7]</li>
+<li>32 bits (<code>int</code>): [-2^(31), 2^(31) - 1] = [-2,147,483,648 to 2,147,483,647]</li>
+<li>64 bits (<code>long</code>): [-2^(63), 2^(63) - 1]</li>
+</ul>
+<p>The range is asymmetric by exactly one on the negative side because zero consumes one of the 2^n patterns; -2^(n-1) has no positive twin of the same magnitude. Memory aid: "the bottom drops one" — the lower bound is -2^(n-1), the upper bound is 2^(n-1) minus one.</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Bits</th>
+<th>Minimum</th>
+<th>Maximum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>byte</code></td>
+<td>8</td>
+<td>-128</td>
+<td>127</td>
+</tr>
+<tr>
+<td><code>short</code></td>
+<td>16</td>
+<td>-32,768</td>
+<td>32,767</td>
+</tr>
+<tr>
+<td><code>int</code></td>
+<td>32</td>
+<td>-2,147,483,648</td>
+<td>2,147,483,647</td>
+</tr>
+<tr>
+<td><code>long</code></td>
+<td>64</td>
+<td>-9,223,372,036,854,775,808</td>
+<td>9,223,372,036,854,775,807</td>
+</tr>
+<tr>
+<td><code>char</code></td>
+<td>16</td>
+<td>0</td>
+<td>65,535 (unsigned — no negatives)</td>
+</tr>
+</tbody>
+</table>
+<p>The constants <code>Integer.MIN_VALUE</code>, <code>Integer.MAX_VALUE</code>, <code>Long.MIN_VALUE</code> and so on come from the wrapper types, and their values are fixed on every platform (architecture neutrality, Lecture 3). <code>char</code> is the one integer type where two's complement never applies, since it has no sign.</p>
+<h2 id="5-overflow-silent-wraparound-and-mathaddexact">5. Overflow: Silent Wraparound and Math.addExact</h2>
+<p>Two's complement arithmetic is modular. Past the top of the range, the value wraps to the bottom of the range — and Java throws nothing:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// OverflowDemo.java — int arithmetic never throws on overflow</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Integer</span><span class="p">.</span><span class="na">MAX_VALUE</span><span class="p">;</span><span class="w">                </span><span class="c1">// 2,147,483,647 = 0111...1111</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">max</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">                </span><span class="c1">// -2,147,483,648: wraps to MIN_VALUE</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">Integer</span><span class="p">.</span><span class="na">MIN_VALUE</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">  </span><span class="c1">// 2,147,483,647: wraps the other way</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Integer</span><span class="p">.</span><span class="na">MIN_VALUE</span><span class="p">;</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="o">-</span><span class="n">n</span><span class="p">);</span><span class="w">                     </span><span class="c1">// -2,147,483,648: negating MIN overflows too</span>
+<span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Math</span><span class="p">.</span><span class="na">addExact</span><span class="p">(</span><span class="n">max</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">                  </span><span class="c1">// detects overflow explicitly</span>
+<span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">ArithmeticException</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;caught: &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">e</span><span class="p">);</span><span class="w">     </span><span class="c1">// integer overflow</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The bit view explains it: <code>MAX_VALUE</code> is <code>0111...1111</code>; adding 1 flips it to <code>1000...0000</code>, which is <code>Integer.MIN_VALUE</code>. No error bit is checked, so the wrap is silent.</p>
+<p>Detection is opt-in through the <code>*Exact</code> family: <code>Math.addExact</code>, <code>Math.subtractExact</code>, <code>Math.multiplyExact</code>, <code>Math.negateExact</code> — each throws <code>ArithmeticException</code> on overflow. <code>Math.negateExact(Integer.MIN_VALUE)</code> throws, because its positive twin does not exist.</p>
+<blockquote class="callout callout--important">
+<p>Important
+Plain int arithmetic never throws on overflow — not <code>+</code>, not <code>-</code>, not <code>*</code>, and not casting (narrowing is covered in Lecture 5). Only the <code>Math.*Exact</code> methods throw.</p>
+</blockquote>
+<h2 id="6-the-bitwise-view-of-negatives">6. The Bitwise View of Negatives</h2>
+<p>Three facts collapse into one identity:</p>
+<ol>
+<li>Adding a value to its bitwise complement fills the pattern with 1s: <code>x + ~x = 111...111</code>, and all-ones as two's complement represents -1.</li>
+<li>Therefore <code>~x = -1 - x</code>, which is the examinable identity: <code>~x = -(x + 1)</code>.</li>
+<li>For a negative value, the magnitude is recovered by the same recipe used to build it: invert the bits and add 1.</li>
+</ol>
+<p>Concrete checks worth remembering: <code>~-7 = 6</code>, <code>~5 = -6</code>, <code>Integer.toHexString(-1)</code> is <code>ffffffff</code>, and <code>Integer.toBinaryString(-5)</code> prints 32 characters: <code>11111111111111111111111111111011</code> — the "leading 1s" are visible directly.</p>
+<p>Consequence: <code>Math.abs(Integer.MIN_VALUE)</code> returns <code>Integer.MIN_VALUE</code> itself, in both the <code>int</code> and <code>long</code> versions. The absolute value 2^31 cannot fit, so negation wraps back down.</p>
+<h2 id="7-floating-point-the-ieee-754-layout">7. Floating Point: The IEEE 754 Layout</h2>
+<p>Floating point is scientific notation in binary: a sign, a scaled exponent, and a fractional digit field — stored with no overall sign field for the exponent (that is what the bias replaces).</p>
+<div class="highlight"><pre><span></span><code>value = (-1)^sign  *  1.mantissa  *  2^(stored exponent - bias)
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>float (32 bits)</th>
+<th>double (64 bits)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sign bit</td>
+<td>1</td>
+<td>1</td>
+</tr>
+<tr>
+<td>Exponent field</td>
+<td>8 bits</td>
+<td>11 bits</td>
+</tr>
+<tr>
+<td>Mantissa (fraction) bits</td>
+<td>23</td>
+<td>52</td>
+</tr>
+<tr>
+<td>Exponent bias</td>
+<td>127</td>
+<td>1023</td>
+</tr>
+<tr>
+<td>Effective exponent range</td>
+<td>-126 to 127</td>
+<td>-1022 to 1023</td>
+</tr>
+<tr>
+<td>Largest exact integer</td>
+<td>2^24 = 16,777,216</td>
+<td>2^53 = 9,007,199,254,740,992</td>
+</tr>
+<tr>
+<td>Approximate magnitude</td>
+<td>+/-3.4 * 10^38</td>
+<td>+/-1.8 * 10^308</td>
+</tr>
+<tr>
+<td>Literal default</td>
+<td>double, suffix <code>f</code> for float</td>
+<td>double (the default)</td>
+</tr>
+</tbody>
+</table>
+<p>The mantissa stores only the fraction; the leading <code>1</code> is implied and costs no bit. That is why a 23-bit fraction field delivers 24 bits of precision. <code>double</code>, at 1 + 11 + 52 bits, delivers a 53-bit mantissa. Memory aid for the splits: float is "1-8-23", double is "1-11-52" — and a full deck of cards (52) tells you which one is the double.</p>
+<p>Why a bias instead of a signed exponent? One unsigned field covers negative and positive exponents, and comparing the raw exponent field orders numbers by magnitude — the hardware Comparator comes free.</p>
+<p>This table extends Lecture 3's data-type list with the internal view: literals like <code>3.14</code> and <code>1e3</code> are <code>double</code> by default; <code>3.14f</code> and <code>1e3f</code> are <code>float</code>. Scientific-notation literals (<code>1e3</code>, <code>2.5E-4</code>) are one storage scheme away from what follows: decode <code>0.1</code> and you get sign 0, stored exponent <code>127 - 4 = 123</code> (since 0.1 = 1.6 x 2^-4), and a fraction field holding the repeating pattern <code>1001 1001 1001...</code>. The pattern is infinite; the 52 available bits are not. That is the entire origin of the next section's surprises.</p>
+<h2 id="8-special-values-infinity-nan-and-signed-zero">8. Special Values: Infinity, NaN and Signed Zero</h2>
+<p>IEEE 754 defines four reserved patterns and their arithmetic (positive infinity, negative infinity, NaN, and a signed zero):</p>
+<table>
+<thead>
+<tr>
+<th>Expression</th>
+<th>Result</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>1.0 / 0.0</code></td>
+<td><code>Infinity</code></td>
+<td>IEEE 754 defines division to infinity; no exception (unlike int <code>1/0</code>)</td>
+</tr>
+<tr>
+<td><code>-1.0 / 0.0</code></td>
+<td><code>-Infinity</code></td>
+<td>Sign folds into infinity</td>
+</tr>
+<tr>
+<td><code>0.0 / 0.0</code></td>
+<td><code>NaN</code></td>
+<td>Undefined value — not a number</td>
+</tr>
+<tr>
+<td><code>Math.sqrt(-9)</code></td>
+<td><code>NaN</code></td>
+<td>No real result</td>
+</tr>
+<tr>
+<td><code>Infinity - Infinity</code></td>
+<td><code>NaN</code></td>
+<td>Indeterminate form</td>
+</tr>
+<tr>
+<td><code>0.0 == -0.0</code></td>
+<td><code>true</code></td>
+<td><code>==</code> cannot see the sign of zero</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="c1">// SpecialsDemo.java — NaN and the two zeros</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">0.0</span><span class="p">);</span><span class="w">                 </span><span class="c1">// Infinity</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="mf">0.0</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">0.0</span><span class="p">);</span><span class="w">                 </span><span class="c1">// NaN</span>
+<span class="kt">double</span><span class="w"> </span><span class="n">nan</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Math</span><span class="p">.</span><span class="na">sqrt</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">nan</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">Double</span><span class="p">.</span><span class="na">NaN</span><span class="p">);</span><span class="w">         </span><span class="c1">// false: NaN equals nothing, not even itself</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">Double</span><span class="p">.</span><span class="na">isNaN</span><span class="p">(</span><span class="n">nan</span><span class="p">));</span><span class="w">         </span><span class="c1">// true: the correct check</span>
+<span class="kt">double</span><span class="w"> </span><span class="n">z1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="n">z2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="mf">0.0</span><span class="p">;</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">z1</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">z2</span><span class="p">);</span><span class="w">                  </span><span class="c1">// true: == reports both zeros equal</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">z2</span><span class="p">);</span><span class="w">                  </span><span class="c1">// -Infinity: the sign of zero surfaces here</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">Double</span><span class="p">.</span><span class="na">compare</span><span class="p">(</span><span class="n">z1</span><span class="p">,</span><span class="w"> </span><span class="n">z2</span><span class="p">));</span><span class="w">    </span><span class="c1">// -1: Double.compare distinguishes them</span>
+</code></pre></div>
+
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+A sharp follow-up is: "Why does halving integers wrap silently while floating division to zero produces Infinity?" Answer: the integer spec keeps wraparound for hardware simplicity and defines no infinity for ints, while IEEE 754 explicitly designs infinity and NaN in so that partial results never abort a long computation. Both "silent" behaviours are specification, not negligence.</p>
+</blockquote>
+<h2 id="9-precision-problems-01-02-and-bigdecimal-for-money">9. Precision Problems: 0.1 + 0.2 and BigDecimal for Money</h2>
+<p>Binary fractions can only be sums of negative powers of two: 1/2, 1/4, 1/8, and so on. Storing 1/10 needs an infinite repeating pattern, so every "nice" decimal is stored as a nearby binary approximation. The errors are tiny individually — and they compound:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// PrecisionDemo.java — approximations and the exact tool</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="mf">0.1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">0.2</span><span class="p">);</span><span class="w">                 </span><span class="c1">// 0.30000000000000004</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="mf">0.1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">0.2</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mf">0.3</span><span class="p">);</span><span class="w">          </span><span class="c1">// false</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mf">0.9</span><span class="p">);</span><span class="w">                 </span><span class="c1">// 0.09999999999999998</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="mf">0.1f</span><span class="p">);</span><span class="w">                      </span><span class="c1">// 0.1 prints literal-style, but ...</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="mf">0.1f</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mf">0.1</span><span class="p">);</span><span class="w">               </span><span class="c1">// false: float and double store different approximations</span>
+<span class="n">BigDecimal</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">BigDecimal</span><span class="p">(</span><span class="s">&quot;0.1&quot;</span><span class="p">);</span><span class="w">          </span><span class="c1">// String constructor: exact decimal digits</span>
+<span class="n">BigDecimal</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">BigDecimal</span><span class="p">(</span><span class="s">&quot;0.2&quot;</span><span class="p">);</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="na">add</span><span class="p">(</span><span class="n">b</span><span class="p">));</span><span class="w">                  </span><span class="c1">// 0.3</span>
+<span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="na">equals</span><span class="p">(</span><span class="n">b</span><span class="p">.</span><span class="na">add</span><span class="p">(</span><span class="n">a</span><span class="p">)));</span><span class="w">        </span><span class="c1">// false: equals() compares scale, use compareTo</span>
+</code></pre></div>
+
+<p>Rules for money and other exact quantities:</p>
+<ol>
+<li>Never accumulate <code>double</code>/<code>float</code> values and compare with <code>==</code>.</li>
+<li>Use <code>BigDecimal</code> built from a <code>String</code> literal — <code>new BigDecimal("0.1")</code>. Do not pass the double (<code>new BigDecimal(0.1)</code> captures the binary approximation it was given).</li>
+<li>Compare <code>BigDecimal</code> with <code>compareTo</code> (equals is scale-sensitive: <code>1.0</code> vs <code>1.00</code>).</li>
+<li>Compare doubles numerically with an epsilon: <code>Math.abs(x - y) &lt; 1e-9</code>, or <code>Double.compare</code>.</li>
+</ol>
+<h2 id="10-comparison-and-rounding-traps">10. Comparison and Rounding Traps</h2>
+<p>Comparing an <code>int</code> with a <code>float</code> mixes the two encodings: binary numeric promotion widens the <code>int</code> to <code>float</code> first (the full conversion ladder — Lecture 5), and wide integers can lose precision on the way because <code>float</code> holds only 24 bits of mantissa:</p>
+<ul>
+<li><code>16777217 == 16777216f</code> is <code>true</code>. The int <code>16777217</code> (2^24 + 1) needs 25 bits; converted to float it rounds down to <code>16777216f</code>, so the comparison compares <code>16777216f</code> with <code>16777216f</code>.</li>
+<li>The exactness limit is 2^24 for float and 2^53 for double. Past those points, consecutive integers stop being distinguishable.</li>
+</ul>
+<p>Rounding has its own asymmetry. <code>Math.round</code> rounds half <strong>up</strong> — toward positive infinity, not away from zero:</p>
+<ol>
+<li><code>Math.round(2.5)</code> is <code>3</code> — half up.</li>
+<li><code>Math.round(-2.5)</code> is <code>-2</code> — still half up, which for negative halves means toward +infinity.</li>
+<li><code>Math.round</code> returns <code>long</code> for a double argument and <code>int</code> for a float argument.</li>
+<li>Contrast: <code>Math.rint(2.5)</code> is <code>2</code> (ties to even, IEEE default), and <code>BigDecimal</code> with <code>RoundingMode.HALF_UP</code> on -2.5 gives <code>-3</code> (away from zero) — so "half up" means different things in different APIs. For money, name your <code>RoundingMode</code> explicitly.</li>
+</ol>
+<h2 id="11-myth-vs-reality">11. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Negative numbers are stored as sign bit + magnitude"</td>
+<td>Java uses two's complement: negate = invert + 1. The leading 1 in a negative pattern is a consequence, not a sign flag.</td>
+</tr>
+<tr>
+<td>"Integer overflow throws an exception"</td>
+<td><code>+</code>, <code>-</code>, <code>*</code> wrap silently (MAX_VALUE + 1 == MIN_VALUE); only the <code>Math.*Exact</code> methods throw.</td>
+</tr>
+<tr>
+<td>"float and double can store 0.1 exactly"</td>
+<td>1/10 is a repeating binary fraction; both types store approximations. Use BigDecimal with a String for exact decimals.</td>
+</tr>
+<tr>
+<td>"NaN is equal to NaN"</td>
+<td><code>NaN == NaN</code> is false by design; test with <code>Double.isNaN</code> or <code>Double.compare</code>.</td>
+</tr>
+<tr>
+<td>"A float can hold any int exactly"</td>
+<td>float carries a 24-bit mantissa: integers above 16,777,216 (2^24) round, and int-to-float comparisons silently compare rounded values.</td>
+</tr>
+<tr>
+<td>"The literal 1e3 is a float"</td>
+<td>Scientific-notation literals are double by default; <code>1e3f</code> is the float form (Lecture 3).</td>
+</tr>
+<tr>
+<td>"Math.round(-2.5) is -3"</td>
+<td>Math.round is half up toward +infinity: -2.5 rounds to -2. Only BigDecimal HALF_UP rounds away from zero.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="12-common-trap-questions">12. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — Range off-by-one: "int's range is -2^31 to +2^31."
+Wrong on both ends' shapes: it is [-2^(31), 2^(31) - 1]. The one-pattern asymmetry exists because zero occupies a pattern. Same shape at 4 bits: [-8, 7].</p>
+<p>Trap 2 — "Integer.MAX_VALUE + 1 throws an exception."
+No. It silently wraps to Integer.MIN_VALUE. Java only throws through the <code>Math.*Exact</code> methods (an ArithmeticException). This is the single most repeated overflow fact in interviews.</p>
+<p>Trap 3 — "If a number fits in int's range, a float can store it exactly."
+No. float has a 24-bit mantissa: 16,777,217 (2^24 + 1) is not representable, and <code>16777217 == 16777216f</code> is true — the int is widened to float and rounded before the comparison.</p>
+<p>Trap 4 — "0.1 + 0.2 != 0.3 is a Java bug; casting or double arithmetic fixes it."
+No fix exists in binary floating point: 0.1 is not representable exactly at any precision. The fix is BigDecimal from a String (or epsilon comparison), not another cast.</p>
+<p>Trap 5 — "Check for NaN with <code>d == Double.NaN</code>."
+Never true — NaN is defined unequal to everything, including itself. Use <code>Double.isNaN(d)</code>, <code>d != d</code>, or <code>Double.compare(d, Double.NaN) == 0</code>.</p>
+<p>Trap 6 — "Math.round is symmetric: round(2.5) = 3, so round(-2.5) = -3."
+The second half is false. Math.round is half up (toward +infinity): round(-2.5) = -2, round(-0.5) = 0.</p>
+<p>Trap 7 — "Dividing by zero behaves the same for int and double."
+Different by design: <code>1 / 0</code> throws ArithmeticException, while <code>1.0 / 0.0</code> produces Infinity and <code>0.0 / 0.0</code> produces NaN.</p>
+</blockquote>
+<h2 id="13-points-to-remember">13. Points to Remember</h2>
+<ol>
+<li>Integers use two's complement: negate = invert all bits, then add 1; a value plus its negation is always 0 with no special case.</li>
+<li>There is exactly one zero pattern; hence the range for n bits is [-2^(n-1), 2^(n-1) - 1] — the negative side is one larger in magnitude.</li>
+<li>int range: -2,147,483,648 to 2,147,483,647. Subtraction is hardware addition: <code>a - b == a + (-b)</code>.</li>
+<li>Overflow wraps silently: <code>Integer.MAX_VALUE + 1 == Integer.MIN_VALUE</code>; <code>Math.addExact</code> and the <code>*Exact</code> family throw <code>ArithmeticException</code> instead.</li>
+<li><code>~x == -(x + 1)</code>; -1 is all 1s (<code>0xffffffff</code>); the magnitude of a negative is recovered by invert + 1; <code>Math.abs(Integer.MIN_VALUE)</code> is still <code>Integer.MIN_VALUE</code>.</li>
+<li>Floating point is IEEE 754: 1 sign bit + biased exponent + mantissa; float is 1-8-23 with bias 127, double is 1-11-52 with bias 1023.</li>
+<li>The exponent is stored biased (actual + 127 or + 1023) so a single unsigned field expresses negative exponents.</li>
+<li>Binary fractions cannot represent 0.1 exactly; <code>0.1 + 0.2 == 0.3</code> is false; money belongs to <code>BigDecimal</code> built from Strings, compared with <code>compareTo</code>.</li>
+<li>NaN equals nothing (<code>Double.isNaN</code> to test), infinity absorbs overflow in floating arithmetic, <code>0.0 == -0.0</code> is true but <code>Double.compare</code> separates them.</li>
+<li>Math.round is half up toward +infinity (<code>round(-2.5) == -2</code>); scientific-notation literals are double by default (Lecture 3); conversion precision loss on int-to-float comparison is a Lecture 5 topic.</li>
+</ol>
+<h2 id="14-likely-interview-questions">14. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>How are negative integers stored in Java?</td>
+<td>Two's complement: negate = invert bits + 1. The leading 1 of a negative pattern is a consequence, not a sign flag.</td>
+</tr>
+<tr>
+<td>Why two's complement instead of sign-magnitude?</td>
+<td>One representation of zero, and the plain adder does subtraction as addition of the complement — no extra circuitry.</td>
+</tr>
+<tr>
+<td>What is the exact range of int and why is it asymmetric?</td>
+<td>[-2,147,483,648, 2,147,483,647] = [-2^31, 2^31 - 1]; zero consumes one pattern, so the negative bound goes one lower.</td>
+</tr>
+<tr>
+<td>What does Integer.MAX_VALUE + 1 print, and why?</td>
+<td>-2,147,483,648. Silent wraparound (modular two's complement); no exception at runtime.</td>
+</tr>
+<tr>
+<td>How do you detect integer overflow safely?</td>
+<td><code>Math.addExact</code> / <code>subtractExact</code> / <code>multiplyExact</code> / <code>negateExact</code> — they throw ArithmeticException on overflow.</td>
+</tr>
+<tr>
+<td>What does <code>~x</code> evaluate to?</td>
+<td><code>-(x + 1)</code>, because <code>x + ~x</code> leaves all 1s, which represent -1 in two's complement.</td>
+</tr>
+<tr>
+<td>What does Math.abs(Integer.MIN_VALUE) return?</td>
+<td>Integer.MIN_VALUE itself: 2^31 does not fit in int, so negation overflows back.</td>
+</tr>
+<tr>
+<td>How is a floating point number stored in memory?</td>
+<td>IEEE 754: 1 sign bit, biased exponent (8 bits/bias 127 for float; 11 bits/bias 1023 for double), mantissa fraction (23/52 bits).</td>
+</tr>
+<tr>
+<td>Why is the exponent stored biased?</td>
+<td>A single unsigned field then covers negative and positive exponents, and raw-field ordering matches numeric ordering.</td>
+</tr>
+<tr>
+<td>Why is 0.1 + 0.2 != 0.3?</td>
+<td>0.1 is a repeating binary fraction; both stored operands are approximations and their sum misses 0.3's approximation.</td>
+</tr>
+<tr>
+<td>How should money be computed in Java?</td>
+<td>BigDecimal from String literals, explicit RoundingMode, compareTo for equality — never raw double accumulation.</td>
+</tr>
+<tr>
+<td>How do you test whether a double is NaN?</td>
+<td><code>Double.isNaN(x)</code> (or <code>x != x</code>). <code>x == Double.NaN</code> is always false because NaN is unequal to everything.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="15-final-summary">15. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>integers in memory:   two&#39;s complement → negate = invert + 1 → one zero → [-2^(n-1), 2^(n-1) - 1]
+overflow:             past the range → wraparound (MAX_VALUE + 1 == MIN_VALUE) → detected by Math.*Exact
+bitwise shorthand:    ~x → -(x + 1)  |  -1 → all 1s  |  magnitude of negative → invert + 1
+floating in memory:   sign (1) + biased exponent (8/11) + mantissa (23/52) → (-1)^s * 1.m * 2^(e - bias)
+specials:             overflow of division → Infinity  |  undefined → NaN (never == NaN)  |  two zeros, one ==, two values
+decimals:             binary fractions → 0.1 approximate → 0.1 + 0.2 = 0.300...004 → BigDecimal(String) for money
+</code></pre></div>
+
+<ul>
+<li>Two's complement → one zero, subtraction-free hardware, wraparound range</li>
+<li>Floats → sign + biased exponent + mantissa; precision is 24/53 significant bits</li>
+<li>Approximation → every decimal like 0.1 is inexact in binary; BigDecimal is the exact tool</li>
+<li>Specials → Infinity and NaN designed in; signed zero equal under ==, distinct under compare</li>
+<li>Rounding → Math.round is half up toward +infinity; BigDecimal takes an explicit RoundingMode</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+Integers wrap silently because the encoding is modular; decimals approximate because binary fractions cannot spell most decimal digits. Every surprise in this note follows from those two facts.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> negative integers live as "invert and add 1" patterns that wrap like an odometer, and floating point numbers live as approximate powers of two — forget either and the machine quietly decides correctness for you.</p>
+<div class="pager"><a class="prev" href="lecture-03.html"><span class="dir">Previous</span><span class="ttl">Java Variables & Data Types</span></a><a class="next" href="lecture-05.html"><span class="dir">Next</span><span class="ttl">Java Type Conversions & Type Promotions Explained</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 14 · Objects Deep Dive — Java Notes</title>
+<meta name="description" content="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="14" data-lecture-title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-14.html#1-what-an-object-is-identity-state-and-the-reference">1. What an Object Is: Identity, State and the Reference</a></li><li><a href="lecture-14.html#2-object-size-in-memory-header-fields-and-padding">2. Object Size in Memory: Header, Fields and Padding</a></li><li><a href="lecture-14.html#3-java-is-always-pass-by-value-primitives">3. Java Is Always Pass-by-Value: Primitives</a></li><li><a href="lecture-14.html#4-pass-by-value-for-objects-the-reference-value-is-copied">4. Pass-by-Value for Objects: The Reference Value Is Copied</a></li><li><a href="lecture-14.html#5-pass-by-value-illustrated">5. Pass-by-Value Illustrated</a></li><li><a href="lecture-14.html#6-the-swap-that-never-works-and-the-vs-equals-preview">6. The Swap That Never Works and the == vs equals Preview</a></li><li><a href="lecture-14.html#7-shallow-copy-one-new-object-shared-insides">7. Shallow Copy: One New Object, Shared Insides</a></li><li><a href="lecture-14.html#8-deep-copy-independent-object-graphs">8. Deep Copy: Independent Object Graphs</a></li><li><a href="lecture-14.html#9-shallow-vs-deep-copy">9. Shallow vs Deep Copy</a></li><li><a href="lecture-14.html#10-the-clone-contract-and-why-it-is-awkward">10. The clone() Contract and Why It Is Awkward</a></li><li><a href="lecture-14.html#11-copy-constructor-vs-clone-vs-static-copy-factory">11. Copy Constructor vs clone() vs Static Copy Factory</a></li><li><a href="lecture-14.html#12-pitfalls-and-best-practices">12. Pitfalls and Best Practices</a></li><li><a href="lecture-14.html#13-myth-vs-reality">13. Myth vs Reality</a></li><li><a href="lecture-14.html#14-common-trap-questions">14. Common Trap Questions</a></li><li><a href="lecture-14.html#15-points-to-remember">15. Points to Remember</a></li><li><a href="lecture-14.html#16-likely-interview-questions">16. Likely Interview Questions</a></li><li><a href="lecture-14.html#17-final-summary">17. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 2 · Arrays & OOP Core · Lecture 14</p>
+<h1>Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy</h1>
+<p class="readmeta">17 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="14" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: lecture title "Objects Deep Dive | Size, Call by Value vs Reference | Shallow vs Deep Copy" (playlist map, verified). Repo evidence: 2 Demo files (<code>Demo.java</code>, <code>Demo2.java</code>). The cached lecture PDF is image-only and is ignored per project rules.</p>
+</blockquote>
+<p>Two objects can look identical in source and yet behave differently in memory once one is copied and the other is shared. This lecture opens an object up and measures it: what bytes an object really occupies, why an empty object is never free, and why Java's calling convention is always pass-by-value even for objects. It then builds the two coping strategies for an object graph — the cheap shallow copy that shares its insides, and the expensive deep copy that owns them — and finishes with the <code>clone()</code> contract and the aliasing bug that shallow copying is famous for. The class/object basics come from Lecture 12, constructors and <code>this</code> from Lecture 13, and the <code>equals</code>/<code>hashCode</code> comparison is a preview of Lecture 22.</p>
+<h2 id="1-what-an-object-is-identity-state-and-the-reference">1. What an Object Is: Identity, State and the Reference</h2>
+<p>An object is a heap-allocated region of memory that bundles three things:</p>
+<ol>
+<li><strong>Identity</strong> — a unique existence independent of its values, represented by the reference that points at it.</li>
+<li><strong>State</strong> — the values stored in its instance fields.</li>
+<li><strong>Behaviour</strong> — the methods defined by its class.</li>
+</ol>
+<p>A variable of a class type does not <em>hold</em> an object; it holds a <strong>reference</strong> — a value that identifies a heap location. That single fact explains both halves of this lecture: object size is the size of the heap region, and pass-by-value is the copying of the reference value rather than the object. Identity is what makes copying subtle: if you copy the reference, two names now describe one identity; if you copy the object, one identity becomes two.</p>
+<blockquote class="callout callout--important">
+<p>Important
+A reference is a value in its own right. You can copy it, compare it, reassign it and pass it — all without ever touching the object it points to. Confusing the reference with the object is the root of almost every misconception in this lecture.</p>
+</blockquote>
+<h2 id="2-object-size-in-memory-header-fields-and-padding">2. Object Size in Memory: Header, Fields and Padding</h2>
+<p>An object's footprint is <strong>not</strong> simply the sum of its fields. On a 64-bit HotSpot JVM it is:</p>
+<div class="highlight"><pre><span></span><code>object size = header + instance fields + padding
+</code></pre></div>
+
+<ol>
+<li><strong>Object header (~12–16 bytes)</strong> — the <strong>mark word</strong> (8 bytes: hash, GC age, lock state) plus the <strong>class pointer</strong> (4 bytes with compressed oops, 8 without), totalling 12 or 16 bytes.</li>
+<li><strong>Instance fields</strong> — the declared non-static fields of the class and its superclasses. A reference field costs 4 bytes with compressed oops (heap up to 32 GB), 8 bytes otherwise. <code>boolean</code>/<code>byte</code> cost 1 byte each (not 1 bit).</li>
+<li><strong>Padding</strong> — the JVM aligns every object so its start address is a multiple of <strong>8 bytes</strong>. The tail is padded out to that boundary.</li>
+<li><strong>Arrays add a length field</strong> — an array has the header, a 4-byte <code>length</code>, then the elements, then padding.</li>
+</ol>
+<p>So an empty object is never 0 bytes — it is at least the header (12 bytes, padded to 16). A class with two <code>int</code> fields (<code>class Point { int x; int y; }</code>) stores 8 bytes of state on top of that header, then pads; the JOL tool (<code>ClassLayout.parseInstance(obj).toPrintable()</code>) prints the exact header, fields and padding rather than leaving it to guesswork. Note that the exact layout depends on the JVM, whether compressed oops are on, and field ordering, which the JVM may reorder for packing.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"How big is an <code>Integer</code> object?" The field is one <code>int</code> (4 bytes), but the object is header (12) + value (4) + padding (0) = <strong>16 bytes</strong>. Relating the wrapper size to a primitive's 4 bytes is the whole point of the question, and it forwards to the autoboxing discussion (Lecture 18).</p>
+</blockquote>
+<h2 id="3-java-is-always-pass-by-value-primitives">3. Java Is Always Pass-by-Value: Primitives</h2>
+<p>Java has exactly one argument-passing mechanism: <strong>pass-by-value</strong>. A method receives a copy of whatever expression the caller evaluated. For a primitive argument, the copy is the primitive value itself, so the method can change its local copy but never the caller's variable.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — primitives: the value is copied</span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">change</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">99</span><span class="p">;</span><span class="w">                     </span><span class="c1">// rebinds the local copy only</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">swap</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">a</span><span class="p">;</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">b</span><span class="p">;</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">t</span><span class="p">;</span><span class="w">    </span><span class="c1">// swaps the copies; caller is untouched</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span><span class="p">;</span>
+<span class="w">        </span><span class="n">change</span><span class="p">(</span><span class="n">n</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">n</span><span class="p">);</span><span class="w">              </span><span class="c1">// 10 — unchanged</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">        </span><span class="n">swap</span><span class="p">(</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">a</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">);</span><span class="w">    </span><span class="c1">// 1 2 — the classic failed swap</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The failed <code>swap</code> is the cleanest proof that Java does not pass by reference: if <code>a</code> and <code>b</code> were references to the caller's variables, the swap would work. It cannot, because the method only ever owned copies.</p>
+<h2 id="4-pass-by-value-for-objects-the-reference-value-is-copied">4. Pass-by-Value for Objects: The Reference Value Is Copied</h2>
+<p>For an object argument, the value that gets copied is the <strong>reference</strong> — the address of the object, not the object. This produces two very different behaviours inside the method's body:</p>
+<ol>
+<li><strong>Mutating the object</strong> through the copied reference (<code>box.value = 99;</code>) writes into the one shared object, so the <strong>caller sees the change</strong>.</li>
+<li><strong>Reassigning the parameter</strong> (<code>box = new Box(0);</code>) rebinds only the local copy of the reference; the caller's reference still points at the original object, so <strong>the caller sees no change</strong>.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo2.java — objects: the reference value is copied</span>
+<span class="kd">class</span> <span class="nc">Box</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">value</span><span class="p">;</span><span class="w"> </span><span class="n">Box</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">v</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">v</span><span class="p">;</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo2</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">mutate</span><span class="p">(</span><span class="n">Box</span><span class="w"> </span><span class="n">box</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">box</span><span class="p">.</span><span class="na">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">99</span><span class="p">;</span><span class="w">             </span><span class="c1">// follows the copied reference: caller sees it</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">reassign</span><span class="p">(</span><span class="n">Box</span><span class="w"> </span><span class="n">box</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">box</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Box</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w">           </span><span class="c1">// rebinds the local copy only</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Box</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Box</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span>
+<span class="w">        </span><span class="n">mutate</span><span class="p">(</span><span class="n">b</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">b</span><span class="p">.</span><span class="na">value</span><span class="p">);</span><span class="w">    </span><span class="c1">// 99 — mutation is visible</span>
+<span class="w">        </span><span class="n">reassign</span><span class="p">(</span><span class="n">b</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">b</span><span class="p">.</span><span class="na">value</span><span class="p">);</span><span class="w">    </span><span class="c1">// 99 — caller&#39;s reference unchanged</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The correct phrasing is therefore <strong>"Java passes the reference by value"</strong>, or more simply "Java is always pass-by-value; for objects the copied value is a reference". "Java passes objects by reference" is wrong, because the parameter is still a copy — it just happens to be a copy of an address.</p>
+<blockquote class="callout callout--important">
+<p>Important
+Mutate through the parameter and the caller sees it; reassign the parameter and the caller does not. Holding both rules at once is the mark of someone who truly understands Java's calling convention.</p>
+</blockquote>
+<h2 id="5-pass-by-value-illustrated">5. Pass-by-Value Illustrated</h2>
+<table>
+<thead>
+<tr>
+<th>Argument kind</th>
+<th>What is copied</th>
+<th>Mutation inside the method</th>
+<th>Reassignment inside the method</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Primitive (<code>int</code>, <code>double</code>)</td>
+<td>The primitive value</td>
+<td>Local copy only — caller unchanged</td>
+<td>Local copy only — caller unchanged</td>
+</tr>
+<tr>
+<td>Object reference</td>
+<td>The reference value (address)</td>
+<td>Visible to the caller — same object is written</td>
+<td>Caller's reference unchanged</td>
+</tr>
+<tr>
+<td>Array reference</td>
+<td>The reference value (address)</td>
+<td><code>arr[i] = x</code> is visible; element writes persist</td>
+<td><code>arr = new int[5]</code> is local — caller's array unchanged</td>
+</tr>
+<tr>
+<td><code>String</code> reference</td>
+<td>The reference value (address)</td>
+<td>No mutation possible — <code>String</code> is immutable (Lecture 25)</td>
+<td>Caller's reference unchanged</td>
+</tr>
+<tr>
+<td><code>final</code> parameter</td>
+<td>The value, as always</td>
+<td>Object contents may still be mutated</td>
+<td>Reassignment is a compile error</td>
+</tr>
+</tbody>
+</table>
+<p>Reading the table: the left column never changes — the value is always copied. What varies is whether that copied value is a primitive or an address, and therefore whether an operation <em>through</em> it can reach the caller's state.</p>
+<h2 id="6-the-swap-that-never-works-and-the-vs-equals-preview">6. The Swap That Never Works and the <code>==</code> vs <code>equals</code> Preview</h2>
+<p>The failed swap of Section 3 generalizes: <strong>no method can reassign a caller's variable in Java</strong>. The usual workarounds are to return a new value, swap array elements (<code>arr[0]</code>/<code>arr[1]</code> are reached through the copied array reference), or use a holder object whose fields the method sets.</p>
+<p>Copying also raises the question of <em>comparing</em> the two references. Two references are equal with <code>==</code> only when they point at the <strong>same object</strong> (same identity), while <code>equals</code> asks whether two objects are <strong>logically equivalent</strong>. So for <code>Box a = new Box(10); Box b = new Box(10);</code>, <code>a == b</code> is <code>false</code> (two distinct objects) and <code>a.equals(b)</code> is also <code>false</code> by default, because the inherited <code>Object.equals</code> is identity comparison (<code>==</code>) until it is overridden. This lecture only needs the distinction so that shallow/deep copies can be reasoned about; the full contract — <code>equals</code>, <code>hashCode</code> and <code>toString</code> — is Lecture 22.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Can a Java method swap two objects?" Not by reassigning its parameters. You can swap the <em>contents</em> through a shared array or holder, and you can return both, but the parameters themselves are copies. The answer tests Sections 3 and 4 in one breath.</p>
+</blockquote>
+<h2 id="7-shallow-copy-one-new-object-shared-insides">7. Shallow Copy: One New Object, Shared Insides</h2>
+<p>A <strong>shallow copy</strong> creates a new object whose <strong>primitive fields are copied by value</strong>, but whose <strong>reference fields copy only the address</strong> — so the new object points at the <em>same</em> nested objects as the original. There is one new shell around the same contents.</p>
+<p>The default mechanics are:</p>
+<ol>
+<li><strong><code>Object.clone()</code></strong> — the shallow case is its default behaviour.</li>
+<li><strong>A copy constructor</strong> that copies each field with a plain assignment (<code>this.field = other.field;</code>).</li>
+</ol>
+<p>The danger is <strong>aliasing</strong>: because both copies share the nested object, mutating it through one copy silently changes the other.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo2.java — shallow copy shares the nested Address</span>
+<span class="kd">class</span> <span class="nc">Address</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">String</span><span class="w"> </span><span class="n">city</span><span class="p">;</span><span class="w"> </span><span class="n">Address</span><span class="p">(</span><span class="n">String</span><span class="w"> </span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">city</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">c</span><span class="p">;</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+
+<span class="kd">class</span> <span class="nc">Person</span><span class="w"> </span><span class="kd">implements</span><span class="w"> </span><span class="n">Cloneable</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">String</span><span class="w"> </span><span class="n">name</span><span class="p">;</span><span class="w"> </span><span class="n">Address</span><span class="w"> </span><span class="n">address</span><span class="p">;</span>
+<span class="w">    </span><span class="n">Person</span><span class="p">(</span><span class="n">String</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="w"> </span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="n">address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Address</span><span class="p">(</span><span class="n">c</span><span class="p">);</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="nd">@Override</span><span class="w"> </span><span class="kd">public</span><span class="w"> </span><span class="n">Person</span><span class="w"> </span><span class="nf">clone</span><span class="p">()</span><span class="w"> </span><span class="kd">throws</span><span class="w"> </span><span class="n">CloneNotSupportedException</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="n">Person</span><span class="p">)</span><span class="w"> </span><span class="kd">super</span><span class="p">.</span><span class="na">clone</span><span class="p">();</span><span class="w">   </span><span class="c1">// shallow: address is shared, not copied</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo2</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="kd">throws</span><span class="w"> </span><span class="n">CloneNotSupportedException</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Person</span><span class="w"> </span><span class="n">p1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Person</span><span class="p">(</span><span class="s">&quot;Asha&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Pune&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">Person</span><span class="w"> </span><span class="n">p2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p1</span><span class="p">.</span><span class="na">clone</span><span class="p">();</span>
+<span class="w">        </span><span class="n">p2</span><span class="p">.</span><span class="na">address</span><span class="p">.</span><span class="na">city</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;Delhi&quot;</span><span class="p">;</span><span class="w">             </span><span class="c1">// writes through the shared Address</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">p1</span><span class="p">.</span><span class="na">address</span><span class="p">.</span><span class="na">city</span><span class="p">);</span><span class="w">   </span><span class="c1">// Delhi — aliasing bug</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Here <code>p1</code> was never touched directly, yet its address changed. That single line is the entire case against careless shallow copying.</p>
+<h2 id="8-deep-copy-independent-object-graphs">8. Deep Copy: Independent Object Graphs</h2>
+<p>A <strong>deep copy</strong> creates a new object and then <strong>recursively copies every nested object</strong>, so the two copies share no mutable state at all. Mutating one copy can never be observed through the other. Three implementation routes exist:</p>
+<ol>
+<li><strong>Copy-constructor chain</strong> — each class takes an instance of itself and constructs fresh copies of its reference fields: <code>this.address = new Address(other.address);</code>.</li>
+<li><strong>Manual <code>clone</code> chain</strong> — override <code>clone</code> in every class of the graph and clone each reference field after <code>super.clone()</code>.</li>
+<li><strong>Serialization round-trip</strong> — serialize the object and deserialize it; the result is a structurally independent graph, at the cost of performance and the <code>Serializable</code> requirement.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo2.java — deep copy via a copy-constructor chain</span>
+<span class="kd">class</span> <span class="nc">Address</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">String</span><span class="w"> </span><span class="n">city</span><span class="p">;</span>
+<span class="w">    </span><span class="n">Address</span><span class="p">(</span><span class="n">String</span><span class="w"> </span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">city</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">c</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="n">Address</span><span class="p">(</span><span class="n">Address</span><span class="w"> </span><span class="n">other</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="na">city</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">other</span><span class="p">.</span><span class="na">city</span><span class="p">;</span><span class="w"> </span><span class="p">}</span><span class="w">        </span><span class="c1">// copy constructor</span>
+<span class="p">}</span>
+
+<span class="kd">class</span> <span class="nc">Person</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">String</span><span class="w"> </span><span class="n">name</span><span class="p">;</span><span class="w"> </span><span class="n">Address</span><span class="w"> </span><span class="n">address</span><span class="p">;</span>
+<span class="w">    </span><span class="n">Person</span><span class="p">(</span><span class="n">Person</span><span class="w"> </span><span class="n">other</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">                                    </span><span class="c1">// deep copy</span>
+<span class="w">        </span><span class="k">this</span><span class="p">.</span><span class="na">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">other</span><span class="p">.</span><span class="na">name</span><span class="p">;</span>
+<span class="w">        </span><span class="k">this</span><span class="p">.</span><span class="na">address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Address</span><span class="p">(</span><span class="n">other</span><span class="p">.</span><span class="na">address</span><span class="p">);</span><span class="w">            </span><span class="c1">// nested object copied</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The trade-off is direct: deep copying is <strong>safe but expensive</strong> (the whole reachable graph is allocated), while shallow copying is <strong>cheap but vulnerable</strong> to aliasing. Choose deep when the copies must evolve independently, and shallow when nested state is immutable or intentionally shared.</p>
+<blockquote class="callout callout--important">
+<p>Important
+A shallow copy of a <code>String</code> field is safe because <code>String</code> is immutable (Lecture 25) — nothing can write through the shared reference. The rule is not "always copy deeply"; it is "copy deeply any nested object that is mutable and shared".</p>
+</blockquote>
+<h2 id="9-shallow-vs-deep-copy">9. Shallow vs Deep Copy</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Shallow copy</th>
+<th>Deep copy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What is copied</td>
+<td>Primitive field values; reference field addresses</td>
+<td>Field values; nested objects recreated recursively</td>
+</tr>
+<tr>
+<td>Nested object shared</td>
+<td>Yes — both copies point at the same nested object</td>
+<td>No — each copy owns its own nested objects</td>
+</tr>
+<tr>
+<td>Mutating a nested field</td>
+<td>Visible in the other copy (aliasing)</td>
+<td>Isolated to the copy that was mutated</td>
+</tr>
+<tr>
+<td>Cost</td>
+<td>Cheap — a single object allocated</td>
+<td>Expensive — the reachable object graph is allocated</td>
+</tr>
+<tr>
+<td>Default behaviour</td>
+<td><code>Object.clone()</code> and naive field-copy constructors</td>
+<td>Must be implemented explicitly</td>
+</tr>
+<tr>
+<td>Safety</td>
+<td>Low — hidden shared state</td>
+<td>High — genuine independence</td>
+</tr>
+<tr>
+<td>Typical tools</td>
+<td><code>super.clone()</code>; field-by-field assignment</td>
+<td>Copy-constructor chain; clone chain; serialization round-trip</td>
+</tr>
+<tr>
+<td>Best used when</td>
+<td>Nested state is immutable or sharing is intended</td>
+<td>Copies must diverge and nested state is mutable</td>
+</tr>
+</tbody>
+</table>
+<p>The table's second row is the one to memorize: shallow shares, deep duplicates. Everything else — cost, safety, tools — follows from that single difference.</p>
+<h2 id="10-the-clone-contract-and-why-it-is-awkward">10. The <code>clone()</code> Contract and Why It Is Awkward</h2>
+<p><code>Object.clone()</code> is Java's built-in copying hook, and its contract is a list of interview favourites:</p>
+<ol>
+<li><strong><code>Cloneable</code> is a marker interface</strong> — it declares no methods. Implementing it merely tells <code>Object.clone()</code> that cloning this class is legal.</li>
+<li><strong><code>clone</code> is <code>protected</code> and <code>native</code></strong> — outside the class (or its package) you cannot call <code>super.clone</code>; a public override is needed to expose it.</li>
+<li><strong>It throws <code>CloneNotSupportedException</code></strong> — a checked exception, thrown if the class does <strong>not</strong> implement <code>Cloneable</code>.</li>
+<li><strong>It returns <code>Object</code></strong> — callers must cast, which is unsafe at compile time.</li>
+<li><strong>It is shallow by default</strong> — reference fields are shared, which becomes the aliasing bug of Section 7 unless every class in the graph overrides <code>clone</code>.</li>
+</ol>
+<p>The awkwardness is visible in one line: on a class that does not implement <code>Cloneable</code>, <code>n.clone()</code> fails to compile because the inherited method is <code>protected</code>; casting to <code>Object</code> makes it compile, but the call then throws <code>CloneNotSupportedException</code> at runtime. <code>Cloneable</code> plus a checked exception plus a protected method plus a cast plus shallow-by-default is a lot of ceremony for one operation. That combination is why most code prefers <strong>copy constructors</strong> or <strong>static copy factories</strong>, and why "why is <code>clone()</code> considered broken?" is a perennial interview question.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why is <code>Cloneable</code> a marker interface?" Because <code>Object.clone()</code> checks for it at runtime via <code>instanceof</code>. It carries no methods, so it is a capability flag, not a contract of behaviour — the same pattern as <code>Serializable</code>.</p>
+</blockquote>
+<h2 id="11-copy-constructor-vs-clone-vs-static-copy-factory">11. Copy Constructor vs <code>clone()</code> vs Static Copy Factory</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th>Signature</th>
+<th>Depth by default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Copy constructor</td>
+<td><code>Person(Person other)</code></td>
+<td>Whatever you code (commonly deep)</td>
+<td>Explicit, no checked exception, no cast; cannot force subclasses, but can be overridden</td>
+</tr>
+<tr>
+<td><code>clone()</code></td>
+<td><code>Object clone()</code></td>
+<td>Shallow</td>
+<td>Needs <code>Cloneable</code>, <code>protected</code> override, cast, checked exception</td>
+</tr>
+<tr>
+<td>Static copy factory</td>
+<td><code>Person.copyOf(other)</code></td>
+<td>Whatever you code</td>
+<td>Clear intent, can return a subtype; no language ceremony</td>
+</tr>
+<tr>
+<td><code>new ArrayList&lt;&gt;(list)</code></td>
+<td>Constructor</td>
+<td>Shallow — element references copied</td>
+<td>Standard for collections</td>
+</tr>
+<tr>
+<td><code>Arrays.copyOf(arr, n)</code></td>
+<td>Static method</td>
+<td>Shallow — for object arrays the references are copied</td>
+<td>New array, same element objects</td>
+</tr>
+<tr>
+<td><code>List.copyOf(list)</code></td>
+<td>Static method</td>
+<td>Shallow, and <strong>immutable</strong> — rejects nulls</td>
+<td>A defensive immutable snapshot, not a deep copy</td>
+</tr>
+</tbody>
+</table>
+<p>The important reading: the collection factories are <strong>shallow</strong>. <code>List.copyOf(list)</code> protects the <em>list structure</em> (it cannot be modified) but not the <em>elements</em> — if the elements are mutable, the copy still exposes them.</p>
+<h2 id="12-pitfalls-and-best-practices">12. Pitfalls and Best Practices</h2>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>What goes wrong</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Saying "objects are passed by reference"</td>
+<td>The argument is a copied reference; reassignment is invisible to the caller</td>
+<td>Say "the reference is passed by value"</td>
+</tr>
+<tr>
+<td>Mutating a shared list through a shallow copy</td>
+<td>The original list's elements change too</td>
+<td>Deep-copy the elements or use an immutable element type</td>
+</tr>
+<tr>
+<td>Assuming <code>clone()</code> is deep</td>
+<td>Nested references are shared</td>
+<td>Override <code>clone</code> per class or use a deep strategy</td>
+</tr>
+<tr>
+<td>Using <code>List.copyOf</code> on mutable elements</td>
+<td>You get an unmodifiable view of the <em>same</em> elements</td>
+<td>Copy each element, or make elements immutable</td>
+</tr>
+<tr>
+<td>Changing fields of a copied <code>equals</code> key</td>
+<td><code>hashCode</code> no longer matches; map lookups fail (Lecture 22)</td>
+<td>Make keys immutable, or stop mutating after insertion</td>
+</tr>
+<tr>
+<td>Measuring object size by adding fields</td>
+<td>The header and padding dominate small objects</td>
+<td>Use JOL; remember the 8-byte alignment</td>
+</tr>
+</tbody>
+</table>
+<p>The unifying lesson: a copy is only as independent as its least-independent nested object. Audit the graph, not just the top-level fields.</p>
+<h2 id="13-myth-vs-reality">13. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Java passes objects by reference"</td>
+<td>Java is always pass-by-value; for objects the value passed is the reference, and the parameter is still a copy.</td>
+</tr>
+<tr>
+<td>"An empty object takes 0 bytes"</td>
+<td>The header alone is roughly 12–16 bytes before any field, and the object is padded to an 8-byte boundary.</td>
+</tr>
+<tr>
+<td>"<code>clone()</code> gives a deep copy"</td>
+<td><code>Object.clone()</code> is shallow; nested reference fields are shared unless every class overrides <code>clone</code>.</td>
+</tr>
+<tr>
+<td>"Reassigning a parameter changes the caller's variable"</td>
+<td>Parameters are copies; reassigning one is local and invisible to the caller — the swap method proves it.</td>
+</tr>
+<tr>
+<td>"A shallow copy of a <code>String</code> field is dangerous"</td>
+<td><code>String</code> is immutable, so sharing it in a shallow copy is safe; only mutable nested objects cause aliasing.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="14-common-trap-questions">14. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — "Objects are passed by reference, right?"
+No. Java is <strong>always pass-by-value</strong>. For an object argument, the copied value is the reference, so mutating the object is visible to the caller, but reassigning the parameter is not. The correct phrase is "the reference is passed by value".</p>
+<p>Trap 2 — "Write a <code>swap(Object a, Object b)</code> method."
+It cannot work by reassigning the parameters, because each parameter is a copy of the caller's reference. Swap the referenced contents instead (for example via a shared array or holder object), or return the two values.</p>
+<p>Trap 3 — "I shallow-copied a <code>Person</code> and edited the copy's <code>Address</code>; why did the original change?"
+The copy's <code>address</code> field holds the same reference as the original, so both point at one <code>Address</code>. The edit went through that shared object. Deep-copy the <code>Address</code> to isolate them.</p>
+<p>Trap 4 — "<code>new NoClone().clone()</code> — does it compile and run?"
+It does not compile, because <code>clone()</code> is <code>protected</code> in <code>Object</code>. Casting to <code>Object</code> makes it compile but then throws <code>CloneNotSupportedException</code> unless the class implements <code>Cloneable</code>.</p>
+<p>Trap 5 — "How big is <code>new Object()</code>?"
+Not zero. It carries the mark word plus the class pointer (about 12 bytes on a 64-bit JVM with compressed oops) and is padded to an 8-byte multiple — typically 16 bytes. Exact numbers require JOL.</p>
+<p>Trap 6 — "Is <code>List.copyOf(list)</code> a deep copy?"
+No. It produces an <strong>immutable</strong> list that shares the same element objects — a shallow, structural copy. If the elements are mutable, both lists still expose the same mutable state.</p>
+</blockquote>
+<h2 id="15-points-to-remember">15. Points to Remember</h2>
+<ol>
+<li>A class-type variable holds a <strong>reference</strong>, not the object; copying the reference copies an address, copying the object creates a new identity.</li>
+<li>Object size = <strong>header (~12–16 bytes) + instance fields + padding</strong> to an 8-byte boundary; use JOL to measure it.</li>
+<li>An empty object is never 0 bytes; arrays add a 4-byte <code>length</code> after the header.</li>
+<li>Reference fields cost 4 bytes with compressed oops (heap up to 32 GB), 8 bytes otherwise; <code>boolean</code>/<code>byte</code> cost 1 byte, not 1 bit.</li>
+<li>Java is <strong>always pass-by-value</strong>; for primitives the value is copied, for objects the reference value is copied.</li>
+<li>Mutating an object through a parameter is visible to the caller; reassigning the parameter is not — so the classic swap fails.</li>
+<li><code>==</code> compares identity (same object); <code>equals</code> compares logical equality when overridden — full contract in Lecture 22.</li>
+<li>A <strong>shallow copy</strong> creates a new object but shares nested reference fields; <code>Object.clone()</code> and naive copy constructors are shallow.</li>
+<li>A <strong>deep copy</strong> recursively duplicates the object graph; use a copy-constructor chain, a manual clone chain, or serialization.</li>
+<li>Shallow is cheap and alias-prone; deep is safe and expensive — copy deeply any nested object that is mutable and shared.</li>
+<li><code>Cloneable</code> is a marker interface, <code>clone</code> is <code>protected</code> and throws <code>CloneNotSupportedException</code>, returns <code>Object</code>, and is shallow — hence copy constructors are usually preferred.</li>
+<li>Copying an object that is a key in a hash-based collection and then mutating its fields breaks lookups — keep map keys immutable (Lecture 22).</li>
+</ol>
+<h2 id="16-likely-interview-questions">16. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Is Java pass-by-value or pass-by-reference?</td>
+<td>Always pass-by-value. Primitives copy the value; objects copy the reference value.</td>
+</tr>
+<tr>
+<td>Then why can a method modify the caller's object?</td>
+<td>Because the copied reference points at the same object; writing through it mutates the shared object.</td>
+</tr>
+<tr>
+<td>Why does <code>swap(a, b)</code> not work?</td>
+<td>The parameters are copies of the caller's values/references; reassigning them only rebinds locals.</td>
+</tr>
+<tr>
+<td>How big is an object in Java?</td>
+<td>Header (mark word + class pointer, ~12–16 bytes) + fields + padding to an 8-byte boundary; arrays add a length.</td>
+</tr>
+<tr>
+<td>How big is <code>new Object()</code>?</td>
+<td>The header plus padding — about 16 bytes on a 64-bit HotSpot JVM; never 0.</td>
+</tr>
+<tr>
+<td>How big is a reference?</td>
+<td>4 bytes with compressed oops (heap up to ~32 GB), otherwise 8 bytes.</td>
+</tr>
+<tr>
+<td>What tool measures object layout?</td>
+<td>JOL (Java Object Layout), which prints the header, fields and padding.</td>
+</tr>
+<tr>
+<td>What is a shallow copy?</td>
+<td>A new object whose primitive fields are copied and whose reference fields are shared with the original.</td>
+</tr>
+<tr>
+<td>What is a deep copy?</td>
+<td>A new object with the entire nested object graph recursively duplicated, so no mutable state is shared.</td>
+</tr>
+<tr>
+<td>How do you make a deep copy?</td>
+<td>Copy-constructor chain, manual <code>clone</code> chain, or a serialization/deserialization round-trip.</td>
+</tr>
+<tr>
+<td>Why is <code>clone()</code> considered awkward?</td>
+<td>It needs the <code>Cloneable</code> marker, is <code>protected</code>, throws a checked exception, returns <code>Object</code>, and is shallow by default.</td>
+</tr>
+<tr>
+<td>Is copying an object with a <code>String</code> field unsafe?</td>
+<td>No — <code>String</code> is immutable, so sharing it is safe; only mutable shared state causes aliasing (Lecture 25).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="17-final-summary">17. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>object on heap  =  header (mark word + class pointer)  +  fields  +  padding (to 8 bytes)
+argument passing:  caller value --copy--&gt; parameter   (primitives: value; objects: reference)
+                        mutate through reference -&gt; caller sees it     reassign parameter -&gt; caller does not
+
+shallow copy  -&gt;  new shell, shared nested objects   (cheap, aliasing risk)
+deep copy     -&gt;  new shell, duplicated graph         (expensive, safe)
+</code></pre></div>
+
+<ul>
+<li>Object → identity + state + behaviour; a reference identifies it on the heap.</li>
+<li>Size → header (~12–16 bytes) + fields + padding; empty objects cost 16 bytes, arrays add a length field; JOL measures it.</li>
+<li>Pass-by-value → primitives copy the value, objects copy the reference; mutation through the reference is visible, reassignment is not.</li>
+<li>Swap → impossible by parameter reassignment; swap contents through a shared holder instead.</li>
+<li>Shallow copy → <code>clone()</code> default and naive constructors; nested references are shared (aliasing).</li>
+<li>Deep copy → copy-constructor chain, manual clone chain, or serialization round-trip; safe but costly.</li>
+<li><code>clone()</code> → marker <code>Cloneable</code>, <code>protected</code>, checked <code>CloneNotSupportedException</code>, <code>Object</code> return, shallow default — prefer copy constructors.</li>
+<li>Copy factories → <code>Arrays.copyOf</code> and <code>List.copyOf</code> are shallow; <code>List.copyOf</code> is additionally immutable.</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+Java copies values, never variables — and a copy is only as independent as its least-copied nested object.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> an object is a header plus fields plus padding reached through a copied reference, so passing mutates but reassigning does not, and shallow copies share their insides while deep copies own them.</p>
+<div class="pager"><a class="prev" href="lecture-13.html"><span class="dir">Previous</span><span class="ttl">Constructors in Java Explained</span></a><a class="next" href="lecture-15.html"><span class="dir">Next</span><span class="ttl">Static & Final in Java</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 40 · Java Stream Methods Deep Dive — Java Notes</title>
+<meta name="description" content="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="40" data-lecture-title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-40.html#1-a-stream-pipeline-has-two-kinds-of-operations">1. A Stream Pipeline Has Two Kinds of Operations</a></li><li><a href="lecture-40.html#2-intermediate-operations-vs-terminal-operations">2. Intermediate Operations vs Terminal Operations</a></li><li><a href="lecture-40.html#3-the-intermediate-operations-in-detail">3. The Intermediate Operations in Detail</a></li><li><a href="lecture-40.html#4-the-terminal-operations-in-detail">4. The Terminal Operations in Detail</a></li><li><a href="lecture-40.html#5-short-circuiting-and-infinite-streams">5. Short-Circuiting and Infinite Streams</a></li><li><a href="lecture-40.html#6-map-vs-flatmap">6. map vs flatMap</a></li><li><a href="lecture-40.html#7-reduce-the-three-forms">7. reduce: The Three Forms</a></li><li><a href="lecture-40.html#8-collect-and-the-collectors-catalogue">8. collect and the Collectors Catalogue</a></li><li><a href="lecture-40.html#9-reduce-vs-collect">9. reduce vs collect</a></li><li><a href="lecture-40.html#10-ordering-and-stability">10. Ordering and Stability</a></li><li><a href="lecture-40.html#11-worked-examples-the-tomap-duplicate-key-trap-and-joining">11. Worked Examples: The toMap Duplicate-Key Trap and joining</a></li><li><a href="lecture-40.html#12-pitfalls-and-common-errors">12. Pitfalls and Common Errors</a></li><li><a href="lecture-40.html#13-myth-vs-reality">13. Myth vs Reality</a></li><li><a href="lecture-40.html#14-common-trap-questions">14. Common Trap Questions</a></li><li><a href="lecture-40.html#15-points-to-remember">15. Points to Remember</a></li><li><a href="lecture-40.html#16-likely-interview-questions">16. Likely Interview Questions</a></li><li><a href="lecture-40.html#17-final-summary">17. Final Summary</a></li></ul></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 5 · Collections, Lambdas & Streams · Lecture 40</p>
+<h1>Java Stream Methods Deep Dive | All Intermediate & Terminal Operations</h1>
+<p class="readmeta">17 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="40" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: "Java Stream Methods Deep Dive | All Intermediate &amp; Terminal Operations" (playlist map, verified). Repo evidence: 3 Demo files.</p>
+</blockquote>
+<p>Lecture 39 introduced how streams are created and how the pipeline is architected. This lecture builds the method catalogue on top of that architecture: the lazy intermediate operations that shape a pipeline, the eager terminal operations that trigger it, the short-circuiting terminals that let infinite streams finish, and the collector factory that reshapes results. It also settles the two pairs that beginners confuse most: <code>map</code> versus <code>flatMap</code>, and <code>reduce</code> versus <code>collect</code>. The governing idea is that a stream pipeline is a declarative query which stays completely inert until a terminal operation asks for an answer.</p>
+<h2 id="1-a-stream-pipeline-has-two-kinds-of-operations">1. A Stream Pipeline Has Two Kinds of Operations</h2>
+<p>A <strong>stream</strong> is a sequence of elements supporting sequential and parallel aggregate operations. It is not a collection: it does not store data, it does not expose indexes, and it is <strong>single-use</strong> — once a terminal operation runs, the stream is consumed. A pipeline always has the same three-part shape:</p>
+<ol>
+<li><strong>A source</strong> — a collection, an array, a generator or an I/O channel (Lecture 39).</li>
+<li><strong>Intermediate operations</strong> — zero or more stages that return another <code>Stream</code> and are <strong>lazy</strong>.</li>
+<li><strong>A terminal operation</strong> — exactly one final stage that produces a result or a side effect and is <strong>eager</strong>.</li>
+</ol>
+<p>The defining property is laziness: chaining <code>filter</code>, <code>map</code> and <code>sorted</code> runs no code at all. Only when the terminal operation is invoked does the pipeline execute, element by element, pulling data through the whole chain.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — a pipeline is inert until the terminal operation runs</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.stream.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="s">&quot;Ada&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Alan&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Grace&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Edsger&quot;</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">Stream</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">pipeline</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">names</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span><span class="w">      </span><span class="c1">// source</span>
+<span class="w">                </span><span class="p">.</span><span class="na">filter</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">n</span><span class="p">.</span><span class="na">length</span><span class="p">()</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">3</span><span class="p">)</span><span class="w">          </span><span class="c1">// intermediate (lazy)</span>
+<span class="w">                </span><span class="p">.</span><span class="na">map</span><span class="p">(</span><span class="n">String</span><span class="p">::</span><span class="n">toUpperCase</span><span class="p">);</span><span class="w">            </span><span class="c1">// intermediate (lazy)</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;Nothing has run yet&quot;</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">pipeline</span><span class="p">.</span><span class="na">forEach</span><span class="p">(</span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">::</span><span class="n">println</span><span class="p">);</span><span class="w">        </span><span class="c1">// terminal (eager)</span>
+<span class="w">        </span><span class="c1">// ADA, ALAN, GRACE, EDSGER</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<blockquote class="callout callout--important">
+<p>Important
+The word "intermediate" describes the <strong>return type</strong>, not the effort: it always returns a <code>Stream</code>, so stages compose. The word "terminal" describes the <strong>effect</strong>: it returns something other than a <code>Stream</code>, which is why it must be last and why it fires the pipeline.</p>
+</blockquote>
+<h2 id="2-intermediate-operations-vs-terminal-operations">2. Intermediate Operations vs Terminal Operations</h2>
+<p>Intermediate operations are lazy and return a <code>Stream</code>; terminal operations are eager and return a result or perform a side effect.</p>
+<table>
+<thead>
+<tr>
+<th>Intermediate operation</th>
+<th>What it does</th>
+<th>Shape</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>filter(Predicate)</code></td>
+<td>keep elements matching the predicate</td>
+<td><code>Stream&lt;T&gt;</code> to <code>Stream&lt;T&gt;</code></td>
+</tr>
+<tr>
+<td><code>map(Function)</code></td>
+<td>transform each element, one to one</td>
+<td><code>Stream&lt;T&gt;</code> to <code>Stream&lt;R&gt;</code></td>
+</tr>
+<tr>
+<td><code>mapToInt</code> / <code>mapToLong</code> / <code>mapToDouble</code></td>
+<td>transform to a primitive stream</td>
+<td><code>Stream&lt;T&gt;</code> to <code>IntStream</code> (and so on)</td>
+</tr>
+<tr>
+<td><code>flatMap(Function)</code></td>
+<td>replace each element by a stream, then concatenate</td>
+<td><code>Stream&lt;T&gt;</code> to <code>Stream&lt;R&gt;</code></td>
+</tr>
+<tr>
+<td><code>distinct()</code></td>
+<td>remove duplicates using <code>equals</code>/<code>hashCode</code></td>
+<td><code>Stream&lt;T&gt;</code> to <code>Stream&lt;T&gt;</code></td>
+</tr>
+<tr>
+<td><code>sorted()</code> / <code>sorted(Comparator)</code></td>
+<td>stable sort by natural or given order</td>
+<td><code>Stream&lt;T&gt;</code> to <code>Stream&lt;T&gt;</code></td>
+</tr>
+<tr>
+<td><code>peek(Consumer)</code></td>
+<td>run an action per element, for debugging</td>
+<td><code>Stream&lt;T&gt;</code> to <code>Stream&lt;T&gt;</code></td>
+</tr>
+<tr>
+<td><code>limit(n)</code></td>
+<td>cap the stream to the first n elements</td>
+<td><code>Stream&lt;T&gt;</code> to <code>Stream&lt;T&gt;</code></td>
+</tr>
+<tr>
+<td><code>skip(n)</code></td>
+<td>discard the first n elements</td>
+<td><code>Stream&lt;T&gt;</code> to <code>Stream&lt;T&gt;</code></td>
+</tr>
+<tr>
+<td><code>takeWhile(Predicate)</code></td>
+<td>take until the predicate first fails (Java 9)</td>
+<td><code>Stream&lt;T&gt;</code> to <code>Stream&lt;T&gt;</code></td>
+</tr>
+<tr>
+<td><code>dropWhile(Predicate)</code></td>
+<td>drop until the predicate first fails (Java 9)</td>
+<td><code>Stream&lt;T&gt;</code> to <code>Stream&lt;T&gt;</code></td>
+</tr>
+<tr>
+<td><code>boxed()</code></td>
+<td>wrap primitives as objects</td>
+<td><code>IntStream</code> to <code>Stream&lt;Integer&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Terminal operation</th>
+<th>Result</th>
+<th>Short-circuits</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>forEach(Consumer)</code></td>
+<td>void</td>
+<td>no</td>
+<td>order not guaranteed in parallel</td>
+</tr>
+<tr>
+<td><code>forEachOrdered(Consumer)</code></td>
+<td>void</td>
+<td>no</td>
+<td>respects encounter order, even in parallel</td>
+</tr>
+<tr>
+<td><code>collect(Collector)</code></td>
+<td>a container or value</td>
+<td>no</td>
+<td>mutable reduction</td>
+</tr>
+<tr>
+<td><code>reduce(...)</code></td>
+<td><code>Optional&lt;T&gt;</code> or <code>T</code></td>
+<td>no</td>
+<td>immutable reduction</td>
+</tr>
+<tr>
+<td><code>count()</code></td>
+<td><code>long</code></td>
+<td>no</td>
+<td>counts elements</td>
+</tr>
+<tr>
+<td><code>min(Comparator)</code> / <code>max(Comparator)</code></td>
+<td><code>Optional&lt;T&gt;</code></td>
+<td>no</td>
+<td>needs a comparator</td>
+</tr>
+<tr>
+<td><code>findFirst()</code></td>
+<td><code>Optional&lt;T&gt;</code></td>
+<td>yes</td>
+<td>first in encounter order</td>
+</tr>
+<tr>
+<td><code>findAny()</code></td>
+<td><code>Optional&lt;T&gt;</code></td>
+<td>yes</td>
+<td>any element; non-deterministic in parallel</td>
+</tr>
+<tr>
+<td><code>anyMatch(Predicate)</code></td>
+<td><code>boolean</code></td>
+<td>yes</td>
+<td>true at the first match</td>
+</tr>
+<tr>
+<td><code>allMatch(Predicate)</code></td>
+<td><code>boolean</code></td>
+<td>yes</td>
+<td>false at the first counterexample</td>
+</tr>
+<tr>
+<td><code>noneMatch(Predicate)</code></td>
+<td><code>boolean</code></td>
+<td>yes</td>
+<td>false at the first match</td>
+</tr>
+<tr>
+<td><code>toArray()</code> / <code>toArray(IntFunction)</code></td>
+<td><code>Object[]</code> or <code>T[]</code></td>
+<td>no</td>
+<td>materializes the stream</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--note">
+<p>Memory aid
+<strong>Intermediate = lazy + returns a Stream; terminal = eager + returns a result.</strong> If the method name is followed by another dot in valid code, it was intermediate.</p>
+</blockquote>
+<h2 id="3-the-intermediate-operations-in-detail">3. The Intermediate Operations in Detail</h2>
+<ul>
+<li><strong><code>filter</code></strong> keeps the elements for which the predicate is <code>true</code>. It never changes an element's type or value.</li>
+<li><strong><code>map</code></strong> applies a function and changes the element type. <code>map</code> is stateless and is the standard field extractor (<code>map(Person::name)</code>).</li>
+<li><strong><code>mapToInt</code> / <code>mapToLong</code> / <code>mapToDouble</code></strong> produce primitive streams such as <code>IntStream</code>, which expose numeric terminals — <code>sum()</code>, <code>average()</code>, <code>max()</code>, <code>min()</code> — and, through <code>summaryStatistics()</code>, all of them at once. They also avoid the boxing cost of mapping to <code>Integer</code>.</li>
+<li><strong><code>flatMap</code></strong> maps each element to a stream and then concatenates those streams. It is the tool for one-to-many expansion and for flattening nested structures (Section 6).</li>
+<li><strong><code>distinct</code></strong> removes duplicates by <code>equals</code> and <code>hashCode</code>, exactly like a <code>HashSet</code> (Lecture 22). It preserves the <strong>first occurrence</strong> and is a stateful operation.</li>
+<li><strong><code>sorted()</code></strong> sorts by natural order (the elements must be <code>Comparable</code>); <code>sorted(comparator)</code> sorts by a supplied comparator. For ordered streams the sort is <strong>stable</strong>, so equal elements keep their original relative order.</li>
+<li><strong><code>peek</code></strong> runs a <code>Consumer</code> on each element as it flows past. It exists for <strong>debugging only</strong>: it is lazy, it can be skipped by a short-circuiting terminal, and its interleaving with parallel chunks is not guaranteed. Using it for business logic is a defect.</li>
+<li><strong><code>limit(n)</code></strong> stops the pipeline after n elements and <strong><code>skip(n)</code></strong> discards the first n. Both make a stream smaller and are how an infinite stream is bounded.</li>
+<li><strong><code>takeWhile</code></strong> and <strong><code>dropWhile</code></strong> (Java 9) operate on a predicate: <code>takeWhile</code> stops at the first failing element and keeps everything before it; <code>dropWhile</code> discards everything before the first failure and keeps the rest. Unlike <code>filter</code>, <code>takeWhile</code> stops scanning once the predicate fails.</li>
+<li><strong><code>boxed()</code></strong> converts a primitive stream back to a stream of wrapper objects, for example <code>IntStream</code> to <code>Stream&lt;Integer&gt;</code>.</li>
+</ul>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"Why is <code>peek</code> discouraged for real work?" Three reasons: it is an intermediate operation, so it may be optimized away or skipped by a short-circuiting terminal; its side effects are not ordered under parallel execution; and the contract of <code>peek</code> explicitly documents it as existing for debugging, so relying on it is undefined ground.</p>
+</blockquote>
+<h2 id="4-the-terminal-operations-in-detail">4. The Terminal Operations in Detail</h2>
+<ul>
+<li><strong><code>forEach</code></strong> applies a <code>Consumer</code> to every element for its side effect. Under a parallel stream the visit order is not specified; <strong><code>forEachOrdered</code></strong> forces encounter order at the cost of parallelism (Lecture 42).</li>
+<li><strong><code>collect</code></strong> is the general <strong>mutable reduction</strong>: it accumulates elements into a mutable container described by a <code>Collector</code> (Section 8).</li>
+<li><strong><code>reduce</code></strong> is the general <strong>immutable reduction</strong>: it folds the elements into a single new value (Section 7).</li>
+<li><strong><code>count</code></strong> returns the number of elements as a <code>long</code>. A sized source such as a list can answer without traversal.</li>
+<li><strong><code>min</code> / <code>max</code></strong> need a <code>Comparator</code> and return an <code>Optional</code> because a stream may be empty.</li>
+<li><strong><code>findFirst</code> / <code>findAny</code></strong> also return <code>Optional</code>; both may stop early (Section 5).</li>
+<li><strong><code>anyMatch</code> / <code>allMatch</code> / <code>noneMatch</code></strong> return a <code>boolean</code> and are the boolean counterparts of existence, universality and emptiness.</li>
+<li><strong><code>toArray</code></strong> materializes the stream, either as <code>Object[]</code> or, with an <code>IntFunction</code> generator (<code>String[]::new</code>), as a correctly typed array.</li>
+</ul>
+<blockquote class="callout callout--important">
+<p>Important
+<code>min</code> and <code>max</code> do not mean numeric comparison unless you say so: they compare with the <code>Comparator</code> you supply. <code>min(Comparator.comparing(Person::age))</code> is the youngest, not the "smallest" object.</p>
+</blockquote>
+<h2 id="5-short-circuiting-and-infinite-streams">5. Short-Circuiting and Infinite Streams</h2>
+<p>A <strong>short-circuiting operation</strong> can produce a result without consuming every element. This is what makes infinite streams usable. The short-circuiting terminal operations are <code>findFirst</code>, <code>findAny</code>, <code>anyMatch</code>, <code>allMatch</code> and <code>noneMatch</code>; the intermediate <code>limit</code> (and <code>takeWhile</code>) bounds the input they scan.</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Kind</th>
+<th>Why it can stop early</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>findFirst</code></td>
+<td>terminal</td>
+<td>the first matching element is already the answer</td>
+</tr>
+<tr>
+<td><code>findAny</code></td>
+<td>terminal</td>
+<td>any matching element is acceptable</td>
+</tr>
+<tr>
+<td><code>anyMatch</code></td>
+<td>terminal</td>
+<td>one <code>true</code> proves the result</td>
+</tr>
+<tr>
+<td><code>allMatch</code></td>
+<td>terminal</td>
+<td>one <code>false</code> disproves the result</td>
+</tr>
+<tr>
+<td><code>noneMatch</code></td>
+<td>terminal</td>
+<td>one <code>true</code> disproves the result</td>
+</tr>
+<tr>
+<td><code>limit(n)</code></td>
+<td>intermediate</td>
+<td>only n elements are ever demanded</td>
+</tr>
+</tbody>
+</table>
+<p>An infinite stream terminates only if something downstream is short-circuiting or bounding:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Stream.iterate is infinite; anyMatch bounds the scan</span>
+<span class="kt">boolean</span><span class="w"> </span><span class="n">found</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Stream</span><span class="p">.</span><span class="na">iterate</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">anyMatch</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">100</span><span class="p">);</span><span class="w">          </span><span class="c1">// stops at 100 -&gt; true</span>
+</code></pre></div>
+
+<p>By contrast, <code>sorted()</code> on an infinite stream <strong>never terminates</strong>: sorting must see every element before it can emit the first one. The same is true of <code>count</code> on an infinite stream. Order matters: put <code>limit</code> before <code>sorted</code> if you want only the first n sorted, and never place <code>sorted</code> before a bound on an unbounded source.</p>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+An infinite stream plus a short-circuiting terminal is a legitimate, terminating program. An infinite stream plus <code>sorted</code>, <code>collect</code> or <code>count</code> is a program that never returns.</p>
+</blockquote>
+<h2 id="6-map-vs-flatmap">6. map vs flatMap</h2>
+<p><code>map</code> maps one element to exactly one element. <code>flatMap</code> maps one element to a stream of zero or more elements and then flattens all those streams into one. The classic case is a list of lists: <code>map(List::stream)</code> yields a <code>Stream&lt;Stream&lt;T&gt;&gt;</code>, while <code>flatMap(List::stream)</code> yields the flat <code>Stream&lt;T&gt;</code> and removes the extra level.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th><code>map</code></th>
+<th><code>flatMap</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mapping</td>
+<td>one element to one element</td>
+<td>one element to zero or more</td>
+</tr>
+<tr>
+<td>Function returns</td>
+<td>a value <code>R</code></td>
+<td>a <code>Stream&lt;R&gt;</code></td>
+</tr>
+<tr>
+<td>Result shape</td>
+<td><code>Stream&lt;R&gt;</code></td>
+<td>a flattened <code>Stream&lt;R&gt;</code></td>
+</tr>
+<tr>
+<td>Nesting</td>
+<td>may create nested structures</td>
+<td>removes one level of nesting</td>
+</tr>
+<tr>
+<td>Cardinality</td>
+<td>preserved (before other stages)</td>
+<td>may change</td>
+</tr>
+<tr>
+<td>Typical use</td>
+<td>transform a field</td>
+<td>expand and merge a collection per element</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo2.java — flatMap flattens a list of lists and expands a word to letters</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.stream.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo2</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">List</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">nested</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span>
+<span class="w">                </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">),</span>
+<span class="w">                </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">),</span>
+<span class="w">                </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="mi">6</span><span class="p">));</span>
+
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">flat</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nested</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span>
+<span class="w">                </span><span class="p">.</span><span class="na">flatMap</span><span class="p">(</span><span class="n">List</span><span class="p">::</span><span class="n">stream</span><span class="p">)</span><span class="w">       </span><span class="c1">// Stream&lt;List&lt;Integer&gt;&gt; -&gt; Stream&lt;Integer&gt;</span>
+<span class="w">                </span><span class="p">.</span><span class="na">collect</span><span class="p">(</span><span class="n">Collectors</span><span class="p">.</span><span class="na">toList</span><span class="p">());</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">flat</span><span class="p">);</span><span class="w">            </span><span class="c1">// [1, 2, 3, 4, 5, 6]</span>
+
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">words</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="s">&quot;ab&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;cd&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">letters</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">words</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span>
+<span class="w">                </span><span class="p">.</span><span class="na">flatMap</span><span class="p">(</span><span class="n">w</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">Arrays</span><span class="p">.</span><span class="na">stream</span><span class="p">(</span><span class="n">w</span><span class="p">.</span><span class="na">split</span><span class="p">(</span><span class="s">&quot;&quot;</span><span class="p">)))</span><span class="w">   </span><span class="c1">// one word -&gt; many characters</span>
+<span class="w">                </span><span class="p">.</span><span class="na">collect</span><span class="p">(</span><span class="n">Collectors</span><span class="p">.</span><span class="na">toList</span><span class="p">());</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">letters</span><span class="p">);</span><span class="w">         </span><span class="c1">// [a, b, c, d]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<blockquote class="callout callout--note">
+<p>Memory aid
+<strong>map = one in, one out. flatMap = one in, many out, then flatten.</strong> If your mapping function returns a collection or a stream, you almost certainly want <code>flatMap</code>.</p>
+</blockquote>
+<h2 id="7-reduce-the-three-forms">7. reduce: The Three Forms</h2>
+<p><strong>Reduction</strong> folds a stream into a single value by repeatedly applying an accumulator. Java exposes three overloads, distinguished by whether an identity is supplied and whether a combiner is required.</p>
+<ol>
+<li><strong><code>reduce(identity, accumulator)</code></strong> returns <code>T</code>. The identity is the seed and must be a true identity for the operation (<code>0</code> for sum, <code>1</code> for product, <code>""</code> for string concatenation). An empty stream returns the identity.</li>
+<li><strong><code>reduce(accumulator)</code></strong> returns <code>Optional&lt;T&gt;</code>. There is no identity, so an empty stream has no answer and the result is <code>Optional.empty()</code>.</li>
+<li><strong><code>reduce(identity, accumulator, combiner)</code></strong> returns <code>T</code>. The combiner merges partial results produced by parallel chunks; it is required when the reduction runs in parallel.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo3.java — identity, accumulator-only, and combiner forms of reduce</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.stream.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo3</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">nums</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">);</span>
+
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">sum</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nums</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span>
+<span class="w">                </span><span class="p">.</span><span class="na">reduce</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="p">::</span><span class="n">sum</span><span class="p">);</span><span class="w">                 </span><span class="c1">// form 1 -&gt; 15</span>
+
+<span class="w">        </span><span class="n">Optional</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nums</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span>
+<span class="w">                </span><span class="p">.</span><span class="na">reduce</span><span class="p">(</span><span class="n">Integer</span><span class="p">::</span><span class="n">max</span><span class="p">);</span><span class="w">                    </span><span class="c1">// form 2 -&gt; Optional[5]</span>
+
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">parallelSum</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nums</span><span class="p">.</span><span class="na">parallelStream</span><span class="p">()</span>
+<span class="w">                </span><span class="p">.</span><span class="na">reduce</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="p">::</span><span class="n">sum</span><span class="p">,</span><span class="w"> </span><span class="n">Integer</span><span class="p">::</span><span class="n">sum</span><span class="p">);</span><span class="w">   </span><span class="c1">// form 3 -&gt; 15</span>
+
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">sum</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">max</span><span class="p">.</span><span class="na">orElse</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">parallelSum</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>For an object result, reduce can also carry a partially built value, but remember that it creates a new value each step. When the result is a container you intend to keep mutating, <code>collect</code> is the correct tool (Section 9).</p>
+<blockquote class="callout callout--important">
+<p>Important
+The identity constraint is not a suggestion. <code>reduce("", String::concat)</code> is correct because <code>""</code> is the identity of concatenation; <code>reduce("x", String::concat)</code> prepends an unwanted <code>x</code> (and, in parallel, may prepend it several times). A wrong identity silently produces wrong answers.</p>
+</blockquote>
+<h2 id="8-collect-and-the-collectors-catalogue">8. collect and the Collectors Catalogue</h2>
+<p><strong><code>collect</code></strong> is a mutable reduction: the stream is accumulated into a mutable container, and a <code>Collector</code> describes how. <code>Collectors</code> is the factory of ready-made collectors.</p>
+<table>
+<thead>
+<tr>
+<th>Collector</th>
+<th>Produces</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>toList()</code></td>
+<td><code>List&lt;T&gt;</code></td>
+<td>mutable list; use <code>toUnmodifiableList</code> for an immutable one</td>
+</tr>
+<tr>
+<td><code>toSet()</code></td>
+<td><code>Set&lt;T&gt;</code></td>
+<td>duplicate elements collapse</td>
+</tr>
+<tr>
+<td><code>toMap(key, value)</code></td>
+<td><code>Map&lt;K,V&gt;</code></td>
+<td>duplicate keys throw <code>IllegalStateException</code></td>
+</tr>
+<tr>
+<td><code>toMap(key, value, merge)</code></td>
+<td><code>Map&lt;K,V&gt;</code></td>
+<td>the merge function resolves duplicate keys</td>
+</tr>
+<tr>
+<td><code>joining(delimiter)</code></td>
+<td><code>String</code></td>
+<td>concatenates <code>CharSequence</code> elements</td>
+</tr>
+<tr>
+<td><code>groupingBy(classifier)</code></td>
+<td><code>Map&lt;K, List&lt;T&gt;&gt;</code></td>
+<td>one group per key</td>
+</tr>
+<tr>
+<td><code>groupingBy(classifier, downstream)</code></td>
+<td><code>Map&lt;K, D&gt;</code></td>
+<td>group, then reduce each group</td>
+</tr>
+<tr>
+<td><code>partitioningBy(predicate)</code></td>
+<td><code>Map&lt;Boolean, List&lt;T&gt;&gt;</code></td>
+<td>exactly two groups, true and false</td>
+</tr>
+<tr>
+<td><code>counting()</code></td>
+<td><code>Long</code></td>
+<td>number of elements, often a downstream</td>
+</tr>
+<tr>
+<td><code>summingInt(mapper)</code></td>
+<td><code>Integer</code></td>
+<td>sum of a derived int</td>
+</tr>
+<tr>
+<td><code>averagingInt(mapper)</code></td>
+<td><code>Double</code></td>
+<td>mean of a derived int</td>
+</tr>
+<tr>
+<td><code>mapping(mapper, downstream)</code></td>
+<td>depends on downstream</td>
+<td>map before the downstream collector</td>
+</tr>
+<tr>
+<td><code>summarizingInt(mapper)</code></td>
+<td><code>IntSummaryStatistics</code></td>
+<td>count, sum, min, max and average together</td>
+</tr>
+<tr>
+<td><code>teeing(a, b, merger)</code></td>
+<td><code>R</code></td>
+<td>Java 12: feed two collectors and merge their results</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo2.java — groupingBy with a downstream, and counting per group</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.stream.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo2</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Person</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">private</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">String</span><span class="w"> </span><span class="n">name</span><span class="p">;</span>
+<span class="w">        </span><span class="kd">private</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">String</span><span class="w"> </span><span class="n">city</span><span class="p">;</span>
+<span class="w">        </span><span class="n">Person</span><span class="p">(</span><span class="n">String</span><span class="w"> </span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="w"> </span><span class="n">city</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="na">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">name</span><span class="p">;</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="na">city</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">city</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="nf">name</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">name</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="nf">city</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">city</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">Person</span><span class="o">&gt;</span><span class="w"> </span><span class="n">people</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span>
+<span class="w">                </span><span class="k">new</span><span class="w"> </span><span class="n">Person</span><span class="p">(</span><span class="s">&quot;Ada&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;London&quot;</span><span class="p">),</span>
+<span class="w">                </span><span class="k">new</span><span class="w"> </span><span class="n">Person</span><span class="p">(</span><span class="s">&quot;Alan&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;London&quot;</span><span class="p">),</span>
+<span class="w">                </span><span class="k">new</span><span class="w"> </span><span class="n">Person</span><span class="p">(</span><span class="s">&quot;Grace&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;New York&quot;</span><span class="p">),</span>
+<span class="w">                </span><span class="k">new</span><span class="w"> </span><span class="n">Person</span><span class="p">(</span><span class="s">&quot;Edsger&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Austin&quot;</span><span class="p">));</span>
+
+<span class="w">        </span><span class="n">Map</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">byCity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">people</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span>
+<span class="w">                </span><span class="p">.</span><span class="na">collect</span><span class="p">(</span><span class="n">Collectors</span><span class="p">.</span><span class="na">groupingBy</span><span class="p">(</span>
+<span class="w">                        </span><span class="n">Person</span><span class="p">::</span><span class="n">city</span><span class="p">,</span>
+<span class="w">                        </span><span class="n">Collectors</span><span class="p">.</span><span class="na">mapping</span><span class="p">(</span><span class="n">Person</span><span class="p">::</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="n">Collectors</span><span class="p">.</span><span class="na">toList</span><span class="p">())));</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">byCity</span><span class="p">);</span>
+<span class="w">        </span><span class="c1">// {New York=[Grace], Austin=[Edsger], London=[Ada, Alan]}</span>
+
+<span class="w">        </span><span class="n">Map</span><span class="o">&lt;</span><span class="n">String</span><span class="p">,</span><span class="w"> </span><span class="n">Long</span><span class="o">&gt;</span><span class="w"> </span><span class="n">countByCity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">people</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span>
+<span class="w">                </span><span class="p">.</span><span class="na">collect</span><span class="p">(</span><span class="n">Collectors</span><span class="p">.</span><span class="na">groupingBy</span><span class="p">(</span><span class="n">Person</span><span class="p">::</span><span class="n">city</span><span class="p">,</span><span class="w"> </span><span class="n">Collectors</span><span class="p">.</span><span class="na">counting</span><span class="p">()));</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">countByCity</span><span class="p">);</span>
+<span class="w">        </span><span class="c1">// {New York=1, Austin=1, London=2}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The downstream collector is the key idea: <code>groupingBy(classifier, downstream)</code> groups first and then applies the downstream collector to each bucket, so counting, summing, averaging and mapping compose naturally. <code>partitioningBy</code> is the two-bucket special case for a predicate, and <code>teeing</code> (Java 12) runs two collectors over the same stream and merges their results.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+"What happens if <code>toMap</code> sees two elements with the same key?" It throws <code>IllegalStateException</code> with a message naming the duplicate key. The fix is not to catch it but to supply a merge function, for example <code>(a, b) -&gt; a</code> (keep the first) or <code>(a, b) -&gt; a + ", " + b</code> (combine), or to switch to <code>groupingBy</code> when the intent is a list per key.</p>
+</blockquote>
+<h2 id="9-reduce-vs-collect">9. reduce vs collect</h2>
+<p><code>reduce</code> performs an <strong>immutable reduction</strong>: each step produces a new value. <code>collect</code> performs a <strong>mutable reduction</strong>: elements are folded into one mutable container that is updated in place. The distinction is not cosmetic; it decides both performance and parallel safety.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th><code>reduce</code></th>
+<th><code>collect</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nature</td>
+<td>immutable reduction</td>
+<td>mutable reduction</td>
+</tr>
+<tr>
+<td>Combines into</td>
+<td>a new value each step</td>
+<td>a single mutable container</td>
+</tr>
+<tr>
+<td>Seed</td>
+<td>an identity value</td>
+<td>a supplier of a container</td>
+</tr>
+<tr>
+<td>Description</td>
+<td>identity plus accumulator (plus combiner)</td>
+<td>a <code>Collector</code> (supplier, accumulator, combiner, finisher)</td>
+</tr>
+<tr>
+<td>Parallel fit</td>
+<td>accumulator must be associative and stateless</td>
+<td>designed for parallel accumulation into chunks</td>
+</tr>
+<tr>
+<td>Result type</td>
+<td><code>T</code> or <code>Optional&lt;T&gt;</code></td>
+<td>any container: <code>List</code>, <code>Set</code>, <code>Map</code>, <code>String</code></td>
+</tr>
+<tr>
+<td>Typical use</td>
+<td>sum, product, max, string concatenation</td>
+<td><code>toList</code>, <code>toMap</code>, <code>groupingBy</code>, <code>joining</code></td>
+</tr>
+<tr>
+<td>Cost profile</td>
+<td>allocates a value per step</td>
+<td>mutates one accumulator, usually cheaper</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--note">
+<p>Memory aid
+<strong>reduce builds a new value; collect fills a container.</strong> If the answer is a single number, <code>reduce</code>; if the answer is a collection, map, or string, <code>collect</code>.</p>
+</blockquote>
+<h2 id="10-ordering-and-stability">10. Ordering and Stability</h2>
+<p><strong>Encounter order</strong> is the order in which the source presents its elements. Several stream methods make promises about it:</p>
+<ul>
+<li><strong><code>sorted()</code> is stable for ordered streams</strong> — elements that compare equal retain their relative encounter order.</li>
+<li><strong><code>distinct()</code> preserves the first occurrence</strong> — it keeps the earliest of each duplicate group.</li>
+<li><strong><code>forEach</code> does not guarantee order under parallel execution; <code>forEachOrdered</code> does</strong>, at the cost of some parallelism.</li>
+<li><strong><code>findFirst</code> respects encounter order; <code>findAny</code> does not.</strong> In a parallel pipeline <code>findAny</code> may return any matching element, which is faster but non-deterministic.</li>
+<li><strong><code>unordered()</code></strong> records that order does not matter, allowing some operations to run more freely; it can change the results of order-sensitive operations.</li>
+<li><strong><code>peek</code> and <code>map</code> do not reorder</strong> on a sequential ordered stream; they see elements in encounter order, but only for elements the pipeline actually demands.</li>
+</ul>
+<blockquote class="callout callout--important">
+<p>Important
+<code>sorted</code> being stable is a property of <strong>ordered</strong> streams. On an unordered stream any permutation is acceptable, so equal elements have no promised relative order.</p>
+</blockquote>
+<h2 id="11-worked-examples-the-tomap-duplicate-key-trap-and-joining">11. Worked Examples: The toMap Duplicate-Key Trap and joining</h2>
+<p>The single most common collector bug is <code>toMap</code> on data that is not unique by key. The collector refuses to guess and throws.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo3.java — toMap duplicate-key trap, the merge fix, and joining</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.stream.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo3</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">words</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="s">&quot;apple&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;banana&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;avocado&quot;</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">Map</span><span class="o">&lt;</span><span class="n">Character</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">first</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">words</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span>
+<span class="w">                    </span><span class="p">.</span><span class="na">collect</span><span class="p">(</span><span class="n">Collectors</span><span class="p">.</span><span class="na">toMap</span><span class="p">(</span><span class="n">w</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">w</span><span class="p">.</span><span class="na">charAt</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span><span class="w"> </span><span class="n">w</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">w</span><span class="p">));</span>
+<span class="w">            </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">first</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">IllegalStateException</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;Duplicate key -&gt; &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="na">getMessage</span><span class="p">());</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">Map</span><span class="o">&lt;</span><span class="n">Character</span><span class="p">,</span><span class="w"> </span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">merged</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">words</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span>
+<span class="w">                </span><span class="p">.</span><span class="na">collect</span><span class="p">(</span><span class="n">Collectors</span><span class="p">.</span><span class="na">toMap</span><span class="p">(</span>
+<span class="w">                        </span><span class="n">w</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">w</span><span class="p">.</span><span class="na">charAt</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span><span class="w">           </span><span class="c1">// key</span>
+<span class="w">                        </span><span class="n">w</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">w</span><span class="p">,</span><span class="w">                      </span><span class="c1">// value</span>
+<span class="w">                        </span><span class="p">(</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot;, &quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">));</span><span class="w">    </span><span class="c1">// merge function</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">merged</span><span class="p">);</span><span class="w">                  </span><span class="c1">// {a=apple, avocado, b=banana}</span>
+
+<span class="w">        </span><span class="n">String</span><span class="w"> </span><span class="n">joined</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">words</span><span class="p">.</span><span class="na">stream</span><span class="p">()</span>
+<span class="w">                </span><span class="p">.</span><span class="na">collect</span><span class="p">(</span><span class="n">Collectors</span><span class="p">.</span><span class="na">joining</span><span class="p">(</span><span class="s">&quot;, &quot;</span><span class="p">));</span><span class="w">  </span><span class="c1">// delimiter</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">joined</span><span class="p">);</span><span class="w">                  </span><span class="c1">// apple, banana, avocado</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The first <code>toMap</code> throws because <code>apple</code> and <code>avocado</code> share the key <code>a</code>. The second supplies the merge function <code>(a, b) -&gt; a + ", " + b</code>, which folds the colliding values instead of failing. <code>joining</code> is the string-specialized collector: <code>joining()</code>, <code>joining(delimiter)</code> and <code>joining(delimiter, prefix, suffix)</code>.</p>
+<h2 id="12-pitfalls-and-common-errors">12. Pitfalls and Common Errors</h2>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>What goes wrong</th>
+<th>Correct approach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>toMap</code> on duplicate keys</td>
+<td><code>IllegalStateException</code></td>
+<td>supply a merge function, or use <code>groupingBy</code></td>
+</tr>
+<tr>
+<td>Using <code>peek</code> for real work</td>
+<td>may be skipped by a short-circuit, order not guaranteed in parallel</td>
+<td>do the work in <code>map</code>, <code>forEach</code> or <code>collect</code></td>
+</tr>
+<tr>
+<td>Stateful lambdas (mutating a shared variable or list)</td>
+<td>wrong results under parallel execution</td>
+<td>use <code>collect</code>/<code>reduce</code>; revisit parallel rules in Lecture 42</td>
+</tr>
+<tr>
+<td>Assuming <code>collect(toList)</code> is immutable</td>
+<td>the returned list is mutable</td>
+<td>use <code>toUnmodifiableList</code> (Java 10) or <code>List.copyOf</code></td>
+</tr>
+<tr>
+<td><code>forEach</code> order in a parallel stream</td>
+<td>elements arrive in no defined order</td>
+<td>use <code>forEachOrdered</code></td>
+</tr>
+<tr>
+<td>Reusing a stream</td>
+<td><code>IllegalStateException</code> on the second terminal</td>
+<td>build a fresh stream from the source each time</td>
+</tr>
+<tr>
+<td>Boxing overhead in numeric pipelines</td>
+<td><code>Stream&lt;Integer&gt;</code> allocates wrappers</td>
+<td>use <code>mapToInt</code> and the primitive streams</td>
+</tr>
+<tr>
+<td><code>findAny</code> when order matters</td>
+<td>non-deterministic element returned</td>
+<td>use <code>findFirst</code></td>
+</tr>
+<tr>
+<td><code>sorted</code> on an infinite stream</td>
+<td>never terminates</td>
+<td>bound with <code>limit</code> before sorting</td>
+</tr>
+<tr>
+<td><code>takeWhile</code> treated as <code>filter</code></td>
+<td>elements after the first failure are lost</td>
+<td>use <code>filter</code> when you must scan the whole stream</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+Streams are single-use pipelines, not reusable collections. A stream that has been operated upon is closed forever; if you need the data twice, obtain it twice.</p>
+</blockquote>
+<h2 id="13-myth-vs-reality">13. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Intermediate operations run as they are chained."</td>
+<td>They are lazy; nothing runs until a terminal operation is invoked.</td>
+</tr>
+<tr>
+<td>"<code>peek</code> is a good place to do real work."</td>
+<td><code>peek</code> is for debugging; it may be skipped and its timing is not guaranteed.</td>
+</tr>
+<tr>
+<td>"<code>reduce</code> and <code>collect</code> are interchangeable."</td>
+<td><code>reduce</code> is immutable reduction; <code>collect</code> is mutable reduction into a container.</td>
+</tr>
+<tr>
+<td>"<code>findAny</code> and <code>findFirst</code> mean the same."</td>
+<td><code>findFirst</code> respects encounter order; <code>findAny</code> may return any element, especially in parallel.</td>
+</tr>
+<tr>
+<td>"<code>toMap</code> silently overwrites duplicate keys."</td>
+<td>It throws <code>IllegalStateException</code>; only a supplied merge function resolves duplicates.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="14-common-trap-questions">14. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — Laziness: "A pipeline calls <code>filter</code> and <code>map</code> but no terminal operation. How many elements are processed?"
+Zero. Intermediate operations are lazy; the pipeline executes only when a terminal operation is invoked.</p>
+<p>Trap 2 — peek guarantees: "<code>peek</code> prints every element, so the print is reliable, right?"
+No. <code>peek</code> is lazy, may be skipped by a short-circuiting terminal, and its interleaving under parallel execution is not guaranteed. It is a debugging aid only.</p>
+<p>Trap 3 — Duplicate keys: "What does <code>Collectors.toMap</code> do when two elements share a key?"
+It throws <code>IllegalStateException</code> unless a merge function <code>(a, b) -&gt; ...</code> is supplied; use <code>groupingBy</code> when a list per key is intended.</p>
+<p>Trap 4 — findFirst versus findAny: "In a parallel stream, does <code>findAny</code> return the first element?"
+No. <code>findAny</code> may return any matching element and is deliberately non-deterministic for speed; use <code>findFirst</code> when encounter order matters.</p>
+<p>Trap 5 — Stream reuse: "Can I call <code>stream.count()</code> and then <code>stream.forEach(...)</code> on the same stream?"
+No. A stream is single-use; the second terminal operation throws <code>IllegalStateException</code>.</p>
+<p>Trap 6 — Infinite sorted: "Will <code>Stream.iterate(1, n -&gt; n + 1).sorted().findFirst()</code> ever finish?"
+No. <code>sorted</code> must see every element before it can emit one, and the source never ends, so it hangs.</p>
+<p>Trap 7 — Wrong identity: "What does <code>Stream.of("a", "b").reduce("x", String::concat)</code> return?"
+<code>"xab"</code>. The first argument is a seed, not a neutral value; with a wrong identity the seed contaminates the result (and may be inserted once per parallel chunk).</p>
+<p>Trap 8 — takeWhile versus filter: "Does <code>takeWhile(n -&gt; n &lt; 3)</code> behave like <code>filter(n -&gt; n &lt; 3)</code>?"
+No. <code>takeWhile</code> stops at the first element that fails and drops everything after it; <code>filter</code> scans the whole stream and keeps every match.</p>
+</blockquote>
+<h2 id="15-points-to-remember">15. Points to Remember</h2>
+<ol>
+<li>A stream pipeline is a source, zero or more lazy intermediate operations, and exactly one eager terminal operation.</li>
+<li>Intermediate operations return a <code>Stream</code> and run nothing until a terminal operation executes.</li>
+<li>Terminal operations return a result or cause a side effect; short-circuiting terminals can stop early.</li>
+<li><code>distinct</code> uses <code>equals</code>/<code>hashCode</code> and keeps the first occurrence; <code>sorted</code> is stable for ordered streams.</li>
+<li><code>peek</code> exists for debugging only; it is lazy and must never carry business logic.</li>
+<li><code>map</code> is one-to-one; <code>flatMap</code> is one-to-many and flattens nested streams such as <code>Stream&lt;List&lt;T&gt;&gt;</code> to <code>Stream&lt;T&gt;</code>.</li>
+<li><code>reduce</code> has three forms: identity plus accumulator returns <code>T</code>; accumulator-only returns <code>Optional&lt;T&gt;</code>; the three-argument form adds a combiner for parallel execution.</li>
+<li><code>collect</code> is mutable reduction through <code>Collectors</code>; <code>toMap</code> throws on duplicate keys unless a merge function is supplied, and <code>joining</code> builds strings.</li>
+<li><code>groupingBy</code> with a downstream collector, <code>partitioningBy</code>, <code>counting</code>, <code>summingInt</code>, <code>summarizingInt</code>, <code>mapping</code> and <code>teeing</code> compose to express most reporting queries.</li>
+<li>Streams are single-use; prefer <code>toUnmodifiableList</code> for immutable results, avoid stateful lambdas, and defer parallel-stream semantics to Lecture 42.</li>
+</ol>
+<h2 id="16-likely-interview-questions">16. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Difference between intermediate and terminal operations?</td>
+<td>Intermediate operations return a <code>Stream</code> and are lazy; terminal operations produce a result or side effect and trigger execution.</td>
+</tr>
+<tr>
+<td>Why are streams lazy?</td>
+<td>To allow fusion, optimization and short-circuiting; work happens only when a terminal operation demands elements.</td>
+</tr>
+<tr>
+<td>Difference between <code>map</code> and <code>flatMap</code>?</td>
+<td><code>map</code> transforms one element to one; <code>flatMap</code> transforms one element to many and flattens the resulting streams.</td>
+</tr>
+<tr>
+<td>Difference between <code>map</code> and <code>mapToInt</code>?</td>
+<td><code>map</code> yields a boxed <code>Stream&lt;R&gt;</code>; <code>mapToInt</code> yields an <code>IntStream</code> with numeric terminals and no boxing.</td>
+</tr>
+<tr>
+<td>What is <code>distinct</code> based on?</td>
+<td><code>equals</code> and <code>hashCode</code>; it preserves the first occurrence.</td>
+</tr>
+<tr>
+<td>Is <code>sorted</code> stable?</td>
+<td>Yes for ordered streams: equal elements keep their original relative order.</td>
+</tr>
+<tr>
+<td>Which operations short-circuit?</td>
+<td>Terminal <code>findFirst</code>, <code>findAny</code>, <code>anyMatch</code>, <code>allMatch</code>, <code>noneMatch</code>, plus intermediate <code>limit</code> and <code>takeWhile</code>.</td>
+</tr>
+<tr>
+<td>Difference between <code>findFirst</code> and <code>findAny</code>?</td>
+<td><code>findFirst</code> returns the first element in encounter order; <code>findAny</code> returns any element and is non-deterministic, which helps in parallel.</td>
+</tr>
+<tr>
+<td>What does <code>reduce</code> do and what are its forms?</td>
+<td>Immutable reduction: identity plus accumulator returns <code>T</code>; accumulator-only returns <code>Optional&lt;T&gt;</code>; identity plus accumulator plus combiner supports parallel.</td>
+</tr>
+<tr>
+<td>Difference between <code>reduce</code> and <code>collect</code>?</td>
+<td><code>reduce</code> folds into a new value; <code>collect</code> accumulates into a mutable container via a <code>Collector</code>.</td>
+</tr>
+<tr>
+<td>What happens when <code>toMap</code> meets duplicate keys?</td>
+<td>It throws <code>IllegalStateException</code> unless a merge function is provided.</td>
+</tr>
+<tr>
+<td>Can a stream be reused?</td>
+<td>No; a stream is single-use and throws <code>IllegalStateException</code> if operated upon twice.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="17-final-summary">17. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>source  →  [ intermediate operations: lazy, return Stream ]  →  terminal operation (eager)
+             filter map mapToInt flatMap distinct sorted peek
+             limit skip takeWhile dropWhile boxed
+                                   |
+             forEach forEachOrdered collect reduce count min max
+             findFirst findAny anyMatch allMatch noneMatch toArray
+
+short-circuit : findFirst findAny anyMatch allMatch noneMatch (+ limit)
+map      : 1 -&gt; 1                 flatMap : 1 -&gt; many (flatten Stream&lt;List&lt;T&gt;&gt; -&gt; Stream&lt;T&gt;)
+reduce   : immutable              collect : mutable
+collectors: toList toSet toMap joining groupingBy partitioningBy
+            counting summingInt averagingInt mapping summarizingInt teeing
+toMap    : duplicate key -&gt; IllegalStateException unless a merge function is supplied
+</code></pre></div>
+
+<ul>
+<li>Intermediate → lazy, return a <code>Stream</code>; nothing runs until a terminal operation fires the pipeline.</li>
+<li>Terminal → eager, produce a result or side effect; short-circuiting terminals stop early and tame infinite streams.</li>
+<li><code>map</code> vs <code>flatMap</code> → transform one-to-one versus expand one-to-many and flatten.</li>
+<li><code>reduce</code> vs <code>collect</code> → immutable folding versus mutable accumulation into a container.</li>
+<li><code>Collectors</code> → the factory for <code>collect</code>: <code>toMap</code> needs a merge function, <code>joining</code> builds strings, <code>groupingBy</code> plus a downstream aggregates.</li>
+<li>Ordering → <code>sorted</code> stable, <code>distinct</code> keeps the first, <code>forEachOrdered</code> versus <code>forEach</code>, <code>findFirst</code> versus <code>findAny</code>.</li>
+<li>Traps → <code>peek</code> is not for logic, streams are single-use, <code>toMap</code> rejects duplicate keys, <code>sorted</code> on an infinite stream never returns.</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+A stream is a lazy query, not a loop: chain the intermediate operations you need, close the pipeline with the right terminal operation, and let laziness, short-circuiting and the collectors do the work.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> intermediate operations build a lazy <code>Stream</code>, terminal operations force an eager answer, and the collector factory — with <code>flatMap</code>, <code>reduce</code> and <code>collect</code> understood — is what turns a stream of data into exactly the shape you need.</p>
+<div class="pager"><a class="prev" href="lecture-39.html"><span class="dir">Previous</span><span class="ttl">Introduction to Java Streams</span></a><a class="next" href="lecture-41.html"><span class="dir">Next</span><span class="ttl">Java Optional Explained from Scratch</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

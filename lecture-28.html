@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 28 · Wildcards in Generics — Java Notes</title>
+<meta name="description" content="Wildcards in Generics | ?, ? extends, ? super — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="28" data-lecture-title="Wildcards in Generics | ?, ? extends, ? super">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-28.html#1-the-invariance-problem-from-lecture-27">1. The Invariance Problem from Lecture 27</a></li><li><a href="lecture-28.html#2-the-unbounded-wildcard">2. The Unbounded Wildcard ?</a></li><li><a href="lecture-28.html#3-upper-bounded-wildcard-extends-t-covariant-producer">3. Upper-Bounded Wildcard ? extends T (Covariant Producer)</a></li><li><a href="lecture-28.html#4-lower-bounded-wildcard-super-t-contravariant-consumer">4. Lower-Bounded Wildcard ? super T (Contravariant Consumer)</a></li><li><a href="lecture-28.html#5-pecs-producer-extends-consumer-super">5. PECS: Producer Extends, Consumer Super</a></li><li><a href="lecture-28.html#6-the-canonical-jdk-example-collectionscopy">6. The Canonical JDK Example: Collections.copy</a></li><li><a href="lecture-28.html#7-comparison-extends-vs-super-vs-unbounded">7. Comparison: ? extends vs ? super vs Unbounded</a></li><li><a href="lecture-28.html#8-readwrite-capability-matrix">8. Read/Write Capability Matrix</a></li><li><a href="lecture-28.html#9-assignment-compatibility-between-list-types">9. Assignment Compatibility Between List Types</a></li><li><a href="lecture-28.html#10-wildcard-capture-and-the-private-helper">10. Wildcard Capture and the Private Helper</a></li><li><a href="lecture-28.html#11-wildcards-vs-method-type-parameters">11. Wildcards vs Method Type Parameters</a></li><li><a href="lecture-28.html#12-return-types-and-api-design">12. Return Types and API Design</a></li><li><a href="lecture-28.html#13-pitfalls-and-common-errors">13. Pitfalls and Common Errors</a></li><li><a href="lecture-28.html#14-myth-vs-reality">14. Myth vs Reality</a></li><li><a href="lecture-28.html#15-common-trap-questions">15. Common Trap Questions</a></li><li><a href="lecture-28.html#16-points-to-remember">16. Points to Remember</a></li><li><a href="lecture-28.html#17-likely-interview-questions">17. Likely Interview Questions</a></li><li><a href="lecture-28.html#18-final-summary">18. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 4 · Strings, Generics & Collections · Lecture 28</p>
+<h1>Wildcards in Generics | ?, ? extends, ? super</h1>
+<p class="readmeta">18 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="28" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: "Wildcards in Generics | ?, ? extends, ? super" (playlist map, verified). Repo evidence: 5 Demo files.</p>
+</blockquote>
+<p>Lecture 27 established that generics are <strong>invariant</strong>: <code>List&lt;Integer&gt;</code> is not a <code>List&lt;Number&gt;</code>, even though <code>Integer</code> is a <code>Number</code>. That rule is safe, but it is also inflexible — a method that should accept "any list of numbers" cannot be typed as <code>List&lt;Number&gt;</code>. Wildcards are Java's controlled escape hatch: they describe a family of parameterised types without abandoning compile-time safety. This lecture covers the unbounded wildcard <code>?</code>, the upper bound <code>? extends T</code>, the lower bound <code>? super T</code>, the PECS mnemonic, the canonical <code>Collections.copy</code> signature, the read/write rules each form obeys, wildcard capture, and the API-design conventions that keep wildcards in parameter positions.</p>
+<h2 id="1-the-invariance-problem-from-lecture-27">1. The Invariance Problem from Lecture 27</h2>
+<p>A generic type is invariant in its type argument. <code>List&lt;Integer&gt;</code> and <code>List&lt;Number&gt;</code> are <strong>unrelated types</strong>, and the compiler refuses to treat one as the other: writing <code>List&lt;Number&gt; nums = new ArrayList&lt;Integer&gt;();</code> is rejected as "incompatible types".</p>
+<p>The rejection is deliberate. If <code>List&lt;Number&gt; nums = ints;</code> compiled, then <code>nums.add(3.14)</code> would put a <code>Double</code> into a structure that everything else believes is <code>List&lt;Integer&gt;</code>, and a later <code>Integer x = ints.get(0);</code> would throw <code>ClassCastException</code> — the very heap pollution that arrays suffer through covariant assignment (<code>Object[] a = new String[1]; a[0] = 3.14;</code> throws <code>ArrayStoreException</code> at runtime). Generics moved that failure from runtime to compile time by forbidding the assignment entirely.</p>
+<p>The cost is lost flexibility. A method whose job is to sum any list of numbers would like the signature <code>sum(List&lt;Number&gt;)</code>, but that rejects <code>List&lt;Integer&gt;</code> and <code>List&lt;Double&gt;</code>. Wildcards restore exactly the flexibility that is provably safe, and nothing more.</p>
+<blockquote class="callout callout--important">
+<p>Important
+Invariance is the default. A wildcard is a <em>use-site</em> annotation that widens the accepted set of types; the underlying generic declaration (<code>class Box&lt;T&gt;</code>) never changes.</p>
+</blockquote>
+<h2 id="2-the-unbounded-wildcard">2. The Unbounded Wildcard <code>?</code></h2>
+<p>The unbounded wildcard <code>?</code> means "a list of some <strong>one</strong> unknown element type". <code>List&lt;?&gt;</code> is a supertype of <code>List&lt;Integer&gt;</code>, <code>List&lt;String&gt;</code>, <code>List&lt;Number&gt;</code> and every other <code>List&lt;X&gt;</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo.java — unbounded wildcard: any element type, read-only</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">printAll</span><span class="p">(</span><span class="n">List</span><span class="o">&lt;?&gt;</span><span class="w"> </span><span class="n">list</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">          </span><span class="c1">// accepts any List&lt;X&gt;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Object</span><span class="w"> </span><span class="n">o</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">list</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">                   </span><span class="c1">// every element reads as Object</span>
+<span class="w">            </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">o</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="c1">// list.add(&quot;x&quot;);                         // Incorrect: type is unknown</span>
+<span class="w">        </span><span class="n">list</span><span class="p">.</span><span class="na">add</span><span class="p">(</span><span class="kc">null</span><span class="p">);</span><span class="w">                           </span><span class="c1">// Correct: null fits every type</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">printAll</span><span class="p">(</span><span class="n">Arrays</span><span class="p">.</span><span class="na">asList</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">));</span>
+<span class="w">        </span><span class="n">printAll</span><span class="p">(</span><span class="n">Arrays</span><span class="p">.</span><span class="na">asList</span><span class="p">(</span><span class="s">&quot;a&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;b&quot;</span><span class="p">));</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The essential facts:</p>
+<ol>
+<li>You can <strong>read</strong> any element, but only as <code>Object</code> — the compiler cannot know the element type.</li>
+<li>You can <strong>add nothing</strong> except <code>null</code>. Adding <code>null</code> is legal because <code>null</code> is a member of every reference type.</li>
+<li><code>List&lt;?&gt;</code> is <strong>not</strong> the same as <code>List&lt;Object&gt;</code>. <code>List&lt;Object&gt;</code> is assignable to <code>List&lt;?&gt;</code>, but not the reverse.</li>
+</ol>
+<blockquote class="callout callout--note">
+<p>Memory aid
+<code>List&lt;?&gt;</code> means "some list, I don't know which". You may take things out (as <code>Object</code>), but you may not put things in, because you do not know what the container accepts.</p>
+</blockquote>
+<h2 id="3-upper-bounded-wildcard-extends-t-covariant-producer">3. Upper-Bounded Wildcard <code>? extends T</code> (Covariant Producer)</h2>
+<p><code>? extends T</code> means "T or any subtype of T". It is <strong>covariant</strong>: <code>List&lt;Integer&gt;</code> is assignable to <code>List&lt;? extends Number&gt;</code> because <code>Integer</code> lies within the bound.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo2.java — upper bound: a Producer you can read from</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo2</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="nf">sum</span><span class="p">(</span><span class="n">List</span><span class="o">&lt;?</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="n">Number</span><span class="o">&gt;</span><span class="w"> </span><span class="n">nums</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">   </span><span class="c1">// reads as Number</span>
+<span class="w">        </span><span class="kt">double</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">Number</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">nums</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">                        </span><span class="c1">// Number or a subtype</span>
+<span class="w">            </span><span class="n">total</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">n</span><span class="p">.</span><span class="na">doubleValue</span><span class="p">();</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="c1">// nums.add(1);                                // Incorrect: no add is allowed</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">total</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">sum</span><span class="p">(</span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">)));</span><span class="w">     </span><span class="c1">// 6.0</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">sum</span><span class="p">(</span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="mf">1.5</span><span class="p">,</span><span class="w"> </span><span class="mf">2.5</span><span class="p">)));</span><span class="w">    </span><span class="c1">// 4.0</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Reading works, writing does not.</strong> The read type is the bound <code>T</code> (here <code>Number</code>): whatever the real element type is, it is guaranteed to be a <code>Number</code>, so <code>n.doubleValue()</code> is always safe. The write is forbidden because the concrete type argument is unknown — the actual list might be a <code>List&lt;Double&gt;</code> or a <code>List&lt;Integer&gt;</code>, and adding an arbitrary <code>Number</code> could violate it. This asymmetry is why <code>? extends T</code> is called a <strong>producer</strong>: it produces values for the caller to read.</p>
+<blockquote class="callout callout--important">
+<p>Important
+<code>? extends T</code> is not a container you fill; it is a source you drain. The compiler protects the unknown element type by refusing every <code>add</code> except <code>null</code>.</p>
+</blockquote>
+<h2 id="4-lower-bounded-wildcard-super-t-contravariant-consumer">4. Lower-Bounded Wildcard <code>? super T</code> (Contravariant Consumer)</h2>
+<p><code>? super T</code> means "T or any supertype of T". It is <strong>contravariant</strong>: <code>List&lt;Number&gt;</code> and <code>List&lt;Object&gt;</code> are both assignable to <code>List&lt;? super Integer&gt;</code> because both are supertypes of <code>Integer</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo3.java — lower bound: a Consumer you can write to</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo3</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">fill</span><span class="p">(</span><span class="n">List</span><span class="o">&lt;?</span><span class="w"> </span><span class="kd">super</span><span class="w"> </span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">dest</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">     </span><span class="c1">// writes Integer</span>
+<span class="w">        </span><span class="n">dest</span><span class="p">.</span><span class="na">add</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span><span class="w">                                  </span><span class="c1">// Correct: element type absorbs Integer</span>
+<span class="w">        </span><span class="n">Object</span><span class="w"> </span><span class="n">first</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dest</span><span class="p">.</span><span class="na">get</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w">                    </span><span class="c1">// reading yields only Object</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">first</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">fill</span><span class="p">(</span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Number</span><span class="o">&gt;</span><span class="p">());</span><span class="w">                 </span><span class="c1">// backed by Number</span>
+<span class="w">        </span><span class="n">fill</span><span class="p">(</span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;</span><span class="p">());</span><span class="w">                 </span><span class="c1">// backed by Object</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Writing works, reading does not (as T).</strong> Because every legal type argument is a supertype of <code>Integer</code>, an <code>Integer</code> (and any subtype) can be stored safely. The read type, however, is only <code>Object</code> — the list might be a <code>List&lt;Number&gt;</code>, or a <code>List&lt;Object&gt;</code>, and <code>Object</code> is the only type guaranteed to cover all of them. This asymmetry is why <code>? super T</code> is called a <strong>consumer</strong>: it consumes values supplied by the caller.</p>
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+The read-from-<code>? super T</code> surprise is the classic follow-up. "You can add an <code>Integer</code> to <code>List&lt;? super Integer&gt;</code>, so can you read an <code>Integer</code> back?" No — reading yields <code>Object</code>, because the declared lower bound says nothing about what the actual type argument is above <code>Integer</code>.</p>
+</blockquote>
+<h2 id="5-pecs-producer-extends-consumer-super">5. PECS: Producer Extends, Consumer Super</h2>
+<p><strong>PECS — Producer Extends, Consumer Super</strong> — is the one-line rule that picks the correct wildcard.</p>
+<ol>
+<li>If the collection <strong>produces</strong> values you read out of it, use <code>? extends T</code>.</li>
+<li>If the collection <strong>consumes</strong> values you write into it, use <code>? super T</code>.</li>
+<li>If it does both, use an exact <code>T</code> (do not use a wildcard).</li>
+<li>If it does neither and you only need "any list", use <code>?</code>.</li>
+</ol>
+<p>Consider a method that reads from <code>src</code> and writes to <code>dest</code>. Its source parameter is typed <code>? extends T</code> because the method only pulls items out; its destination parameter is typed <code>? super T</code> because the method only pushes items in. A caller may then pass a <code>List&lt;Integer&gt;</code> as the producer and a <code>List&lt;Number&gt;</code> as the consumer — exactly the flexibility invariance denied. The runnable form of this pattern is Demo4 in the next section.</p>
+<blockquote class="callout callout--note">
+<p>Memory aid
+<strong>PECS</strong>: the Producer Extends (read), the Consumer Super (write). Picture the data flowing from the producer into the consumer — reading on the left, writing on the right.</p>
+</blockquote>
+<h2 id="6-the-canonical-jdk-example-collectionscopy">6. The Canonical JDK Example: <code>Collections.copy</code></h2>
+<p>The standard library uses PECS in <code>java.util.Collections.copy</code>, whose signature is <code>public static &lt;T&gt; void copy(List&lt;? super T&gt; dest, List&lt;? extends T&gt; src)</code>. The parameter order encodes the data flow: <code>src</code> is a <strong>producer</strong> (<code>? extends T</code>, read from) and <code>dest</code> is a <strong>consumer</strong> (<code>? super T</code>, written to). Demo4 writes the same method by hand and calls it.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo4.java — PECS in practice: read src, write dest (as Collections.copy does)</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo4</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">copy</span><span class="p">(</span><span class="n">List</span><span class="o">&lt;?</span><span class="w"> </span><span class="kd">super</span><span class="w"> </span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="n">dest</span><span class="p">,</span><span class="w"> </span><span class="n">List</span><span class="o">&lt;?</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="n">src</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">src</span><span class="p">.</span><span class="na">size</span><span class="p">();</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">dest</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">src</span><span class="p">.</span><span class="na">get</span><span class="p">(</span><span class="n">i</span><span class="p">));</span><span class="w">                 </span><span class="c1">// read producer, write consumer</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">Number</span><span class="o">&gt;</span><span class="w"> </span><span class="n">dest</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">));</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">src</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">);</span>
+<span class="w">        </span><span class="n">copy</span><span class="p">(</span><span class="n">dest</span><span class="p">,</span><span class="w"> </span><span class="n">src</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">dest</span><span class="p">);</span><span class="w">                    </span><span class="c1">// [1, 2, 3]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>If the signature were the invariant <code>copy(List&lt;T&gt; dest, List&lt;T&gt; src)</code>, then <code>T</code> would have to unify to a single type and <code>copy(List&lt;Number&gt;, List&lt;Integer&gt;)</code> would fail to compile. The wildcards let the source and destination element types differ, provided one is a subtype of the other.</p>
+<h2 id="7-comparison-extends-vs-super-vs-unbounded">7. Comparison: <code>? extends</code> vs <code>? super</code> vs Unbounded</h2>
+<table>
+<thead>
+<tr>
+<th>Wildcard</th>
+<th>Meaning</th>
+<th>Variance</th>
+<th>Role</th>
+<th>Typical use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>?</code></td>
+<td>exactly one unknown type</td>
+<td>none (any)</td>
+<td>generic read-only access</td>
+<td>accept any list; print, count, copy out</td>
+</tr>
+<tr>
+<td><code>? extends T</code></td>
+<td>T or a subtype</td>
+<td>covariant</td>
+<td>Producer (read)</td>
+<td>iterate and consume values from a source</td>
+</tr>
+<tr>
+<td><code>? super T</code></td>
+<td>T or a supertype</td>
+<td>contravariant</td>
+<td>Consumer (write)</td>
+<td>collect and store values into a sink</td>
+</tr>
+</tbody>
+</table>
+<p>Read the table downward as the data-flow decision: unknown type first, then "am I reading or writing?". If reading, extend; if writing, super.</p>
+<h2 id="8-readwrite-capability-matrix">8. Read/Write Capability Matrix</h2>
+<table>
+<thead>
+<tr>
+<th>Declaration</th>
+<th>Read element as</th>
+<th>Add T</th>
+<th>Add subtype of T</th>
+<th>Add <code>null</code></th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>List&lt;T&gt;</code> (exact)</td>
+<td><code>T</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>read and write</td>
+</tr>
+<tr>
+<td><code>List&lt;? extends T&gt;</code></td>
+<td><code>T</code></td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+<td>producer (read-only)</td>
+</tr>
+<tr>
+<td><code>List&lt;? super T&gt;</code></td>
+<td><code>Object</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>consumer (write-only)</td>
+</tr>
+<tr>
+<td><code>List&lt;?&gt;</code></td>
+<td><code>Object</code></td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+<td>any list, read-only</td>
+</tr>
+</tbody>
+</table>
+<p>The matrix is the single most reliable way to answer any "can I add / can I read" question: <code>extends</code> gives read access but blocks writes; <code>super</code> gives write access but degrades reads to <code>Object</code>; the unbounded <code>?</code> gives read access as <code>Object</code> and blocks writes; only an exact <code>T</code> gives both.</p>
+<blockquote class="callout callout--important">
+<p>Important
+<code>null</code> is the sole exception that every list accepts, including <code>List&lt;?&gt;</code> and <code>List&lt;? extends T&gt;</code>. This is a consequence of the null type being a subtype of every reference type, not a special rule for wildcards.</p>
+</blockquote>
+<h2 id="9-assignment-compatibility-between-list-types">9. Assignment Compatibility Between List Types</h2>
+<p>The following table records which assignments compile. "Source → Target" is read as <code>Target ref = source;</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Source type</th>
+<th>Target type</th>
+<th>Legal?</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>List&lt;Integer&gt;</code></td>
+<td><code>List&lt;Number&gt;</code></td>
+<td>no</td>
+<td>generics are invariant</td>
+</tr>
+<tr>
+<td><code>List&lt;Integer&gt;</code></td>
+<td><code>List&lt;? extends Number&gt;</code></td>
+<td>yes</td>
+<td>Integer is within the upper bound</td>
+</tr>
+<tr>
+<td><code>List&lt;Number&gt;</code></td>
+<td><code>List&lt;? extends Number&gt;</code></td>
+<td>yes</td>
+<td>a type lies within its own bound</td>
+</tr>
+<tr>
+<td><code>List&lt;Double&gt;</code></td>
+<td><code>List&lt;? extends Number&gt;</code></td>
+<td>yes</td>
+<td>Double is within the upper bound</td>
+</tr>
+<tr>
+<td><code>List&lt;Integer&gt;</code></td>
+<td><code>List&lt;? super Integer&gt;</code></td>
+<td>yes</td>
+<td>a type is a supertype of itself</td>
+</tr>
+<tr>
+<td><code>List&lt;Number&gt;</code></td>
+<td><code>List&lt;? super Integer&gt;</code></td>
+<td>yes</td>
+<td>Number is a supertype of Integer</td>
+</tr>
+<tr>
+<td><code>List&lt;Object&gt;</code></td>
+<td><code>List&lt;? super Integer&gt;</code></td>
+<td>yes</td>
+<td>Object is a supertype of Integer</td>
+</tr>
+<tr>
+<td><code>List&lt;Double&gt;</code></td>
+<td><code>List&lt;? super Integer&gt;</code></td>
+<td>no</td>
+<td>Double is not a supertype of Integer</td>
+</tr>
+<tr>
+<td><code>List&lt;? super Integer&gt;</code></td>
+<td><code>List&lt;Object&gt;</code></td>
+<td>no</td>
+<td>a wildcard is not an exact type argument</td>
+</tr>
+<tr>
+<td><code>List&lt;? extends Number&gt;</code></td>
+<td><code>List&lt;Number&gt;</code></td>
+<td>no</td>
+<td>an upper bound is not the exact type</td>
+</tr>
+<tr>
+<td><code>List&lt;Integer&gt;</code></td>
+<td><code>List&lt;?&gt;</code></td>
+<td>yes</td>
+<td>every list matches the unbounded wildcard</td>
+</tr>
+<tr>
+<td><code>List&lt;Object&gt;</code></td>
+<td><code>List&lt;?&gt;</code></td>
+<td>yes</td>
+<td>every list matches the unbounded wildcard</td>
+</tr>
+<tr>
+<td><code>List&lt;?&gt;</code></td>
+<td><code>List&lt;Object&gt;</code></td>
+<td>no</td>
+<td>the unknown element type may not be Object</td>
+</tr>
+<tr>
+<td><code>List&lt;? super Integer&gt;</code></td>
+<td><code>List&lt;?&gt;</code></td>
+<td>yes</td>
+<td>any parameterised type upcasts to <code>List&lt;?&gt;</code></td>
+</tr>
+<tr>
+<td><code>List&lt;? extends Number&gt;</code></td>
+<td><code>List&lt;?&gt;</code></td>
+<td>yes</td>
+<td>any parameterised type upcasts to <code>List&lt;?&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p>The asymmetry in the middle block is the surprising one: <code>List&lt;Number&gt;</code> is assignable to <strong>both</strong> <code>List&lt;? extends Number&gt;</code> and <code>List&lt;? super Integer&gt;</code>, yet <code>List&lt;? super Integer&gt;</code> cannot be assigned back to <code>List&lt;Object&gt;</code>. A wildcard describes a set of possible types; an exact type argument names one. Widening from a specific type to a wildcard is safe; narrowing from a wildcard to a specific type is not.</p>
+<h2 id="10-wildcard-capture-and-the-private-helper">10. Wildcard Capture and the Private Helper</h2>
+<p>The unbounded <code>?</code> is not a type you can write down. A method that must both read and write the same element position cannot express that with <code>List&lt;?&gt;</code>. The textbook case is <code>swap</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Demo5.java — wildcard capture needs a private generic helper</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo5</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">swap</span><span class="p">(</span><span class="n">List</span><span class="o">&lt;?&gt;</span><span class="w"> </span><span class="n">list</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">swapHelper</span><span class="p">(</span><span class="n">list</span><span class="p">,</span><span class="w"> </span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">j</span><span class="p">);</span><span class="w">                      </span><span class="c1">// capture ? into a fresh T</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">swapHelper</span><span class="p">(</span><span class="n">List</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="n">list</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">T</span><span class="w"> </span><span class="n">tmp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">list</span><span class="p">.</span><span class="na">get</span><span class="p">(</span><span class="n">i</span><span class="p">);</span><span class="w">                         </span><span class="c1">// T is a usable type here</span>
+<span class="w">        </span><span class="n">list</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">list</span><span class="p">.</span><span class="na">get</span><span class="p">(</span><span class="n">j</span><span class="p">));</span>
+<span class="w">        </span><span class="n">list</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="n">j</span><span class="p">,</span><span class="w"> </span><span class="n">tmp</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">words</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="s">&quot;a&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;b&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;c&quot;</span><span class="p">));</span>
+<span class="w">        </span><span class="n">swap</span><span class="p">(</span><span class="n">words</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">words</span><span class="p">);</span><span class="w">                   </span><span class="c1">// [c, b, a]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Writing <code>list.set(i, list.get(j))</code> directly inside <code>swap(List&lt;?&gt;)</code> fails to compile: the compiler has a captured type for <code>list</code>'s element, but it cannot prove that the value returned by one <code>get</code> is acceptable to the same <code>set</code>, because each wildcard occurrence captures independently. The workaround is <strong>capture conversion</strong>: passing <code>List&lt;?&gt;</code> to a method whose parameter is <code>List&lt;T&gt;</code> asks the compiler to name the unknown type once as <code>T</code>, after which <code>get</code> and <code>set</code> agree.</p>
+<blockquote class="callout callout--important">
+<p>Important
+The helper must be <code>private</code>. It exists only to give the captured type a name and should never leak into the public API; the public method keeps the clean <code>List&lt;?&gt;</code> signature.</p>
+</blockquote>
+<h2 id="11-wildcards-vs-method-type-parameters">11. Wildcards vs Method Type Parameters</h2>
+<p>A wildcard and a method type parameter can express overlapping ideas, but they are not interchangeable:</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th><code>void f(List&lt;?&gt;)</code></th>
+<th><code>&lt;T&gt; void f(List&lt;T&gt;)</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The element type</td>
+<td>one unknown, cannot be named</td>
+<td>one named type variable</td>
+</tr>
+<tr>
+<td>Multiple parameters</td>
+<td>each occurrence may capture differently</td>
+<td>all occurrences must share the same <code>T</code></td>
+</tr>
+<tr>
+<td>Relating arguments</td>
+<td>cannot say "the two lists have the same type"</td>
+<td>can, via the shared <code>T</code></td>
+</tr>
+<tr>
+<td>Return type</td>
+<td>cannot return the element type</td>
+<td>can return <code>T</code></td>
+</tr>
+<tr>
+<td>Body</td>
+<td>read-only (<code>Object</code>) or delegate</td>
+<td>read and write the element type</td>
+</tr>
+<tr>
+<td>Best for</td>
+<td>accepting any list, no relationship needed</td>
+<td>tying several arguments to one type</td>
+</tr>
+</tbody>
+</table>
+<p>The rule of thumb: if the type must be <strong>named</strong> — to return it, to write it, or to link two parameters — use <code>&lt;T&gt;</code>. If the type is genuinely unknown and only read, a wildcard is simpler and gives the caller more freedom.</p>
+<h2 id="12-return-types-and-api-design">12. Return Types and API Design</h2>
+<p>Wildcards belong in method <strong>parameters</strong>, not in return types. A method declared <code>List&lt;? extends Number&gt; getNumbers()</code> forces every caller to deal with a wildcard they did not ask for, and makes it impossible to add to the returned list. The idiomatic guideline is <strong>use wildcards on the way in, concrete types on the way out</strong>.</p>
+<p>Inside a body, return the exact type; let the caller widen it if needed. The standard advice appears in <em>Effective Java</em> as Item 31: "Use bounded wildcards to increase API flexibility", applied to parameters such as <code>pushAll</code> and <code>popAll</code>, never to return types.</p>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+Accept widely (<code>? extends</code>, <code>? super</code>, <code>?</code>), return narrowly (the exact <code>T</code>). A wildcard return type is a design smell.</p>
+</blockquote>
+<h2 id="13-pitfalls-and-common-errors">13. Pitfalls and Common Errors</h2>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>What goes wrong</th>
+<th>Correct approach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Adding to <code>List&lt;? extends T&gt;</code></td>
+<td>Compile error: capture of <code>?</code> cannot be converted</td>
+<td>Treat it as a producer and use an exact <code>List&lt;T&gt;</code> when you must write</td>
+</tr>
+<tr>
+<td>Assigning <code>List&lt;? super Integer&gt;</code> to <code>List&lt;Object&gt;</code></td>
+<td>Compile error: wildcard is not an exact type argument</td>
+<td>Accept the wildcard type or copy into a new <code>List&lt;Object&gt;</code></td>
+</tr>
+<tr>
+<td>Expecting <code>Integer</code> back from <code>List&lt;? super Integer&gt;</code></td>
+<td>Reading yields <code>Object</code>, not <code>Integer</code></td>
+<td>Downcast only with a proven invariant, or redesign to <code>List&lt;Integer&gt;</code></td>
+</tr>
+<tr>
+<td>Writing <code>set(get(...))</code> on <code>List&lt;?&gt;</code></td>
+<td>Compile error: independent captures</td>
+<td>Route through a private <code>&lt;T&gt;</code> capture helper</td>
+</tr>
+<tr>
+<td>Assuming a wildcard permits any <code>add</code></td>
+<td><code>List&lt;?&gt;</code> and <code>? extends</code> reject all non-null adds</td>
+<td>Re-check the capability matrix before writing</td>
+</tr>
+<tr>
+<td>Mixing raw <code>List</code> with wildcards</td>
+<td>Raw types disable generic checking and can hide errors</td>
+<td>Use <code>List&lt;?&gt;</code> rather than raw <code>List</code> for "unknown element type"</td>
+</tr>
+<tr>
+<td>Believing <code>?</code> equals adding anything</td>
+<td><code>?</code> fixes one unknown type for the whole expression</td>
+<td>Choose <code>? extends</code> or <code>? super</code> by read/write direction</td>
+</tr>
+<tr>
+<td>Using a wildcard in a return type</td>
+<td>Callers cannot add to or reliably use the result</td>
+<td>Return the exact <code>T</code>; widen at the parameter instead</td>
+</tr>
+</tbody>
+</table>
+<h2 id="14-myth-vs-reality">14. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"A wildcard lets me add whatever I want"</td>
+<td><code>?</code> and <code>? extends T</code> forbid every non-null add; only <code>? super T</code> and exact <code>List&lt;T&gt;</code> accept writes.</td>
+</tr>
+<tr>
+<td>"<code>List&lt;? extends Number&gt;</code> can accept more Numbers via <code>add</code>"</td>
+<td>It is a read-only producer; the concrete element type is unknown, so <code>add</code> is a compile error.</td>
+</tr>
+<tr>
+<td>"<code>List&lt;? super Integer&gt;</code> is a kind of <code>List&lt;Object&gt;</code>"</td>
+<td>No such assignment exists; a lower-bounded wildcard is not an exact type argument.</td>
+</tr>
+<tr>
+<td>"Generics are covariant like arrays"</td>
+<td>Generics are invariant; arrays are covariant and pay for it with runtime <code>ArrayStoreException</code>.</td>
+</tr>
+<tr>
+<td>"<code>?</code> and <code>&lt;T&gt;</code> are interchangeable"</td>
+<td><code>&lt;T&gt;</code> names one type usable in many positions (including return); <code>?</code> is an unnamed existential usable once.</td>
+</tr>
+<tr>
+<td>"Wildcards are useful in return types too"</td>
+<td>They say "one of many types" and force the caller to handle it; parameters are the right place.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="15-common-trap-questions">15. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — The forbidden add: "Can you add an <code>Integer</code> to a <code>List&lt;? extends Number&gt;</code>?"
+No. Reading yields <code>Number</code>, but the concrete type might be <code>List&lt;Double&gt;</code>, so the compiler rejects every non-null add.</p>
+<p>Trap 2 — The failed upcast: "Is <code>List&lt;? super Integer&gt;</code> assignable to <code>List&lt;Object&gt;</code>?"
+No. A wildcard is a set of possible type arguments, not one type argument; assign it to <code>List&lt;?&gt;</code> instead.</p>
+<p>Trap 3 — The read surprise: "What does <code>list.get(0)</code> return when <code>list</code> is <code>List&lt;? super Integer&gt;</code>?"
+<code>Object</code>. The lower bound guarantees only that <code>Integer</code> can go in, not what comes out.</p>
+<p>Trap 4 — Invariance: "Why does <code>List&lt;Number&gt; n = new ArrayList&lt;Integer&gt;();</code> fail?"
+Generics are invariant; the two type arguments are unrelated, and allowing the assignment would permit heap pollution.</p>
+<p>Trap 5 — Capture: "Why does <code>swap(List&lt;?&gt;)</code> require a private helper?"
+Each occurrence of <code>?</code> captures independently, so <code>get</code> and <code>set</code> cannot be proven compatible; a <code>&lt;T&gt;</code> helper names the captured type once.</p>
+<p>Trap 6 — The null exception: "Can you add anything at all to <code>List&lt;?&gt;</code>?"
+Only <code>null</code>, because <code>null</code> is a member of every reference type; no real value is type-safe.</p>
+<p>Trap 7 — Return type: "A method returns <code>List&lt;? extends Number&gt;</code>. Can the caller add a <code>Number</code>?"
+No. The wildcard survives into the return type, so the caller faces the same read-only restriction.</p>
+</blockquote>
+<h2 id="16-points-to-remember">16. Points to Remember</h2>
+<ol>
+<li>Generics are invariant: <code>List&lt;Integer&gt;</code> is never a <code>List&lt;Number&gt;</code>; wildcards restore only the flexibility that is provably safe.</li>
+<li><code>List&lt;?&gt;</code> accepts any element type, reads every element as <code>Object</code>, and permits only <code>null</code> to be added.</li>
+<li><code>? extends T</code> is covariant and a <strong>producer</strong> — read <code>T</code>, write nothing (except <code>null</code>), because the concrete type is unknown.</li>
+<li><code>? super T</code> is contravariant and a <strong>consumer</strong> — write <code>T</code> and its subtypes, but read only <code>Object</code>.</li>
+<li>PECS: <strong>P</strong>roducer <strong>E</strong>xtends, <strong>C</strong>onsumer <strong>S</strong>uper; apply it by asking whether the collection is read from or written to.</li>
+<li><code>Collections.copy(List&lt;? super T&gt; dest, List&lt;? extends T&gt; src)</code> is the canonical PECS signature: read <code>src</code>, write <code>dest</code>.</li>
+<li>A wildcard narrows safety, not flexibility: widening from a specific type to a wildcard is legal, narrowing a wildcard back to a specific type is not.</li>
+<li>Unbounded and upper-bounded lists are read-only for adds; lower-bounded and exact lists accept writes; <code>null</code> is the universal exception.</li>
+<li>Wildcard capture is the compiler's mechanism for naming an unknown type; a private generic helper (<code>&lt;T&gt;</code>) is its standard workaround.</li>
+<li>Put wildcards in parameters, keep exact types in return values; a wildcard return type is poor API design.</li>
+</ol>
+<h2 id="17-likely-interview-questions">17. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Why are generics invariant?</td>
+<td>To preserve compile-time type safety; covariant assignment would allow heap pollution and runtime <code>ClassCastException</code>.</td>
+</tr>
+<tr>
+<td>What does <code>List&lt;?&gt;</code> mean?</td>
+<td>A list of some single unknown element type; read as <code>Object</code>, add only <code>null</code>.</td>
+</tr>
+<tr>
+<td>Difference between <code>? extends T</code> and <code>? super T</code>?</td>
+<td><code>extends</code> is covariant and a producer (read <code>T</code>); <code>super</code> is contravariant and a consumer (write <code>T</code>, read <code>Object</code>).</td>
+</tr>
+<tr>
+<td>What is PECS?</td>
+<td>Producer Extends, Consumer Super — choose <code>extends</code> for read-only sources and <code>super</code> for write-only sinks.</td>
+</tr>
+<tr>
+<td>Explain <code>Collections.copy</code>'s signature.</td>
+<td><code>&lt;T&gt; void copy(List&lt;? super T&gt; dest, List&lt;? extends T&gt; src)</code> — reads the producer <code>src</code>, writes the consumer <code>dest</code>.</td>
+</tr>
+<tr>
+<td>Can you add to <code>List&lt;? extends Number&gt;</code>?</td>
+<td>No; only <code>null</code>. The real element type could be any subtype, so <code>add</code> is a compile error.</td>
+</tr>
+<tr>
+<td>What can you read from <code>List&lt;? super Integer&gt;</code>?</td>
+<td><code>Object</code>, never <code>Integer</code> directly, because the actual type argument is only known to be a supertype.</td>
+</tr>
+<tr>
+<td>Is <code>List&lt;Object&gt;</code> the same as <code>List&lt;?&gt;</code>?</td>
+<td>No. <code>List&lt;Object&gt;</code> is assignable to <code>List&lt;?&gt;</code>, but not vice versa; <code>List&lt;?&gt;</code> can also be <code>List&lt;String&gt;</code>.</td>
+</tr>
+<tr>
+<td>What is wildcard capture?</td>
+<td>The compiler's naming of a wildcard's unknown type (<code>?</code> becomes a fresh <code>T</code> via capture conversion); a private <code>&lt;T&gt;</code> helper is the usual fix.</td>
+</tr>
+<tr>
+<td>Why does <code>swap(List&lt;?&gt;)</code> need a helper?</td>
+<td>Each <code>?</code> occurrence captures separately, so <code>get</code>/<code>set</code> cannot be related; a generic helper names one <code>T</code> for both.</td>
+</tr>
+<tr>
+<td>Wildcards vs method type parameters?</td>
+<td><code>&lt;T&gt;</code> names a type usable across parameters and return; <code>?</code> is an unnamed type for one use, often simpler for read-only parameters.</td>
+</tr>
+<tr>
+<td>Should a method return a wildcard type?</td>
+<td>Generally no; use wildcards in parameters and return the exact <code>T</code> to keep the API usable.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="18-final-summary">18. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>List&lt;Integer&gt;  ≠  List&lt;Number&gt;          invariance (Lecture 27)
+        |
+   add a wildcard at use site
+        |
+        +-- List&lt;?&gt;             read Object      add null only
+        +-- List&lt;? extends T&gt;   read T           add nothing   (Producer)
+        +-- List&lt;? super T&gt;     read Object      add T         (Consumer)
+
+PECS:   Producer Extends (read)  --&gt;  Consumer Super (write)
+JDK:    copy(List&lt;? super T&gt; dest, List&lt;? extends T&gt; src)
+</code></pre></div>
+
+<ul>
+<li>Invariance → generics are not covariant; a wildcard is the safe, use-site widening.</li>
+<li>Unbounded <code>?</code> → any element type; read as <code>Object</code>, write <code>null</code> only.</li>
+<li><code>? extends T</code> → covariant producer; read <code>T</code>, never write (except <code>null</code>).</li>
+<li><code>? super T</code> → contravariant consumer; write <code>T</code>, read only <code>Object</code>.</li>
+<li>PECS → decide by data flow: reading wants <code>extends</code>, writing wants <code>super</code>.</li>
+<li><code>Collections.copy</code> → <code>? super T</code> destination and <code>? extends T</code> source encode read-then-write.</li>
+<li>Capture → <code>?</code> is unnamed; a private <code>&lt;T&gt;</code> helper names it when both read and write are needed.</li>
+<li>API rule → wildcards in parameters, exact types in return values.</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+A wildcard widens what a method accepts without weakening what the compiler proves: extends when you read, super when you write, <code>?</code> when you only look.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> wildcards turn invariance into controlled flexibility — <code>?</code> reads anything as <code>Object</code>, <code>? extends T</code> produces <code>T</code> but cannot be written, and <code>? super T</code> consumes <code>T</code> but can only be read as <code>Object</code>, with PECS choosing the right one.</p>
+<div class="pager"><a class="prev" href="lecture-27.html"><span class="dir">Previous</span><span class="ttl">Java Generics Deep Dive</span></a><a class="next" href="lecture-29.html"><span class="dir">Next</span><span class="ttl">Java Collection Framework Explained</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

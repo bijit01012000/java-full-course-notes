@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture 31 · Java Collection Interface Deep Dive — Java Notes</title>
+<meta name="description" content="Java Collection Interface Deep Dive | Methods & Internals — interview-oriented Java notes with dark and light themes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230d1117'/%3E%3Ctext x='32' y='45' font-family='monospace' font-size='40' font-weight='bold' text-anchor='middle' fill='%2339c5cf'%3EJ%3C/text%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('jfc:theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="stylesheet" href="assets/highlight.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lecture="31" data-lecture-title="Java Collection Interface Deep Dive | Methods & Internals">
+<div class="scrim"></div>
+<header class="topbar">
+  <button class="iconbtn hamburger" id="hamburger" aria-label="Toggle topic menu">☰</button>
+  <a class="brand" href="index.html">Coder Army · <b>Java Notes</b></a>
+  <span class="spacer"></span>
+  <div class="actions">
+    <button class="iconbtn" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><div class="side-search"><input id="q" type="search" placeholder="Search topics and sections  ( / )" autocomplete="off" aria-label="Search"></div><div class="side-block search-results" id="search-results"></div><div class="side-block" id="bookmarks" style="display:none"><h4>Bookmarks</h4><ul class="side-list" id="bookmarks-list"></ul></div><div class="side-block" id="parts"><details class="part"><summary>Part 1 · Java Basics</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-01.html" title="Introduction to Java"><span class="num">01</span>Introduction to Java</a><button class="star" data-lecture="1" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-02.html" title="Write Your First Java Program — JVM, JDK & JRE Explained"><span class="num">02</span>Write Your First Java Program</a><button class="star" data-lecture="2" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-03.html" title="Java Variables & Data Types — Identifiers, Literals & Keywords"><span class="num">03</span>Java Variables & Data Types</a><button class="star" data-lecture="3" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-04.html" title="How Java Stores Negative & Floating Point Numbers"><span class="num">04</span>How Java Stores Negative & Floating Point Numbers</a><button class="star" data-lecture="4" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-05.html" title="Java Type Conversions & Type Promotions Explained — Casting in Java"><span class="num">05</span>Java Type Conversions & Type Promotions Explained</a><button class="star" data-lecture="5" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-06.html" title="Java Operators — Arithmetic, Unary, Logical, Bitwise & Assignment"><span class="num">06</span>Java Operators</a><button class="star" data-lecture="6" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-07.html" title="Java Conditional Statements — If, If-Else, If-Else-If Ladder & Switch"><span class="num">07</span>Java Conditional Statements</a><button class="star" data-lecture="7" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-08.html" title="Java Loops & Jump Statements Explained — for, while, do-while, break, continue"><span class="num">08</span>Java Loops & Jump Statements Explained</a><button class="star" data-lecture="8" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 2 · Arrays & OOP Core</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-09.html" title="Java Arrays Explained — Declaration, Initialization, Traversal & a First Look at String"><span class="num">09</span>Java Arrays Explained</a><button class="star" data-lecture="9" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-10.html" title="How Arrays Work in Java — Heap, Contiguous Storage & Random Access"><span class="num">10</span>How Arrays Work in Java</a><button class="star" data-lecture="10" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-11.html" title="Java Functions Deep Dive | Recursion | Method Overloading"><span class="num">11</span>Java Functions Deep Dive</a><button class="star" data-lecture="11" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-12.html" title="Object Oriented Programming in Java — Classes, Objects & the new Keyword"><span class="num">12</span>Object Oriented Programming in Java</a><button class="star" data-lecture="12" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-13.html" title="Constructors in Java Explained — Constructor Chaining, Overloading & the this Keyword"><span class="num">13</span>Constructors in Java Explained</a><button class="star" data-lecture="13" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-14.html" title="Objects Deep Dive — Object Size, Call by Value vs Reference, Shallow vs Deep Copy"><span class="num">14</span>Objects Deep Dive</a><button class="star" data-lecture="14" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-15.html" title="Static & Final in Java — Static Methods, Blocks & String[] args"><span class="num">15</span>Static & Final in Java</a><button class="star" data-lecture="15" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-16.html" title="Encapsulation & Inheritance in Java | Java Packages & Super Keyword"><span class="num">16</span>Encapsulation & Inheritance in Java</a><button class="star" data-lecture="16" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 3 · OOP Deep Dive</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-17.html" title="Abstraction & Polymorphism in Depth | Abstract Class vs Interfaces"><span class="num">17</span>Abstraction & Polymorphism in Depth</a><button class="star" data-lecture="17" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-18.html" title="AutoBoxing, Abstract classes & POJOs | Why only one public class in java file"><span class="num">18</span>AutoBoxing, Abstract classes & POJOs</a><button class="star" data-lecture="18" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-19.html" title="Java Nested Classes | Static Nested, Inner, Local & Anonymous Classes"><span class="num">19</span>Java Nested Classes</a><button class="star" data-lecture="19" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-20.html" title="Java I/O Deep Dive | InputStreams, System.in, Scanner vs BufferedReader"><span class="num">20</span>Java I/O Deep Dive</a><button class="star" data-lecture="20" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-21.html" title="Immutable Classes in Java | How to Create Immutable Objects"><span class="num">21</span>Immutable Classes in Java</a><button class="star" data-lecture="21" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-22.html" title="Most Important Class in Java — Object Class (equals, hashCode, toString)"><span class="num">22</span>Most Important Class in Java</a><button class="star" data-lecture="22" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-23.html" title="Java Enums — Why Not Use int/String for Constants?"><span class="num">23</span>Java Enums</a><button class="star" data-lecture="23" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-24.html" title="Java Interfaces Deep Dive | Default Methods, Functional, Marker Interfaces"><span class="num">24</span>Java Interfaces Deep Dive</a><button class="star" data-lecture="24" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part" open><summary>Part 4 · Strings, Generics & Collections</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-25.html" title="Java Strings | String Pool, Immutability, Internals"><span class="num">25</span>Java Strings</a><button class="star" data-lecture="25" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-26.html" title="Java Strings Part 2 | All String Methods + StringBuilder vs StringBuffer"><span class="num">26</span>Java Strings Part 2</a><button class="star" data-lecture="26" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-27.html" title="Java Generics Deep Dive | Bounded Types using extends"><span class="num">27</span>Java Generics Deep Dive</a><button class="star" data-lecture="27" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-28.html" title="Wildcards in Generics | ?, ? extends, ? super"><span class="num">28</span>Wildcards in Generics</a><button class="star" data-lecture="28" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-29.html" title="Java Collection Framework Explained | Data Structures + Complete Hierarchy"><span class="num">29</span>Java Collection Framework Explained</a><button class="star" data-lecture="29" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-30.html" title="Iterable Interface in Java | Why Iterator Exists? | For-Each Loop"><span class="num">30</span>Iterable Interface in Java</a><button class="star" data-lecture="30" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="active" href="lecture-31.html" title="Java Collection Interface Deep Dive | Methods & Internals"><span class="num">31</span>Java Collection Interface Deep Dive</a><button class="star" data-lecture="31" title="Bookmark this lecture">☆</button></div><ul class="sections"><li><a href="lecture-31.html#1-the-root-of-the-collections-hierarchy">1. The Root of the Collections Hierarchy</a></li><li><a href="lecture-31.html#2-the-hierarchy-at-a-glance">2. The Hierarchy at a Glance</a></li><li><a href="lecture-31.html#3-single-element-methods">3. Single-Element Methods</a></li><li><a href="lecture-31.html#4-bulk-operations">4. Bulk Operations</a></li><li><a href="lecture-31.html#5-removeall-is-difference-retainall-is-intersection">5. removeAll Is Difference, retainAll Is Intersection</a></li><li><a href="lecture-31.html#6-array-conversion-toarray-and-toarrayt">6. Array Conversion: toArray and toArray(T[])</a></li><li><a href="lecture-31.html#7-optional-operations-and-unsupportedoperationexception">7. Optional Operations and UnsupportedOperationException</a></li><li><a href="lecture-31.html#8-default-methods-java-8">8. Default Methods (Java 8)</a></li><li><a href="lecture-31.html#9-skeletal-implementations-abstractcollection-and-abstractlist">9. Skeletal Implementations: AbstractCollection and AbstractList</a></li><li><a href="lecture-31.html#10-equals-and-hashcode-contracts-by-collection-type">10. equals and hashCode Contracts by Collection Type</a></li><li><a href="lecture-31.html#11-the-collections-utility-class">11. The Collections Utility Class</a></li><li><a href="lecture-31.html#12-size-vs-capacity">12. size() vs capacity</a></li><li><a href="lecture-31.html#13-common-errors-and-pitfalls">13. Common Errors and Pitfalls</a></li><li><a href="lecture-31.html#14-myth-vs-reality">14. Myth vs Reality</a></li><li><a href="lecture-31.html#15-common-trap-questions">15. Common Trap Questions</a></li><li><a href="lecture-31.html#16-points-to-remember">16. Points to Remember</a></li><li><a href="lecture-31.html#17-likely-interview-questions">17. Likely Interview Questions</a></li><li><a href="lecture-31.html#18-final-summary">18. Final Summary</a></li></ul></li><li><div class="side-link-row"><a class="" href="lecture-32.html" title="Java List Interface Deep Dive | ArrayList, LinkedList, Vector, Stack"><span class="num">32</span>Java List Interface Deep Dive</a><button class="star" data-lecture="32" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 5 · Collections, Lambdas & Streams</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-33.html" title="Set & Map Interface in Java | Internal Working of HashMap, HashSet & TreeMap"><span class="num">33</span>Set & Map Interface in Java</a><button class="star" data-lecture="33" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-34.html" title="Set & Map Methods Explained | EnumMaps, IdentityHashMaps & More"><span class="num">34</span>Set & Map Methods Explained</a><button class="star" data-lecture="34" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-35.html" title="Java Queue Interface Deep Dive | PriorityQueue & Heap Explained"><span class="num">35</span>Java Queue Interface Deep Dive</a><button class="star" data-lecture="35" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-36.html" title="Comparable Interface in Java | Collections class | Comparing Objects"><span class="num">36</span>Comparable Interface in Java</a><button class="star" data-lecture="36" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-37.html" title="Java Lambdas & Functional Interfaces | Comparator Interface"><span class="num">37</span>Java Lambdas & Functional Interfaces</a><button class="star" data-lecture="37" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-38.html" title="Lambdas & Functional Interface Deep Dive | Method References & Composition"><span class="num">38</span>Lambdas & Functional Interface Deep Dive</a><button class="star" data-lecture="38" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-39.html" title="Introduction to Java Streams | Creation & Architecture"><span class="num">39</span>Introduction to Java Streams</a><button class="star" data-lecture="39" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-40.html" title="Java Stream Methods Deep Dive | All Intermediate & Terminal Operations"><span class="num">40</span>Java Stream Methods Deep Dive</a><button class="star" data-lecture="40" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 6 · Optional, Exceptions & Memory</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-41.html" title="Java Optional Explained from Scratch | All Methods + Streams Integration"><span class="num">41</span>Java Optional Explained from Scratch</a><button class="star" data-lecture="41" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-42.html" title="Parallel Streams in Java Explained | Primitive Optional Classes"><span class="num">42</span>Parallel Streams in Java Explained</a><button class="star" data-lecture="42" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-43.html" title="Java Exception Handling from Scratch | Exceptions vs Errors"><span class="num">43</span>Java Exception Handling from Scratch</a><button class="star" data-lecture="43" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-44.html" title="Exception Hierarchy Deep Dive | throw vs throws | Custom Exceptions"><span class="num">44</span>Exception Hierarchy Deep Dive</a><button class="star" data-lecture="44" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-45.html" title="Java Memory Management Explained in Depth — Stack, Heap, Method Area & PC"><span class="num">45</span>Java Memory Management Explained in Depth</a><button class="star" data-lecture="45" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-46.html" title="Java Heap Memory Deep Dive | Garbage Collection Algorithms Explained"><span class="num">46</span>Java Heap Memory Deep Dive</a><button class="star" data-lecture="46" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-47.html" title="Introduction to Multithreading in Java | Process vs Thread"><span class="num">47</span>Introduction to Multithreading in Java</a><button class="star" data-lecture="47" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-48.html" title="Java Thread Creation & Lifecycle Explained from Scratch"><span class="num">48</span>Java Thread Creation & Lifecycle Explained from Scratch</a><button class="star" data-lecture="48" title="Bookmark this lecture">☆</button></div></li></ul></details><details class="part"><summary>Part 7 · Concurrency</summary><ul class="side-list"><li><div class="side-link-row"><a class="" href="lecture-49.html" title="Thread Methods | sleep, join, yield, interrupt, isAlive, priority & more"><span class="num">49</span>Thread Methods</a><button class="star" data-lecture="49" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-50.html" title="Problems in Multithreading | Race Condition, Visibility, Ordering Explained"><span class="num">50</span>Problems in Multithreading</a><button class="star" data-lecture="50" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-51.html" title="Monitor Locks in Java | Synchronized Keyword, Static Sync & Custom Locks"><span class="num">51</span>Monitor Locks in Java</a><button class="star" data-lecture="51" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-52.html" title="Inter Thread Communication in Java | wait(), notify(), notifyAll() Deep Dive"><span class="num">52</span>Inter Thread Communication in Java</a><button class="star" data-lecture="52" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-53.html" title="Java Locks | ReentrantLock, ReadWriteLock, StampedLock, Semaphore & Condition"><span class="num">53</span>Java Locks</a><button class="star" data-lecture="53" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-54.html" title="Lock-Free Concurrency in Java | AtomicVariables & CAS Explained"><span class="num">54</span>Lock-Free Concurrency in Java</a><button class="star" data-lecture="54" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-55.html" title="Lock-Free Concurrency in Java - 2 | CAS Retry, Compare-and-Swap & ABA Problem"><span class="num">55</span>Lock-Free Concurrency in Java - 2</a><button class="star" data-lecture="55" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-56.html" title="Executor Framework Deep Dive | ThreadPool, Future & Callable"><span class="num">56</span>Executor Framework Deep Dive</a><button class="star" data-lecture="56" title="Bookmark this lecture">☆</button></div></li><li><div class="side-link-row"><a class="" href="lecture-57.html" title="CompletableFuture, Fork-Join Pool, ThreadLocal & Virtual Threads"><span class="num">57</span>CompletableFuture, Fork-Join Pool, ThreadLocal & Virt…</a><button class="star" data-lecture="57" title="Bookmark this lecture">☆</button></div></li></ul></details></div><div class="side-foot"><a href="index.html">Home · all lectures</a><a href="https://github.com/adityatandon15/Java-Full-Course">Source on GitHub</a></div></aside>
+  <main class="content"><article class="article">
+<p class="kicker">Part 4 · Strings, Generics & Collections · Lecture 31</p>
+<h1>Java Collection Interface Deep Dive | Methods & Internals</h1>
+<p class="readmeta">18 sections · interview-oriented · both themes</p>
+<div class="doc-actions"><button class="iconbtn star" data-lecture="31" data-label="Bookmark" title="Bookmark this lecture">☆ Bookmark</button><button class="iconbtn" onclick="window.print()">Print</button></div>
+<hr>
+<blockquote class="callout callout--note">
+<p>Scope evidence: "Java Collection Interface Deep Dive | Methods &amp; Internals" (playlist map, verified). Repo evidence: code/Demo.java.</p>
+</blockquote>
+<p><code>Collection&lt;E&gt;</code> is the root of the single-element part of the Java Collections Framework, the common contract shared by <code>List</code>, <code>Set</code> and <code>Queue</code>. It defines the operations every one of those types must understand, yet it also marks many of them as <em>optional</em>, which is why an apparently correct call can throw at runtime. This lecture walks through the single-element and bulk methods, array conversion, the meaning of the optional-operation contract, the Java 8 default methods, the skeletal abstract classes, and the <code>equals</code>/<code>hashCode</code> rules that differ by collection type. The goal is to know not only what compiles but what is guaranteed.</p>
+<h2 id="1-the-root-of-the-collections-hierarchy">1. The Root of the Collections Hierarchy</h2>
+<p><code>Collection&lt;E&gt;</code> is a generic interface declared in <code>java.util</code>. It is the superinterface of <code>List&lt;E&gt;</code>, <code>Set&lt;E&gt;</code> and <code>Queue&lt;E&gt;</code>; <code>Deque&lt;E&gt;</code> extends <code>Queue</code>. It does <strong>not</strong> cover <code>Map&lt;K,V&gt;</code>, because a map stores key-value bindings rather than a sequence of single elements. <code>Map</code> is therefore a separate hierarchy, and the collections returned by <code>map.keySet()</code>, <code>map.values()</code> and <code>map.entrySet()</code> are views that do implement <code>Collection</code>.</p>
+<p><code>Collection</code> extends <code>Iterable&lt;E&gt;</code>. That inheritance is what supplies <code>iterator()</code> and, in turn, the enhanced for-each loop (Lecture 30). The relationship is a chain of capability:</p>
+<div class="highlight"><pre><span></span><code>Iterable&lt;E&gt;  ⊃  Collection&lt;E&gt;  ⊃  { List&lt;E&gt;, Set&lt;E&gt;, Queue&lt;E&gt; }
+Map&lt;K,V&gt;  -&gt;  separate hierarchy, not a Collection
+</code></pre></div>
+
+<blockquote class="callout callout--important">
+<p>Important
+"Map is a Collection" is false. <code>Map</code> does not extend <code>Collection</code>; only the views it exports (<code>keySet</code>, <code>values</code>, <code>entrySet</code>) do.</p>
+</blockquote>
+<h2 id="2-the-hierarchy-at-a-glance">2. The Hierarchy at a Glance</h2>
+<div class="highlight"><pre><span></span><code>Iterable&lt;E&gt;
+  |
+  +-- Collection&lt;E&gt;
+        |
+        +-- List&lt;E&gt;    ordered, indexed, duplicates allowed
+        +-- Set&lt;E&gt;     no duplicates
+        +-- Queue&lt;E&gt;   FIFO or priority ordering
+              |
+              +-- Deque&lt;E&gt;  double-ended queue
+Map&lt;K,V&gt;   separate hierarchy; does NOT extend Collection
+</code></pre></div>
+
+<p>The interfaces are backed by skeletal abstract classes (<code>AbstractCollection</code>, <code>AbstractList</code>, <code>AbstractSet</code>, <code>AbstractQueue</code>) and by concrete implementations (<code>ArrayList</code>, <code>LinkedList</code>, <code>HashSet</code>, <code>TreeSet</code>, <code>ArrayDeque</code>, <code>PriorityQueue</code>). This lecture fixes the contract; Lecture 32 examines the <code>List</code> implementations in detail.</p>
+<h2 id="3-single-element-methods">3. Single-Element Methods</h2>
+<p>The single-element methods operate on one element at a time and are declared directly on <code>Collection</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Signature</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>add</code></td>
+<td><code>boolean add(E e)</code></td>
+<td>Adds one element; returns whether the collection changed</td>
+</tr>
+<tr>
+<td><code>remove</code></td>
+<td><code>boolean remove(Object o)</code></td>
+<td>Removes one element equal to <code>o</code>; returns whether it was found</td>
+</tr>
+<tr>
+<td><code>contains</code></td>
+<td><code>boolean contains(Object o)</code></td>
+<td>Membership test using <code>equals</code></td>
+</tr>
+<tr>
+<td><code>size</code></td>
+<td><code>int size()</code></td>
+<td>Number of elements currently held</td>
+</tr>
+<tr>
+<td><code>isEmpty</code></td>
+<td><code>boolean isEmpty()</code></td>
+<td>Equivalent to <code>size() == 0</code></td>
+</tr>
+<tr>
+<td><code>clear</code></td>
+<td><code>void clear()</code></td>
+<td>Removes every element</td>
+</tr>
+<tr>
+<td><code>iterator</code></td>
+<td><code>Iterator&lt;E&gt; iterator()</code></td>
+<td>Inherited from <code>Iterable</code>; the iteration primitive</td>
+</tr>
+<tr>
+<td><code>stream</code></td>
+<td><code>Stream&lt;E&gt; stream()</code></td>
+<td>Default method returning a sequential stream (Lecture 39)</td>
+</tr>
+</tbody>
+</table>
+<p>Notice the asymmetry in signatures: insertion is typed <code>E</code>, but <code>remove</code> and <code>contains</code> accept <code>Object</code>. This keeps the contract usable with legacy code and with raw collections; the cost is that a wrong-typed argument is a silent <code>false</code> instead of a compile error.</p>
+<h3 id="single-element-vs-bulk-methods">Single-Element vs Bulk Methods</h3>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Single-element methods</th>
+<th>Bulk methods</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Examples</td>
+<td><code>add</code>, <code>remove</code>, <code>contains</code></td>
+<td><code>addAll</code>, <code>removeAll</code>, <code>retainAll</code>, <code>containsAll</code></td>
+</tr>
+<tr>
+<td>Argument</td>
+<td>One element (<code>E</code> or <code>Object</code>)</td>
+<td>An entire <code>Collection&lt;?&gt;</code></td>
+</tr>
+<tr>
+<td>Return</td>
+<td>A value or a change flag</td>
+<td>A change flag (except <code>containsAll</code>, a pure test)</td>
+</tr>
+<tr>
+<td>Typical cost</td>
+<td>Roughly one element of work</td>
+<td>Often <code>O(n)</code>, and up to <code>O(n × m)</code></td>
+</tr>
+<tr>
+<td>Atomicity</td>
+<td>One logical change</td>
+<td>Not guaranteed atomic; partial application is allowed</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-bulk-operations">4. Bulk Operations</h2>
+<p>Bulk operations treat an entire collection as the argument. They are the natural way to combine two data sets:</p>
+<table>
+<thead>
+<tr>
+<th>Bulk method</th>
+<th>Signature</th>
+<th>Set-theoretic meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>addAll</code></td>
+<td><code>boolean addAll(Collection&lt;? extends E&gt; c)</code></td>
+<td>Union: add every element of <code>c</code></td>
+</tr>
+<tr>
+<td><code>removeAll</code></td>
+<td><code>boolean removeAll(Collection&lt;?&gt; c)</code></td>
+<td>Difference: remove every element also in <code>c</code></td>
+</tr>
+<tr>
+<td><code>retainAll</code></td>
+<td><code>boolean retainAll(Collection&lt;?&gt; c)</code></td>
+<td>Intersection: keep only elements also in <code>c</code></td>
+</tr>
+<tr>
+<td><code>containsAll</code></td>
+<td><code>boolean containsAll(Collection&lt;?&gt; c)</code></td>
+<td>Subset test: are all elements of <code>c</code> present?</td>
+</tr>
+</tbody>
+</table>
+<p>Each returns <code>boolean</code> reporting whether the receiver changed (except <code>containsAll</code>, which reports membership only). A subtle and important detail: <code>removeAll</code> and <code>retainAll</code> reason about <em>elements via <code>equals</code></em>, never about positions or indices.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Collection</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">Arrays</span><span class="p">.</span><span class="na">asList</span><span class="p">(</span><span class="s">&quot;A&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;B&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;D&quot;</span><span class="p">));</span>
+<span class="w">        </span><span class="n">Collection</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">Arrays</span><span class="p">.</span><span class="na">asList</span><span class="p">(</span><span class="s">&quot;C&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;D&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;E&quot;</span><span class="p">));</span>
+
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="na">containsAll</span><span class="p">(</span><span class="n">b</span><span class="p">));</span><span class="w">       </span><span class="c1">// false: E is missing</span>
+
+<span class="w">        </span><span class="n">Collection</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">union</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">a</span><span class="p">);</span>
+<span class="w">        </span><span class="n">union</span><span class="p">.</span><span class="na">addAll</span><span class="p">(</span><span class="n">b</span><span class="p">);</span><span class="w">                            </span><span class="c1">// [A, B, C, D, C, D, E]</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">union</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">Collection</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">intersection</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">a</span><span class="p">);</span>
+<span class="w">        </span><span class="n">intersection</span><span class="p">.</span><span class="na">retainAll</span><span class="p">(</span><span class="n">b</span><span class="p">);</span><span class="w">                  </span><span class="c1">// [C, D]</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">intersection</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">Collection</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">difference</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">a</span><span class="p">);</span>
+<span class="w">        </span><span class="n">difference</span><span class="p">.</span><span class="na">removeAll</span><span class="p">(</span><span class="n">b</span><span class="p">);</span><span class="w">                    </span><span class="c1">// [A, B]</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">difference</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<blockquote class="callout callout--note">
+<p>Memory aid
+Read <code>retainAll</code> as "retain what is in the argument" (intersection) and <code>removeAll</code> as "remove what is in the argument" (difference). The receiver always keeps its identity; only its contents change.</p>
+</blockquote>
+<h2 id="5-removeall-is-difference-retainall-is-intersection">5. removeAll Is Difference, retainAll Is Intersection</h2>
+<p>Given <code>a = {A, B, C, D}</code> and <code>b = {C, D, E}</code>:</p>
+<ul>
+<li><code>a.retainAll(b)</code> leaves <code>{C, D}</code> — the intersection, written <code>intersection(a, b)</code>.</li>
+<li><code>a.removeAll(b)</code> leaves <code>{A, B}</code> — the difference, written <code>difference(a, b)</code> or <code>a minus b</code>.</li>
+<li><code>a.addAll(b)</code> grows <code>a</code> to <code>{A, B, C, D, C, D, E}</code> because a <code>List</code> permits duplicates.</li>
+</ul>
+<p>Two consequences follow. First, for a <code>Set</code>, <code>addAll</code> and <code>removeAll</code> behave exactly like set union and set difference; for a <code>List</code>, duplicate handling makes the result multiset-like. Second, <code>retainAll</code> is the correct way to prune a collection down to an allowed whitelist, while <code>removeAll</code> is the correct way to purge a blacklist. Neither touches elements that are not named in the argument.</p>
+<blockquote class="callout callout--trap">
+<p>Trap
+<code>removeAll</code> on a <code>List&lt;Integer&gt;</code> does <strong>not</strong> remove by index. It removes every element equal to some element of the argument collection. Index-based removal is <code>List.remove(int)</code>.</p>
+</blockquote>
+<h2 id="6-array-conversion-toarray-and-toarrayt">6. Array Conversion: toArray and toArray(T[])</h2>
+<p><code>Collection</code> exposes two conversions to arrays:</p>
+<table>
+<thead>
+<tr>
+<th>Overload</th>
+<th>Signature</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Untyped</td>
+<td><code>Object[] toArray()</code></td>
+<td>Always a new <code>Object[]</code>; no type information survives erasure</td>
+</tr>
+<tr>
+<td>Typed</td>
+<td><code>&lt;T&gt; T[] toArray(T[] a)</code></td>
+<td>A <code>T[]</code>; if <code>a</code> is large enough it is filled and returned, otherwise a new <code>T[]</code> is allocated</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Collection</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">Arrays</span><span class="p">.</span><span class="na">asList</span><span class="p">(</span><span class="s">&quot;x&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;y&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;z&quot;</span><span class="p">));</span>
+
+<span class="w">        </span><span class="n">Object</span><span class="o">[]</span><span class="w"> </span><span class="n">raw</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">c</span><span class="p">.</span><span class="na">toArray</span><span class="p">();</span><span class="w">                 </span><span class="c1">// Object[]</span>
+<span class="w">        </span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">typed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">c</span><span class="p">.</span><span class="na">toArray</span><span class="p">(</span><span class="k">new</span><span class="w"> </span><span class="n">String</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">);</span><span class="w">  </span><span class="c1">// preferred modern style</span>
+
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">Arrays</span><span class="p">.</span><span class="na">toString</span><span class="p">(</span><span class="n">raw</span><span class="p">));</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">Arrays</span><span class="p">.</span><span class="na">toString</span><span class="p">(</span><span class="n">typed</span><span class="p">));</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The typed version needs an array of the correct runtime component type for two reasons. First, an <code>Object[]</code> can never be assigned to a <code>String[]</code>, so the untyped form usually forces a manual copy. Second, the JVM uses the passed array's component type to allocate a correctly typed array when the input is too small, and it uses the input directly when it is large enough. Passing <code>new String[0]</code> is the idiomatic choice because it lets the collection allocate an exactly-sized result; passing an oversized array works but the trailing slots are set to <code>null</code>.</p>
+<blockquote class="callout callout--important">
+<p>Important
+<code>toArray()</code> returns <code>Object[]</code> even when the collection holds <code>String</code>s. A cast such as <code>(String[]) c.toArray()</code> throws <code>ClassCastException</code> unless the collection's backing array already has that component type.</p>
+</blockquote>
+<h2 id="7-optional-operations-and-unsupportedoperationexception">7. Optional Operations and UnsupportedOperationException</h2>
+<p>The <code>Collection</code> contract divides its methods into <strong>required</strong> and <strong>optional</strong> operations. An optional operation is legal to declare and legal to call, but an implementation is permitted to reject it by throwing <code>UnsupportedOperationException</code>. "Optional" here does not mean "nullable" or "may be skipped"; it means "the implementation may not support this mutation".</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Required or optional</th>
+<th>Typical implementations that reject it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>size</code>, <code>isEmpty</code>, <code>contains</code>, <code>iterator</code></td>
+<td>Required</td>
+<td>No conforming implementation may reject these</td>
+</tr>
+<tr>
+<td><code>toArray</code></td>
+<td>Required</td>
+<td>No conforming implementation may reject these</td>
+</tr>
+<tr>
+<td><code>add</code>, <code>addAll</code></td>
+<td>Optional</td>
+<td><code>Arrays.asList</code>, <code>List.of</code> and the other immutable factories</td>
+</tr>
+<tr>
+<td><code>remove</code>, <code>removeAll</code>, <code>retainAll</code></td>
+<td>Optional</td>
+<td><code>List.of</code>, <code>Collections.unmodifiableList</code> and read-only views</td>
+</tr>
+<tr>
+<td><code>clear</code></td>
+<td>Optional</td>
+<td>Fixed-size and immutable collections</td>
+</tr>
+<tr>
+<td><code>removeIf</code> (default)</td>
+<td>Optional</td>
+<td>Delegates to <code>remove</code>/<code>iterator.remove</code>, so it inherits their optionality</td>
+</tr>
+</tbody>
+</table>
+<p><code>Arrays.asList("a", "b", "c")</code> returns a <strong>fixed-size</strong> list: <code>set</code> is supported, but <code>add</code> and <code>remove</code> throw. <code>List.of("a", "b", "c")</code> returns an <strong>immutable</strong> list: even <code>set</code> throws. The distinction between "fixed-size" and "immutable" is one of the most reliable interview questions in this area.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">fixed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Arrays</span><span class="p">.</span><span class="na">asList</span><span class="p">(</span><span class="s">&quot;a&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;b&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;c&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">fixed</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;z&quot;</span><span class="p">);</span><span class="w">            </span><span class="c1">// allowed: replacement is supported</span>
+
+<span class="w">        </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">fixed</span><span class="p">.</span><span class="na">add</span><span class="p">(</span><span class="s">&quot;d&quot;</span><span class="p">);</span><span class="w">          </span><span class="c1">// structurally unsupported</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">UnsupportedOperationException</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;fixed-size: add rejected&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">List</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="w"> </span><span class="n">immutable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">List</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="s">&quot;a&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;b&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;c&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">immutable</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;z&quot;</span><span class="p">);</span><span class="w">   </span><span class="c1">// even replacement is rejected</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">UnsupportedOperationException</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="s">&quot;immutable: set rejected&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<blockquote class="callout callout--interviewer">
+<p>Interviewer's perspective
+When asked "is a <code>Collection</code> mutable?", the precise answer is: <em>not necessarily</em>. The interface declares mutation methods, but each may be optional, so mutability is a property of the implementation, not of the type. This is why APIs often return <code>Collection&lt;E&gt;</code> for a view that is structurally read-only.</p>
+</blockquote>
+<h2 id="8-default-methods-java-8">8. Default Methods (Java 8)</h2>
+<p>Before Java 8, adding a method to <code>Collection</code> would have broken every existing implementation. Default methods solved the evolution problem: new behaviour is added to the interface with a body, and implementors inherit it for free.</p>
+<table>
+<thead>
+<tr>
+<th>Default method</th>
+<th>Signature</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>removeIf</code></td>
+<td><code>boolean removeIf(Predicate&lt;? super E&gt; filter)</code></td>
+<td>Removes every element matching the predicate</td>
+</tr>
+<tr>
+<td><code>forEach</code></td>
+<td><code>void forEach(Consumer&lt;? super E&gt; action)</code></td>
+<td>Runs an action for each element</td>
+</tr>
+<tr>
+<td><code>stream</code></td>
+<td><code>Stream&lt;E&gt; stream()</code></td>
+<td>Returns a sequential stream (Lecture 39)</td>
+</tr>
+<tr>
+<td><code>spliterator</code></td>
+<td><code>Spliterator&lt;E&gt; spliterator()</code></td>
+<td>Traversal/partitioning primitive used by streams (Lecture 39)</td>
+</tr>
+</tbody>
+</table>
+<p>Default methods may still be optional in effect: <code>removeIf</code> is implemented in terms of <code>iterator.remove()</code> or <code>remove</code>, so calling it on an immutable collection throws, even though the method itself is inherited.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">java.util.*</span><span class="p">;</span>
+
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">Demo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">String</span><span class="o">[]</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">Collection</span><span class="o">&lt;</span><span class="n">Integer</span><span class="o">&gt;</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">ArrayList</span><span class="o">&lt;&gt;</span><span class="p">(</span><span class="n">Arrays</span><span class="p">.</span><span class="na">asList</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">));</span>
+
+<span class="w">        </span><span class="n">c</span><span class="p">.</span><span class="na">removeIf</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w">                 </span><span class="c1">// removes 2, 4, 6</span>
+<span class="w">        </span><span class="n">c</span><span class="p">.</span><span class="na">forEach</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">print</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="p">));</span><span class="w">   </span><span class="c1">// 1 3 5</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">();</span>
+
+<span class="w">        </span><span class="kt">long</span><span class="w"> </span><span class="n">big</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">c</span><span class="p">.</span><span class="na">stream</span><span class="p">().</span><span class="na">filter</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">1</span><span class="p">).</span><span class="na">count</span><span class="p">();</span><span class="w">   </span><span class="c1">// 2 (Lecture 39)</span>
+<span class="w">        </span><span class="n">System</span><span class="p">.</span><span class="na">out</span><span class="p">.</span><span class="na">println</span><span class="p">(</span><span class="n">big</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="9-skeletal-implementations-abstractcollection-and-abstractlist">9. Skeletal Implementations: AbstractCollection and AbstractList</h2>
+<p>Writing a full <code>Collection</code> from scratch means implementing every abstract method, including the optional ones reduced to a sensible default. The JDK removes that burden with <strong>skeletal implementations</strong>:</p>
+<ul>
+<li><code>AbstractCollection&lt;E&gt;</code> implements <code>contains</code>, <code>containsAll</code>, <code>toArray</code>, <code>removeAll</code>, <code>retainAll</code>, <code>clear</code> and <code>toString</code> in terms of iteration; <code>add</code> and <code>remove</code> are given rejecting bodies, so only <code>size()</code> and <code>iterator()</code> remain abstract for a read-only subclass.</li>
+<li><code>AbstractList&lt;E&gt;</code> extends <code>AbstractCollection</code> and implements <code>get(int)</code>-based logic, <code>equals</code>, <code>hashCode</code>, <code>indexOf</code>, <code>lastIndexOf</code>, <code>iterator</code>, <code>subList</code> and <code>listIterator</code>.</li>
+<li><code>AbstractSet&lt;E&gt;</code>, <code>AbstractQueue&lt;E&gt;</code> and <code>AbstractMap&lt;K,V&gt;</code> play the same role for their branches.</li>
+</ul>
+<p>The design point is reuse by inheritance: <code>ArrayList</code> extends <code>AbstractList</code>, <code>HashSet</code> extends <code>AbstractSet</code>, and so on. A custom mutable collection can therefore subclass <code>AbstractCollection</code> and override only <code>size()</code>, <code>iterator()</code> and the optional <code>add()</code>/<code>remove()</code> it actually supports.</p>
+<blockquote class="callout callout--important">
+<p>Important
+<code>AbstractCollection</code> is not magic; it is ordinary code. If a subclass throws from <code>iterator().remove()</code>, then inherited bulk methods such as <code>removeAll</code> and <code>retainAll</code> may throw as a consequence.</p>
+</blockquote>
+<h2 id="10-equals-and-hashcode-contracts-by-collection-type">10. equals and hashCode Contracts by Collection Type</h2>
+<p><code>Collection</code> itself does not strengthen <code>equals</code>/<code>hashCode</code> beyond <code>Object</code>; the meaningful contracts live in its subinterfaces. This is the single most common source of "why are these not equal?" bugs.</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>equals semantics</th>
+<th>hashCode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>List</code></td>
+<td>Order matters; two lists are equal iff the same elements appear in the same positions. <code>[1, 2]</code> is not equal to <code>[2, 1]</code>.</td>
+<td>Depends on element order</td>
+</tr>
+<tr>
+<td><code>Set</code></td>
+<td>Order is irrelevant; two sets are equal iff they contain the same elements. <code>{1, 2}</code> equals <code>{2, 1}</code>.</td>
+<td>Independent of iteration order</td>
+</tr>
+<tr>
+<td><code>Queue</code></td>
+<td>Inherited contract; implementations generally do not define element-wise equality</td>
+<td>Identity, unless overridden</td>
+</tr>
+<tr>
+<td><code>Collection</code> used directly</td>
+<td>No element-wise contract; effectively identity unless the concrete class overrides</td>
+<td>Identity, unless overridden</td>
+</tr>
+</tbody>
+</table>
+<p>Because <code>equals</code> is defined by the contract and not by the concrete class, an <code>ArrayList</code> and a <code>LinkedList</code> with the same elements are equal, and a <code>HashSet</code> and a <code>TreeSet</code> with the same elements are equal. The rule of thumb: <strong>use <code>List</code> when order is part of identity; use <code>Set</code> when membership is the identity.</strong></p>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+The <code>equals</code>/<code>hashCode</code> contract is inherited from the subinterface, never from the storage strategy. <code>equals</code> is about logical contents, not about the implementation class.</p>
+</blockquote>
+<h2 id="11-the-collections-utility-class">11. The Collections Utility Class</h2>
+<p><code>java.util.Collections</code> (plural) is a utility class of static methods that operate on <code>Collection</code> instances. It is easily confused with the <code>Collection</code> (singular) interface.</p>
+<table>
+<thead>
+<tr>
+<th>Utility</th>
+<th>Returns</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Collections.unmodifiableCollection</code></td>
+<td>A read-only view</td>
+<td>Mutations throw <code>UnsupportedOperationException</code></td>
+</tr>
+<tr>
+<td><code>Collections.synchronizedCollection</code></td>
+<td>A thread-safe wrapper</td>
+<td>Serialises access; iteration still needs external synchronisation (forward-ref)</td>
+</tr>
+<tr>
+<td><code>Collections.emptyList</code> / <code>emptySet</code> / <code>emptyMap</code></td>
+<td>Immutable empty singletons</td>
+<td>Safe, reused empty instances</td>
+</tr>
+<tr>
+<td><code>Collections.singleton</code> / <code>singletonList</code></td>
+<td>Immutable one-element collections</td>
+<td>Useful for <code>addAll</code> of a single element</td>
+</tr>
+</tbody>
+</table>
+<p>Wrapping with <code>unmodifiableCollection</code> does not copy the data; it is a view that forwards reads and blocks writes, so changes made through the original collection remain visible through the wrapper. <code>synchronizedCollection</code> likewise wraps rather than copies, and its iteration is not atomic, so concurrent iteration requires manual <code>synchronized</code> blocks.</p>
+<h2 id="12-size-vs-capacity">12. size() vs capacity</h2>
+<p><code>Collection.size()</code> reports the number of elements currently stored, and every conforming implementation must support it. Capacity is a different concept: it is internal storage reserved for growth, and it applies only to implementations that use a backing array. For an <code>ArrayList</code>, <code>size()</code> can be smaller than capacity, and <code>trimToSize()</code> can shrink the array to fit. Capacity is not part of the <code>Collection</code> contract and most collections never expose it; the <code>ArrayList</code> internals are covered in Lecture 32.</p>
+<blockquote class="callout callout--important">
+<p>Important
+<code>size()</code> is required and universal. <code>capacity</code> is implementation-specific and belongs to <code>ArrayList</code>, <code>Vector</code>, <code>ArrayDeque</code> and the other array-backed classes, not to <code>Collection</code>.</p>
+</blockquote>
+<h2 id="13-common-errors-and-pitfalls">13. Common Errors and Pitfalls</h2>
+<table>
+<thead>
+<tr>
+<th>Pitfall</th>
+<th>What happens</th>
+<th>Correct approach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Assuming a returned collection is mutable</td>
+<td><code>UnsupportedOperationException</code> on <code>add</code>/<code>remove</code>/<code>set</code></td>
+<td>Check the documentation; copy first if mutation is needed</td>
+</tr>
+<tr>
+<td>Confusing <code>List</code> and <code>Set</code> equality</td>
+<td><code>[1, 2]</code> compares unequal to <code>[2, 1]</code>, but <code>{1, 2}</code> equals <code>{2, 1}</code></td>
+<td>Choose the type that matches the identity you need</td>
+</tr>
+<tr>
+<td>Mutating while iterating</td>
+<td><code>ConcurrentModificationException</code> (Lecture 30)</td>
+<td>Use <code>iterator.remove()</code> or the Java 8 <code>removeIf</code></td>
+</tr>
+<tr>
+<td>Treating <code>removeAll</code>/<code>retainAll</code> as index-based</td>
+<td>Wrong elements removed</td>
+<td>Remember they are <code>equals</code>-based; use <code>List.remove(int)</code> for indices</td>
+</tr>
+<tr>
+<td>Expecting <code>toArray()</code> to be typed</td>
+<td><code>ClassCastException</code> on <code>(String[])</code></td>
+<td>Use <code>toArray(new String[0])</code></td>
+</tr>
+<tr>
+<td>Passing primitives to <code>contains</code>/<code>remove</code></td>
+<td>Silent autoboxing on every call</td>
+<td>Prefer typed references; be aware of allocation cost</td>
+</tr>
+<tr>
+<td>Assuming all collections accept <code>null</code></td>
+<td><code>NullPointerException</code> from <code>List.of</code>/<code>Set.of</code></td>
+<td>Know each implementation's null policy; <code>ArrayList</code> allows <code>null</code>, the factories do not</td>
+</tr>
+</tbody>
+</table>
+<h2 id="14-myth-vs-reality">14. Myth vs Reality</h2>
+<table>
+<thead>
+<tr>
+<th>Myth</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"<code>Map</code> is a <code>Collection</code>"</td>
+<td><code>Map</code> does not extend <code>Collection</code>; only its <code>keySet</code>, <code>values</code> and <code>entrySet</code> views do.</td>
+</tr>
+<tr>
+<td>"Every <code>Collection</code> supports <code>add</code> and <code>remove</code>"</td>
+<td>These operations are optional; fixed-size and immutable collections throw <code>UnsupportedOperationException</code>.</td>
+</tr>
+<tr>
+<td>"<code>removeAll</code> removes elements by index"</td>
+<td>It removes by <code>equals</code>; only <code>List.remove(int)</code> is index-based.</td>
+</tr>
+<tr>
+<td>"<code>toArray()</code> returns a <code>String[]</code> for a collection of strings"</td>
+<td>It always returns <code>Object[]</code>; use the typed overload for a <code>String[]</code>.</td>
+</tr>
+<tr>
+<td>"Two sets with different order are unequal"</td>
+<td><code>Set</code> equality ignores order; <code>List</code> equality depends on order.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="15-common-trap-questions">15. Common Trap Questions</h2>
+<blockquote class="callout callout--trap">
+<p>Trap 1 — Interfaces vs utility class: "Is <code>Collections</code> the same thing as <code>Collection</code>?"
+No. <code>Collection</code> (singular) is the root interface; <code>Collections</code> (plural) is a utility class of static algorithms and wrappers.</p>
+<p>Trap 2 — The index ambiguity: "A <code>List&lt;Integer&gt;</code> contains the values <code>[10, 20, 30]</code>. What does <code>list.remove(1)</code> remove?"
+Index <code>1</code>, that is, the value <code>20</code>, leaving <code>[10, 30]</code>. To remove the value <code>1</code>, use <code>list.remove(Integer.valueOf(1))</code>.</p>
+<p>Trap 3 — Direction of intersection: "Does <code>a.retainAll(b)</code> keep <code>a</code>'s elements that are in <code>b</code>, or <code>b</code>'s elements that are in <code>a</code>?"
+It mutates <code>a</code>, keeping only the elements of <code>a</code> that are also in <code>b</code>. The result is the intersection, stored in <code>a</code>.</p>
+<p>Trap 4 — Fixed-size vs immutable: "Can I call <code>set</code> on the list returned by <code>Arrays.asList</code>?"
+Yes, replacement is allowed. Only structural changes (<code>add</code>, <code>remove</code>, <code>clear</code>) throw. <code>List.of</code> forbids even <code>set</code>.</p>
+<p>Trap 5 — The typed array: "Is <code>toArray(new String[c.size()])</code> better than <code>toArray(new String[0])</code>?"
+Both are correct. The zero-length form is the modern idiom and lets the collection allocate an exactly-sized array; an oversized array is filled and <code>null</code>-padded.</p>
+<p>Trap 6 — Equality across implementations: "Are <code>new ArrayList&lt;&gt;(List.of(1, 2))</code> and <code>new LinkedList&lt;&gt;(List.of(1, 2))</code> equal?"
+Yes. Both implement the <code>List</code> contract, so <code>equals</code> compares contents in order regardless of the concrete class.</p>
+<p>Trap 7 — Optionality of defaults: "<code>removeIf</code> has a body, so it cannot fail on an immutable collection, right?"
+Wrong. <code>removeIf</code> is inherited, but it is implemented through <code>remove</code>/<code>iterator.remove</code>, so it throws <code>UnsupportedOperationException</code> on immutable collections.</p>
+</blockquote>
+<h2 id="16-points-to-remember">16. Points to Remember</h2>
+<ol>
+<li><code>Collection&lt;E&gt;</code> is the root interface for <code>List</code>, <code>Set</code> and <code>Queue</code>; <code>Map</code> is a separate hierarchy that does not extend it.</li>
+<li><code>Collection</code> extends <code>Iterable</code>, so <code>iterator()</code> and the for-each loop are available on every collection.</li>
+<li>Single-element methods are <code>add</code>, <code>remove</code>, <code>contains</code>, <code>size</code>, <code>isEmpty</code>, <code>clear</code>, <code>iterator</code> and the default <code>stream</code>.</li>
+<li>Bulk operations are <code>addAll</code> (union), <code>removeAll</code> (difference), <code>retainAll</code> (intersection) and <code>containsAll</code> (subset test).</li>
+<li><code>removeAll</code> and <code>retainAll</code> compare elements with <code>equals</code>, never by index or position.</li>
+<li><code>toArray()</code> returns <code>Object[]</code>; <code>toArray(T[])</code> returns a typed array and <code>new T[0]</code> is the preferred argument.</li>
+<li>Many methods are optional: an implementation may throw <code>UnsupportedOperationException</code>; "optional" is a contract term, not a nullability term.</li>
+<li>Java 8 default methods (<code>removeIf</code>, <code>forEach</code>, <code>stream</code>, <code>spliterator</code>) let the interface evolve without breaking implementors.</li>
+<li><code>AbstractCollection</code>, <code>AbstractList</code>, <code>AbstractSet</code> and <code>AbstractQueue</code> are skeletal implementations that supply default behaviour for concrete classes.</li>
+<li><code>List</code> equality is order-sensitive, <code>Set</code> equality is order-insensitive, and <code>Collections</code> is a utility class distinct from the <code>Collection</code> interface.</li>
+</ol>
+<h2 id="17-likely-interview-questions">17. Likely Interview Questions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Crisp Answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What is the <code>Collection</code> interface?</td>
+<td>The root interface of the single-element collections hierarchy, extended by <code>List</code>, <code>Set</code> and <code>Queue</code>, and itself extending <code>Iterable</code>.</td>
+</tr>
+<tr>
+<td>Does <code>Map</code> extend <code>Collection</code>?</td>
+<td>No. <code>Map</code> is a separate hierarchy; only its <code>keySet</code>, <code>values</code> and <code>entrySet</code> views are collections.</td>
+</tr>
+<tr>
+<td>Why does <code>Collection</code> extend <code>Iterable</code>?</td>
+<td>So every collection is directly iterable, enabling <code>iterator()</code> and the for-each loop.</td>
+</tr>
+<tr>
+<td>Name the bulk operations.</td>
+<td><code>addAll</code>, <code>removeAll</code>, <code>retainAll</code> and <code>containsAll</code>.</td>
+</tr>
+<tr>
+<td>What does <code>retainAll</code> do?</td>
+<td>Keeps only the receiver's elements that are also present in the argument, computing the intersection.</td>
+</tr>
+<tr>
+<td>What does <code>removeAll</code> do?</td>
+<td>Removes every receiver element that is also present in the argument, computing the difference.</td>
+</tr>
+<tr>
+<td>Difference between <code>toArray()</code> and <code>toArray(T[])</code>?</td>
+<td>The first returns <code>Object[]</code>; the second returns an array of type <code>T</code>, reusing the passed array or allocating a new one.</td>
+</tr>
+<tr>
+<td>What does "optional operation" mean?</td>
+<td>An implementation may legally reject the operation by throwing <code>UnsupportedOperationException</code>; mutability is implementation-specific.</td>
+</tr>
+<tr>
+<td>Give a fixed-size versus a truly immutable example.</td>
+<td><code>Arrays.asList</code> is fixed-size (<code>set</code> allowed, <code>add</code>/<code>remove</code> throw); <code>List.of</code> is immutable (<code>set</code> also throws).</td>
+</tr>
+<tr>
+<td>How does <code>List</code> equality differ from <code>Set</code> equality?</td>
+<td><code>List</code> equality is order-sensitive and position-wise; <code>Set</code> equality ignores order and compares membership.</td>
+</tr>
+<tr>
+<td>What are <code>AbstractCollection</code> and <code>AbstractList</code> for?</td>
+<td>They are skeletal implementations that provide most method bodies so custom collections need only implement the core ones.</td>
+</tr>
+<tr>
+<td>Why were default methods added to <code>Collection</code>?</td>
+<td>To add new behaviour (<code>removeIf</code>, <code>stream</code>, <code>forEach</code>, <code>spliterator</code>) in Java 8 without breaking every existing implementation.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="18-final-summary">18. Final Summary</h2>
+<div class="highlight"><pre><span></span><code>Collection&lt;E&gt;  ⊃  List&lt;E&gt; | Set&lt;E&gt; | Queue&lt;E&gt;
+   extends Iterable&lt;E&gt;          Map&lt;K,V&gt; = separate hierarchy (≠ Collection)
+
+single:  add · remove · contains · size · isEmpty · clear · iterator · stream
+bulk:    addAll(union) · retainAll(intersection) · removeAll(difference) · containsAll(subset)
+arrays:  toArray() -&gt; Object[]      toArray(new T[0]) -&gt; T[]
+
+optional ops  --rejected by--&gt;  UnsupportedOperationException  (Arrays.asList, List.of, unmodifiable views)
+defaults      --added in Java 8--&gt;  removeIf · forEach · stream · spliterator
+skeletal      --supply bodies--&gt;  AbstractCollection · AbstractList · AbstractSet · AbstractQueue
+equality:     List order matters  ≠  Set order ignored  ·  Collections = utility class
+</code></pre></div>
+
+<ul>
+<li><code>Collection&lt;E&gt;</code> is the root contract for <code>List</code>, <code>Set</code> and <code>Queue</code>, extends <code>Iterable</code>, and excludes <code>Map</code>.</li>
+<li>Single-element and bulk methods form the API; bulk methods are <code>equals</code>-based set operations, not index operations.</li>
+<li><code>toArray()</code> yields <code>Object[]</code>; the typed overload requires a correctly-typed, correctly-sized array argument.</li>
+<li>Many operations are optional, so mutability depends on the implementation, not on the interface type.</li>
+<li>Java 8 default methods and the skeletal abstract classes let the contract evolve and be implemented cheaply.</li>
+<li><code>equals</code>/<code>hashCode</code> semantics come from the subinterface: order matters for <code>List</code>, is irrelevant for <code>Set</code>.</li>
+</ul>
+<blockquote class="callout callout--golden">
+<p>Golden rule
+The <code>Collection</code> interface promises the vocabulary, not the mutability: always read the implementation's contract before assuming <code>add</code>, <code>remove</code> or <code>set</code> will succeed.</p>
+</blockquote>
+<p><strong>One-line takeaway:</strong> <code>Collection&lt;E&gt;</code> is the shared, partly-optional contract beneath <code>List</code>, <code>Set</code> and <code>Queue</code> — learn its bulk set operations, its <code>toArray</code> conversion and its per-subinterface equality rules, and the rest of the framework becomes predictable.</p>
+<div class="pager"><a class="prev" href="lecture-30.html"><span class="dir">Previous</span><span class="ttl">Iterable Interface in Java</span></a><a class="next" href="lecture-32.html"><span class="dir">Next</span><span class="ttl">Java List Interface Deep Dive</span></a></div>
+  </article></main>
+</div>
+<script src="assets/lectures.js"></script>
+<script src="assets/search-index.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
