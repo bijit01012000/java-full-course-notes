@@ -48,7 +48,14 @@
 
   /* ---------------- bookmarks (stars) ---------------- */
   function padNum(n) { return n < 10 ? "0" + n : String(n); }
-  function fileFor(course, n) { return (course === "spring" ? "spring-" : "lecture-") + padNum(n); }
+  function fileFor(course, n) {
+    var prefix = course === "spring" ? "spring-" : course === "dsa" ? "dsa-" : "lecture-";
+    return prefix + padNum(n);
+  }
+  function lectMap(course) {
+    return course === "spring" ? (window.SPRING || {}) : course === "dsa" ? (window.DSA || {}) : (window.LECTURES || {});
+  }
+  var COURSE_ORDER = { java: 0, spring: 1, dsa: 2 };
   function normStar(k) { return typeof k === "number" ? "java:" + k : String(k); }
   var stars = (loadJSON(LS_STARS, []) || []).map(normStar);
   function starKey(btn) {
@@ -67,11 +74,11 @@
     function splitKey(k) { var i = k.indexOf(":"); return [k.slice(0, i), parseInt(k.slice(i + 1), 10)]; }
     stars.slice().sort(function (a, b) {
       var pa = splitKey(a), pb = splitKey(b);
-      if (pa[0] !== pb[0]) return pa[0] === "java" ? -1 : 1;
+      if (pa[0] !== pb[0]) return (COURSE_ORDER[pa[0]] || 0) - (COURSE_ORDER[pb[0]] || 0);
       return pa[1] - pb[1];
     }).forEach(function (key) {
       var p = splitKey(key), course = p[0], n = p[1];
-      var meta = ((course === "spring" ? window.SPRING : window.LECTURES) || {})[n];
+      var meta = lectMap(course)[n];
       if (!meta) return;
       var li = document.createElement("li");
       li.className = "side-link-row";
@@ -153,7 +160,7 @@
   function fillContinue(el, course) {
     if (!el) return;
     var last = loadJSON(LS_LAST, null);
-    if (last && last.n && (last.course || "java") === course) {
+    if (last && last.n != null && (last.course || "java") === course) {
       el.href = fileFor(course, last.n) + ".html";
       var b = el.querySelector("b");
       if (b) b.textContent = last.title;
@@ -162,6 +169,7 @@
   }
   fillContinue(document.getElementById("continue"), "java");
   fillContinue(document.getElementById("continue-spring"), "spring");
+  fillContinue(document.getElementById("continue-dsa"), "dsa");
 
   /* ---------------- active section highlight ---------------- */
   var sectionLinks = document.querySelectorAll(".sections a");
