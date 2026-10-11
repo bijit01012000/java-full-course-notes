@@ -1,5 +1,5 @@
 /* ===========================================================================
-   Java Full Course Notes — site behaviour
+   Java + Spring Boot Full Course Notes — site behaviour
    Theme toggle · sidebar · search · bookmarks · active-section highlight
    No dependencies. Works from file:// and any static host.
    =========================================================================== */
@@ -47,8 +47,15 @@
   });
 
   /* ---------------- bookmarks (stars) ---------------- */
-  var stars = loadJSON(LS_STARS, []);
-  function isStarred(n) { return stars.indexOf(n) !== -1; }
+  function padNum(n) { return n < 10 ? "0" + n : String(n); }
+  function fileFor(course, n) { return (course === "spring" ? "spring-" : "lecture-") + padNum(n); }
+  function normStar(k) { return typeof k === "number" ? "java:" + k : String(k); }
+  var stars = (loadJSON(LS_STARS, []) || []).map(normStar);
+  function starKey(btn) {
+    var course = btn.getAttribute("data-course") || "java";
+    return course + ":" + parseInt(btn.getAttribute("data-lecture"), 10);
+  }
+  function isStarred(key) { return stars.indexOf(key) !== -1; }
   function saveStars() { store(LS_STARS, JSON.stringify(stars)); renderBookmarks(); }
   function renderBookmarks() {
     var block = document.getElementById("bookmarks");
@@ -57,19 +64,25 @@
     list.innerHTML = "";
     if (!stars.length) { block.style.display = "none"; return; }
     block.style.display = "";
-    stars.slice().sort(function (a, b) { return a - b; }).forEach(function (n) {
-      var meta = (window.LECTURES || {})[n];
+    function splitKey(k) { var i = k.indexOf(":"); return [k.slice(0, i), parseInt(k.slice(i + 1), 10)]; }
+    stars.slice().sort(function (a, b) {
+      var pa = splitKey(a), pb = splitKey(b);
+      if (pa[0] !== pb[0]) return pa[0] === "java" ? -1 : 1;
+      return pa[1] - pb[1];
+    }).forEach(function (key) {
+      var p = splitKey(key), course = p[0], n = p[1];
+      var meta = ((course === "spring" ? window.SPRING : window.LECTURES) || {})[n];
       if (!meta) return;
       var li = document.createElement("li");
       li.className = "side-link-row";
       var a = document.createElement("a");
-      a.href = "lecture-" + (n < 10 ? "0" + n : n) + ".html";
-      a.innerHTML = '<span class="num">' + (n < 10 ? "0" + n : n) + "</span>" + meta.short;
+      a.href = (meta.file || fileFor(course, n)) + ".html";
+      a.innerHTML = '<span class="num">' + (meta.label || padNum(n)) + "</span>" + meta.short;
       var b = document.createElement("button");
       b.className = "star on"; b.textContent = "★"; b.title = "Remove bookmark";
       b.addEventListener("click", function (e) {
         e.preventDefault();
-        stars = stars.filter(function (x) { return x !== n; });
+        stars = stars.filter(function (x) { return x !== key; });
         saveStars(); syncStarButtons();
       });
       li.appendChild(a); li.appendChild(b);
@@ -78,8 +91,7 @@
   }
   function syncStarButtons() {
     document.querySelectorAll(".star[data-lecture]").forEach(function (btn) {
-      var n = parseInt(btn.getAttribute("data-lecture"), 10);
-      var on = isStarred(n);
+      var on = isStarred(starKey(btn));
       var label = btn.getAttribute("data-label");
       btn.classList.toggle("on", on);
       btn.textContent = label ? ((on ? "★ " : "☆ ") + label) : (on ? "★" : "☆");
@@ -89,9 +101,9 @@
   document.querySelectorAll(".star[data-lecture]").forEach(function (btn) {
     btn.addEventListener("click", function (e) {
       e.preventDefault(); e.stopPropagation();
-      var n = parseInt(btn.getAttribute("data-lecture"), 10);
-      if (isStarred(n)) stars = stars.filter(function (x) { return x !== n; });
-      else stars.push(n);
+      var key = starKey(btn);
+      if (isStarred(key)) stars = stars.filter(function (x) { return x !== key; });
+      else stars.push(key);
       saveStars(); syncStarButtons();
     });
   });
@@ -114,7 +126,8 @@
     results.classList.add("show");
     if (!hits.length) { results.innerHTML = '<div class="sr-empty">No matches for "' + esc(term) + '"</div>'; return; }
     results.innerHTML = hits.map(function (r) {
-      var label = r.section ? '<span class="sr-lect">' + esc(r.lecture) + " ›</span> " : '<span class="sr-lect">' + esc(r.lecture) + " ·</span> ";
+      var lect = r.course ? r.course + " · " + r.lecture : r.lecture;
+      var label = r.section ? '<span class="sr-lect">' + esc(lect) + " ›</span> " : '<span class="sr-lect">' + esc(lect) + " ·</span> ";
       return '<a class="sr-item" href="' + esc(r.url) + '">' + label + esc(r.section || r.lectureTitle) + "</a>";
     }).join("");
   }
@@ -131,18 +144,24 @@
   /* ---------------- last visited / continue reading ---------------- */
   var pageLect = document.body.getAttribute("data-lecture");
   if (pageLect) {
-    var lt = document.body.getAttribute("data-lecture-title") || "";
-    store(LS_LAST, JSON.stringify({ n: parseInt(pageLect, 10), title: lt }));
+    store(LS_LAST, JSON.stringify({
+      course: document.body.getAttribute("data-course") || "java",
+      n: parseInt(pageLect, 10),
+      title: document.body.getAttribute("data-lecture-title") || ""
+    }));
   }
-  var cont = document.getElementById("continue");
-  if (cont) {
+  function fillContinue(el, course) {
+    if (!el) return;
     var last = loadJSON(LS_LAST, null);
-    if (last && last.n) {
-      cont.href = "lecture-" + (last.n < 10 ? "0" + last.n : last.n) + ".html";
-      cont.querySelector("b").textContent = last.title;
-      cont.style.display = "";
+    if (last && last.n && (last.course || "java") === course) {
+      el.href = fileFor(course, last.n) + ".html";
+      var b = el.querySelector("b");
+      if (b) b.textContent = last.title;
+      el.style.display = "";
     }
   }
+  fillContinue(document.getElementById("continue"), "java");
+  fillContinue(document.getElementById("continue-spring"), "spring");
 
   /* ---------------- active section highlight ---------------- */
   var sectionLinks = document.querySelectorAll(".sections a");
