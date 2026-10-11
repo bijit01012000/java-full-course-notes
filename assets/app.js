@@ -1,7 +1,7 @@
 /* ===========================================================================
-   Java + Spring Boot Full Course Notes — site behaviour
-   Theme toggle · sidebar · search · bookmarks · active-section highlight
-   No dependencies. Works from file:// and any static host.
+   Java + Spring Boot + DSA Course Notes — site behaviour
+   Theme toggle · sidebar · search · bookmarks · instant navigation
+   No dependencies. Works from any static host (SPA fetching needs http/https).
    =========================================================================== */
 (function () {
   "use strict";
@@ -87,11 +87,8 @@
       a.innerHTML = '<span class="num">' + (meta.label || padNum(n)) + "</span>" + meta.short;
       var b = document.createElement("button");
       b.className = "star on"; b.textContent = "★"; b.title = "Remove bookmark";
-      b.addEventListener("click", function (e) {
-        e.preventDefault();
-        stars = stars.filter(function (x) { return x !== key; });
-        saveStars(); syncStarButtons();
-      });
+      b.setAttribute("data-course", course);
+      b.setAttribute("data-lecture", n);
       li.appendChild(a); li.appendChild(b);
       list.appendChild(li);
     });
@@ -105,22 +102,23 @@
       btn.title = on ? "Remove bookmark" : "Bookmark this lecture";
     });
   }
-  document.querySelectorAll(".star[data-lecture]").forEach(function (btn) {
-    btn.addEventListener("click", function (e) {
-      e.preventDefault(); e.stopPropagation();
-      var key = starKey(btn);
-      if (isStarred(key)) stars = stars.filter(function (x) { return x !== key; });
-      else stars.push(key);
-      saveStars(); syncStarButtons();
-    });
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest(".star[data-lecture]");
+    if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    var key = starKey(btn);
+    if (isStarred(key)) stars = stars.filter(function (x) { return x !== key; });
+    else stars.push(key);
+    saveStars(); syncStarButtons();
   });
 
   /* ---------------- search ---------------- */
-  var q = document.getElementById("q");
-  var results = document.getElementById("search-results");
-  var parts = document.getElementById("parts");
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function runSearch(term) {
+    var q = document.getElementById("q");
+    var results = document.getElementById("search-results");
+    var parts = document.getElementById("parts");
+    if (!results) return;
     var idx = window.SEARCH_INDEX || [];
     term = term.trim().toLowerCase();
     if (term.length < 2) {
@@ -138,19 +136,24 @@
       return '<a class="sr-item" href="' + esc(r.url) + '">' + label + esc(r.section || r.lectureTitle) + "</a>";
     }).join("");
   }
-  if (q) {
+  function bindSearch() {
+    var q = document.getElementById("q");
+    if (!q || q.dataset.bound) return;
+    q.dataset.bound = "1";
     q.addEventListener("input", function () { runSearch(q.value); });
     q.addEventListener("keydown", function (e) { if (e.key === "Escape") { q.value = ""; runSearch(""); q.blur(); } });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "/" && document.activeElement !== q && !e.target.matches("input,textarea")) {
-        e.preventDefault(); q.focus();
-      }
-    });
   }
+  document.addEventListener("keydown", function (e) {
+    var q = document.getElementById("q");
+    if (e.key === "/" && q && document.activeElement !== q && !e.target.matches("input,textarea")) {
+      e.preventDefault(); q.focus();
+    }
+  });
 
-  /* ---------------- last visited / continue reading ---------------- */
-  var pageLect = document.body.getAttribute("data-lecture");
-  if (pageLect) {
+  /* ---------------- last visited ---------------- */
+  function storeLast() {
+    var pageLect = document.body.getAttribute("data-lecture");
+    if (!pageLect) return;
     store(LS_LAST, JSON.stringify({
       course: document.body.getAttribute("data-course") || "java",
       n: parseInt(pageLect, 10),
@@ -167,13 +170,11 @@
       el.style.display = "";
     }
   }
-  fillContinue(document.getElementById("continue"), "java");
-  fillContinue(document.getElementById("continue-spring"), "spring");
-  fillContinue(document.getElementById("continue-dsa"), "dsa");
 
-  /* ---------------- active section highlight ---------------- */
-  var sectionLinks = document.querySelectorAll(".sections a");
-  if (sectionLinks.length) {
+  /* ---------------- article behaviours (re-run after each swap) ---------------- */
+  function initSections() {
+    var sectionLinks = document.querySelectorAll(".sections a");
+    if (!sectionLinks.length) return;
     var map = {};
     sectionLinks.forEach(function (a) { map[a.getAttribute("href").split("#")[1]] = a; });
     var heads = document.querySelectorAll(".article h2[id]");
@@ -188,24 +189,99 @@
     }, { rootMargin: "-70px 0px -75% 0px", threshold: 0 });
     heads.forEach(function (h) { io.observe(h); });
   }
-
-  /* ---------------- heading anchor copy ---------------- */
-  document.querySelectorAll(".article h2[id], .article h3[id]").forEach(function (h) {
-    var b = document.createElement("button");
-    b.className = "anchor-btn"; b.textContent = "#"; b.title = "Copy link to this section";
-    b.addEventListener("click", function () {
-      var url = location.href.split("#")[0] + "#" + h.id;
-      if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { flash(b, "copied"); },
-        function () { flash(b, "copy?"); });
-      else flash(b, "copy?");
+  function initAnchors() {
+    document.querySelectorAll(".article h2[id], .article h3[id]").forEach(function (h) {
+      var b = document.createElement("button");
+      b.className = "anchor-btn"; b.textContent = "#"; b.title = "Copy link to this section";
+      b.addEventListener("click", function () {
+        var url = location.href.split("#")[0] + "#" + h.id;
+        if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { flash(b, "copied"); },
+          function () { flash(b, "copy?"); });
+        else flash(b, "copy?");
+      });
+      h.appendChild(b);
     });
-    h.appendChild(b);
-  });
+  }
   function flash(el, txt) {
     var old = el.textContent; el.textContent = txt;
     setTimeout(function () { el.textContent = old; }, 1100);
   }
+  function syncPills() {
+    var course = document.body.getAttribute("data-course") || "";
+    document.querySelectorAll(".topbar .pill").forEach(function (p) {
+      p.classList.toggle("active", p.getAttribute("href") === "index.html#" + course);
+    });
+  }
 
-  renderBookmarks();
-  syncStarButtons();
+  /* ---------------- instant navigation (no full reloads) ---------------- */
+  var navigating = false;
+  function isDocPage(url) { return /\/(lecture|spring|dsa)-\d{2}\.html$/.test(url.pathname); }
+  function afterSwap() {
+    storeLast();
+    renderBookmarks();
+    syncStarButtons();
+    syncPills();
+    bindSearch();
+    initSections();
+    initAnchors();
+  }
+  function navigateTo(target, push) {
+    if (navigating) return;
+    navigating = true;
+    document.body.classList.add("loading");
+    fetch(target, { credentials: "same-origin" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.text();
+    }).then(function (html) {
+      var doc = new DOMParser().parseFromString(html, "text/html");
+      var art = document.querySelector("article.article");
+      var side = document.getElementById("sidebar");
+      var newArt = doc.querySelector("article.article");
+      var newSide = doc.querySelector("#sidebar");
+      if (!art || !side || !newArt || !newSide) throw new Error("unexpected layout");
+      art.innerHTML = newArt.innerHTML;
+      side.innerHTML = newSide.innerHTML;
+      document.title = doc.title;
+      ["data-course", "data-lecture", "data-lecture-title"].forEach(function (k) {
+        var v = doc.body.getAttribute(k);
+        if (v == null) document.body.removeAttribute(k); else document.body.setAttribute(k, v);
+      });
+      if (push !== false) history.pushState({ url: target }, "", target);
+      var hash = target.split("#")[1];
+      var el = hash && document.getElementById(hash);
+      if (el) el.scrollIntoView(); else window.scrollTo(0, 0);
+      afterSwap();
+    }).catch(function () {
+      window.location.href = target;
+    }).then(function () {
+      navigating = false;
+      document.body.classList.remove("loading");
+    });
+  }
+  document.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target.closest && e.target.closest("a[href]");
+    if (!a || !(a.closest(".sidebar") || a.closest(".pager"))) return;
+    var url;
+    try { url = new URL(a.href, location.href); } catch (err) { return; }
+    if (url.origin !== location.origin) return;
+    if (url.pathname === location.pathname) {
+      if (!url.hash) { e.preventDefault(); window.scrollTo(0, 0); }
+      return; // same-page anchors keep native (instant) behaviour
+    }
+    if (!isDocPage(url)) return; // index.html and friends: normal navigation
+    e.preventDefault();
+    navigateTo(url.pathname + url.search + url.hash);
+  });
+  window.addEventListener("popstate", function () {
+    var url = location.pathname + location.search + location.hash;
+    if (isDocPage(location)) navigateTo(url, false);
+    else window.location.reload();
+  });
+
+  /* ---------------- init ---------------- */
+  fillContinue(document.getElementById("continue"), "java");
+  fillContinue(document.getElementById("continue-spring"), "spring");
+  fillContinue(document.getElementById("continue-dsa"), "dsa");
+  afterSwap();
 })();
