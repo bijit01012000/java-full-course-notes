@@ -16,7 +16,8 @@
   }
 
   /* ---------------- theme ---------------- */
-  var THEMES = ["light", "dark", "nord", "dracula", "solarized-light", "solarized-dark", "paper"];
+  var THEMES = ["light", "paper", "solarized-light", "dark", "amoled", "one-dark", "tokyo-night",
+                "catppuccin", "gruvbox", "nord", "dracula", "solarized-dark"];
   function currentTheme() {
     var t = document.documentElement.getAttribute("data-theme");
     return THEMES.indexOf(t) !== -1 ? t : "light";
@@ -215,7 +216,14 @@
 
   /* ---------------- instant navigation (no full reloads) ---------------- */
   var navigating = false;
+  var docPath = location.pathname + location.search; // identity of the document currently shown
   function isDocPage(url) { return /\/(lecture|spring|dsa)-\d{2}\.html$/.test(url.pathname); }
+  function scrollToHash() {
+    if (!location.hash) return;
+    var el = document.getElementById(location.hash.slice(1));
+    if (el) el.scrollIntoView();
+  }
+  window.addEventListener("hashchange", scrollToHash);
   function afterSwap() {
     storeLast();
     renderBookmarks();
@@ -246,6 +254,7 @@
         var v = doc.body.getAttribute(k);
         if (v == null) document.body.removeAttribute(k); else document.body.setAttribute(k, v);
       });
+      docPath = target.split("#")[0];
       if (push !== false) history.pushState({ url: target }, "", target);
       var hash = target.split("#")[1];
       var el = hash && document.getElementById(hash);
@@ -266,7 +275,14 @@
     try { url = new URL(a.href, location.href); } catch (err) { return; }
     if (url.origin !== location.origin) return;
     if (url.pathname === location.pathname) {
-      if (!url.hash) { e.preventDefault(); window.scrollTo(0, 0); }
+      if (!url.hash) {
+        e.preventDefault();
+        // clicking the topic you are already on toggles its section list
+        var li = a.closest("li");
+        var sec = li && li.querySelector(".sections");
+        if (sec) sec.classList.toggle("collapsed");
+        else window.scrollTo(0, 0);
+      }
       return; // same-page anchors keep native (instant) behaviour
     }
     if (!isDocPage(url)) return; // index.html and friends: normal navigation
@@ -274,6 +290,9 @@
     navigateTo(url.pathname + url.search + url.hash);
   });
   window.addEventListener("popstate", function () {
+    var now = location.pathname + location.search;
+    if (now === docPath) return; // fragment-only change on this document: keep native behaviour
+    docPath = now;
     var url = location.pathname + location.search + location.hash;
     if (isDocPage(location)) navigateTo(url, false);
     else window.location.reload();
@@ -284,4 +303,5 @@
   fillContinue(document.getElementById("continue-spring"), "spring");
   fillContinue(document.getElementById("continue-dsa"), "dsa");
   afterSwap();
+  scrollToHash();
 })();
