@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQL vs NoSQL / Choose a Database — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 11 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Databases</span></div>
+    <h1>SQL vs NoSQL / Choose a Database</h1>
+    <p class="dek">The database choice is the hardest design decision to undo, and interviewers want to hear you reason from access patterns and consistency requirements rather than from product reputations.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Pick the engine whose storage layout matches the hardest access pattern, start with one relational database, and add specialised stores only when a measured workload outgrows it.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Store users, orders, order items, and payments with multi-row atomicity.</li><li>Serve product detail, category browsing, and ranked text search.</li><li>Store sessions and carts with fast lookup by a known key and a TTL.</li><li>Record metrics and events for dashboards with time-window queries and retention.</li><li>Keep derived copies in sync and make each one rebuildable from the source.</li><li>Run sales reporting without adding load to the checkout database.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Orders and payments need strong consistency and must never lose an acknowledged write.</li><li>Checkout p99 under 200 ms; catalog reads p99 under 100 ms at 10k reads/s.</li><li>Search results may lag the catalog by up to 5 s; a just-created product can be briefly missing.</li><li>Session and cart lookups p99 under 10 ms.</li><li>Checkout availability 99.99%; a search or analytics outage must not block orders.</li><li>Every additional engine must be operable by the same small team, with backups, monitoring, and upgrades.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>5M users and 1M orders/day is about 12 order writes/s on average and roughly 50/s at peak.</li><li>Catalog reads are about 10k/s at peak, which is a read-scaling problem rather than a write problem.</li><li>100k SKUs at about 5 KB each is about 500 MB of catalog data and roughly 1 GB in the search index.</li><li>1M orders/day at about 2 KB each is about 2 GB/day, or roughly 730 GB/year before indexes and replicas.</li><li>2M active carts at about 2 KB each is about 4 GB in Redis; 50k metric points/s fits a time-series store with a 7-day raw retention.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">User</span><span class="fields">user_id, email, password_hash, status, created_at</span></div><div class="entity"><span class="name">Order</span><span class="fields">order_id, user_id, total_cents, currency, status, created_at, version</span></div><div class="entity"><span class="name">OrderItem</span><span class="fields">order_id, sku, quantity, unit_price_cents, line_total_cents</span></div><div class="entity"><span class="name">Product</span><span class="fields">sku, title, description, attributes_json, price_cents, category_id, version</span></div><div class="entity"><span class="name">Cart</span><span class="fields">cart_id, user_id, items, updated_at, expires_at</span></div><div class="entity"><span class="name">SearchDocument</span><span class="fields">sku, title, description, category, popularity, indexed_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/orders</code></td><td>Create an order atomically with its items and inventory reservation; idempotency key required.</td></tr><tr><td><code>GET</code></td><td><code>/v1/orders/{id}</code></td><td>Read an order and its items from the transactional store.</td></tr><tr><td><code>GET</code></td><td><code>/v1/products?query=&category=&cursor=</code></td><td>Browse the catalog; free-text queries are served by the search index, category pages by the primary or a replica.</td></tr><tr><td><code>PUT</code></td><td><code>/v1/cart/items</code></td><td>Add or update a cart line in Redis with a TTL; the cart is persisted on checkout.</td></tr><tr><td><code>GET</code></td><td><code>/v1/admin/reports/sales?from=&to=</code></td><td>Read precomputed sales aggregates from the warehouse or a reporting replica.</td></tr><tr><td><code>POST</code></td><td><code>/internal/search/reindex</code></td><td>Rebuild the search index from a snapshot and replay recent changes.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Orders and payments</td><td>PostgreSQL with foreign keys, unique constraints, integer minor units, and an append-only ledger</td><td>Multi-row correctness, refunds, and reconciliation need ACID; the write volume is small enough for one primary.</td></tr><tr><td>Large order tables</td><td>Range-partition by month and archive closed partitions</td><td>Keeps the active working set small and makes retention a partition drop instead of a mass delete.</td></tr><tr><td>Sessions and carts</td><td>Redis hash with a TTL, and a durable order on checkout</td><td>Reads are by a known key and must be fast; losing an unsubmitted cart is acceptable, losing a placed order is not.</td></tr><tr><td>Catalog and attributes</td><td>PostgreSQL rows with a JSONB column for variable attributes</td><td>Keeps prices and inventory transactional while avoiding a migration for every new product attribute.</td></tr><tr><td>Search</td><td>Elasticsearch index fed from an outbox or CDC stream</td><td>An inverted index provides ranking, stemming, and facets that a B-tree LIKE query cannot; the index stays a derived copy.</td></tr><tr><td>Metrics and reporting</td><td>Time-series database for metrics and a columnar warehouse for sales aggregates</td><td>Time-ordered compression and window queries fit metrics, while columnar scans fit reporting without touching the checkout primary.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> API[⚙️ Application services]
+  API --> PG[🗄️ PostgreSQL OLTP]
+  API --> RD[⚡ Redis carts]
+  API --> TS[📈 Time-series DB]
+  API --> SE[🔎 Search index]
+  PG --> RP[🗄️ Read replica]
+  PG --> OB[📤 CDC stream]
+  OB --> SE
+  OB --> WH[📊 Warehouse]
+  RP --> RPT[📊 Reporting]
+  MON[📊 Ops metrics] -.-> API
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef cache fill:#dff3ee,stroke:#0f766e,color:#17211f;
+  classDef derived fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  class C client;
+  class API,MON svc;
+  class PG,RP store;
+  class RD cache;
+  class TS,SE,WH,RPT,OB derived;</div><div class="diagram-caption">One transactional core owns orders and catalog, while Redis, search, metrics, and the warehouse are derived stores fed from the primary and kept rebuildable.</div></div>
+        <ul><li>Start with one well-tuned relational database; JSON columns, full-text search, and extensions cover many early needs before another engine is justified.</li><li>Choose from the access pattern, consistency need, write volume, schema churn, and team expertise, not from which database is currently popular.</li><li>Keep the transactional core small: orders, payments, and inventory live together so one local transaction protects the invariant.</li><li>A search index, cache, and warehouse are derived copies; each needs a propagation path, a reconciliation job, and a full rebuild procedure.</li><li>Reporting and analytics read from a replica or warehouse, never from the checkout primary during peak traffic.</li><li>Do not shard until a measured write or storage limit requires it; at 50 order writes/s, one primary is not the bottleneck.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Relational as the default</td><td>ACID transactions, constraints, joins, and mature backup and recovery</td><td>Writes are bound to one primary, and schema changes need migrations</td></tr><tr><td>Key-value store</td><td>Sub-millisecond lookup by a known key with native TTL</td><td>Cannot query fields inside the value, and a hot key lands on one node</td></tr><tr><td>Document store</td><td>Whole-object reads and a flexible schema for evolving payloads</td><td>Connected data needs duplication or application-side joins that drift</td></tr><tr><td>Wide-column store</td><td>Very high write throughput and partition-local range reads</td><td>Query-first modelling means a second table for each new access path</td></tr><tr><td>Search engine</td><td>Relevance ranking, stemming, typo tolerance, and facets</td><td>It is a derived copy that lags, must be rebuilt, and adds an engine to operate</td></tr><tr><td>Time-series database</td><td>Compression and fast time-window aggregates with automatic retention</td><td>High-cardinality labels and non-time predicates perform badly</td></tr><tr><td>Polyglot persistence</td><td>Each workload gets the engine that fits it best</td><td>Every extra store adds deployment, monitoring, backup, upgrades, and a sync path</td></tr><tr><td>Denormalization</td><td>Cheap reads without joins</td><td>Write amplification and duplicated facts that must be kept consistent</td></tr></tbody></table></div>
+        <ul><li>Verify the top queries with EXPLAIN ANALYZE and add the composite or covering indexes they actually need.</li><li>Use cursor pagination for catalog and order history instead of OFFSET, which scans and discards rows as the page number grows.</li><li>Partition orders by month and archive closed partitions to keep indexes shallow.</li><li>Serve product detail from a cache with delete-on-write invalidation rather than denormalizing the whole catalog.</li><li>Feed search and the warehouse from an outbox or CDC stream with idempotent consumers and reconciliation counts.</li><li>Precompute sales aggregates in the warehouse instead of running large GROUP BY queries against live orders.</li><li>Keep time-series labels low-cardinality; a user ID on every metric destroys the index and compression.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>SQL or NoSQL first?</strong> Start with a relational database unless a measured access pattern clearly needs something else, because transactions, constraints, and ad hoc queries are expensive to add later.</div><div class="followup"><strong>When would you actually choose NoSQL?</strong> When the access pattern is known-key lookups at very high volume, append-heavy events, or a rapidly changing document shape, and multi-row transactions are not the hard requirement.</div><div class="followup"><strong>Does NoSQL automatically scale writes?</strong> No; many systems still have a single primary or a partition limit, and all of them need a shard key, hot-partition handling, and operational work.</div><div class="followup"><strong>How do you choose a shard key?</strong> It should spread writes evenly and keep data that is read together on one shard; hash a high-cardinality entity ID and avoid timestamps and auto-increment columns.</div><div class="followup"><strong>Why is the search index not the source of truth?</strong> It is a denormalised index optimised for ranking, it lags the primary, and it can be rebuilt; using it as the source loses transactional guarantees.</div><div class="followup"><strong>How do you keep search in sync?</strong> Write an outbox row in the same transaction as the catalog change, relay it to the index with an idempotent consumer, and reconcile counts and checksums periodically.</div><div class="followup"><strong>Can Redis hold carts durably?</strong> It can hold the active cart with a TTL, but on checkout the cart must be persisted to the transactional database before the order is confirmed.</div><div class="followup"><strong>Why a time-series database instead of a relational table?</strong> Append-only timestamped data compresses well in time order, and the access pattern is window aggregates with retention, which a row-store primary handles poorly.</div><div class="followup"><strong>When is a graph database worth it?</strong> When variable-depth relationship traversal is central, such as fraud rings or friends-of-friends; for one-hop lookups and bulk scans a relational store is simpler.</div><div class="followup"><strong>When is polyglot persistence a mistake?</strong> When it is adopted before a workload needs it, because every additional engine multiplies operational cost and adds another copy of the data that can drift.</div><div class="followup"><strong>How do you run reporting without hurting checkout?</strong> Send reads to a replica or a warehouse and precompute aggregates; never run large analytical scans on the primary during peak order traffic.</div><div class="followup"><strong>What would you monitor across these stores?</strong> Replication lag, slow queries and index bloat, search-index lag and mismatch rate, cache hit ratio, shard skew, and the age of the oldest unreconciled copy.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Choosing a database from its reputation instead of the queries it must serve.</li><li>Assuming NoSQL always scales writes and skipping the shard-key and hot-partition work.</li><li>Using a search engine or vector index as the authoritative store.</li><li>Putting a high-cardinality label such as user_id on every time-series metric.</li><li>Forgetting that every copied fact needs a sync path, a reconciliation check, and a rebuild plan.</li><li>Storing money as a floating-point value instead of integer minor units.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="caching-consistency.html"><span>← Previous</span><strong>Caching and Cache Consistency</strong></a><a class="next" href="idempotency-retries.html"><span>Next →</span><strong>Idempotency and Safe Retries</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

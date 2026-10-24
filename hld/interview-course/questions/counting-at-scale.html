@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Counting at Scale — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 32 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p2">P2 · Specialized</span></div>
+    <h1>Counting at Scale</h1>
+    <p class="dek">It checks whether you match the counting mechanism to the semantics: exact for billing, approximate for reach, and sharded or streamed when one row would serialize every write.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Split hot counters into shards or aggregate a durable event stream, keep the display path cached and approximate, and reserve exact counts for money.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Increment and decrement a counter for an entity and metric.</li><li>Return the current total quickly.</li><li>Count distinct users for a time window.</li><li>Expose counts over time for charts and ranking.</li><li>Accept batched increments from edge or mobile clients.</li><li>Recompute counts from raw events for correction.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Absorb 500k increments/s at peak without a single hot row.</li><li>Read p99 under about 50 ms from cache or a serving table.</li><li>Exact and auditable for billing and votes; approximate is acceptable for views.</li><li>Idempotent per logical event, so retries never double count.</li><li>Lose no billable event; display counts may lag seconds.</li><li>Survive a region failure without corrupting totals.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 200k events/s average and 500k/s peak across all counters.</li><li>1M active counters, with the top 100 receiving most of the traffic.</li><li>An event at about 100 B is roughly 20 MB/s, around 1.7 TB/day before compression.</li><li>30-day hot retention is roughly 50 TB; older events move to cold storage.</li><li>A counter with 64 shards turns one hot row into 64 rows; reads sum 64 values or a cached snapshot.</li><li>A HyperLogLog sketch of about 12 KB estimates millions of distinct users within a few percent.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Counter</span><span class="fields">counter_id, entity_id, metric, base_value, shard_count, version, updated_at</span></div><div class="entity"><span class="name">CounterShard</span><span class="fields">entity_id, metric, shard_id, delta, updated_at</span></div><div class="entity"><span class="name">CountEvent</span><span class="fields">event_id, entity_id, metric, user_id, occurred_at, idempotency_key, source</span></div><div class="entity"><span class="name">WindowAggregate</span><span class="fields">entity_id, metric, window_start, window_end, value, watermark, updated_at</span></div><div class="entity"><span class="name">DedupeRecord</span><span class="fields">idempotency_key, event_id, seen_at, expires_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/counters/{entityId}/{metric}/increment</code></td><td>Apply one event with an Idempotency-Key; duplicates are rejected or no-op.</td></tr><tr><td><code>POST</code></td><td><code>/v1/counters/increments</code></td><td>Batch increments from edge or mobile with a per-item result.</td></tr><tr><td><code>GET</code></td><td><code>/v1/counters/{entityId}/{metric}</code></td><td>Return the total plus a freshness timestamp; never run COUNT over events.</td></tr><tr><td><code>GET</code></td><td><code>/v1/counters/{entityId}/{metric}/series</code></td><td>Return a windowed series for charts with an explicit window and step.</td></tr><tr><td><code>GET</code></td><td><code>/v1/counters/{entityId}/{metric}/unique</code></td><td>Return an approximate distinct count for a window from a sketch.</td></tr><tr><td><code>GET</code></td><td><code>/v1/rankings</code></td><td>Return top entities for a metric and window from a precomputed pipeline.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Hot counter</td><td>64 shards per logical counter, with writes to a random or hash-of-user shard</td><td>Spreads lock contention; reads pay a 64-way sum that can be cached.</td></tr><tr><td>Durability</td><td>Append every event to a partitioned log and treat Redis as a buffer, not the source of truth</td><td>The log can rebuild counters after a crash, a bad deploy, or a logic bug.</td></tr><tr><td>Write-behind</td><td>Flush aggregated deltas every few seconds into counter rows</td><td>Fewer database writes while keeping the loss window bounded and recoverable from the log.</td></tr><tr><td>Read model</td><td>Cache the total for 5 to 10 s, with a base snapshot plus live deltas</td><td>Fast reads without summing 64 shards on every request.</td></tr><tr><td>Unique counts</td><td>One HyperLogLog per window, merging sketches for unions</td><td>Adding daily uniques overcounts users who appear on multiple days.</td></tr><tr><td>Idempotency</td><td>Unique event_id at the sink plus a dedupe table with a 24 to 72 h TTL</td><td>Covers retries and consumer rebalances without unbounded storage.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> G[🛡️ API]
+  G --> S[⚙️ Counter service]
+  S --> R[⚡ Sharded counters]
+  S --> E[📬 Event log]
+  E --> A[📊 Window aggregator]
+  A --> V[(🗄️ Serving store)]
+  A --> H[🧮 HyperLogLog]
+  R --> F[🔁 Delta flusher]
+  F --> D[(🗄️ Counter table)]
+  V --> G
+  D --> G
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef service fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef hot fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  class C client;
+  class G,S,A service;
+  class V,D store;
+  class R,E,H,F hot;</div><div class="diagram-caption">Writes increment sharded counters and append to a durable log; the aggregator maintains serving totals, windowed series, and sketches, while reads come from the serving side.</div></div>
+        <ul><li>The write path is append plus increment; the read path is a cached snapshot, never a live COUNT over events.</li><li>Billing, votes, and quotas read from the exact event-derived store; view counts read the approximate serving store.</li><li>Partition the event log by entity_id so all events for one counter stay ordered.</li><li>Windows close on a watermark; a late event either updates an open window or emits an explicit correction.</li><li>A batch job recomputes from the raw log to repair drift, duplicates, and logic bugs.</li><li>Hot entities get more shards or edge pre-aggregation, and the read path must not loop over shards synchronously.</li><li>Regional counters can accept local writes and merge later, but a global hard cap needs coordination.</li><li>Keep the raw events; without them a wrong number can only be guessed at, not repaired.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Sharded exact counter</td><td>Scales writes and stays exact</td><td>Reads sum many shards and resizing is awkward</td></tr><tr><td>Single counter row</td><td>Trivial reads and exact semantics</td><td>Serializes all writes on one hot row</td></tr><tr><td>Redis buffer with write-behind</td><td>Very fast increments and fewer database writes</td><td>A crash can lose the last flush window unless the log is replayed</td></tr><tr><td>Stream aggregation</td><td>Fresh windowed results without request-path counting</td><td>Watermarks, late events, and idempotent sinks add complexity</td></tr><tr><td>Batch recomputation</td><td>Authoritative and repairable</td><td>Slow and expensive over long histories</td></tr><tr><td>HyperLogLog</td><td>Cheap, mergeable distinct counts</td><td>Approximate and cannot answer which users were counted</td></tr><tr><td>CRDT counters</td><td>Local writes and convergence across regions</td><td>Metadata per replica and no global hard limit</td></tr><tr><td>Long dedupe window</td><td>Catches late retries and replays</td><td>More storage and operational cost</td></tr></tbody></table></div>
+        <ul><li>Pre-aggregate at the edge for a few seconds before sending deltas.</li><li>Pipeline Redis increments and flush them as batched deltas.</li><li>Compact shards into a base value so the live shard count stays bounded.</li><li>Cache the displayed total with a short TTL and serve stale on failure.</li><li>Read rankings from a precomputed table instead of sorting live counts.</li><li>Filter bots and duplicate events before they reach the counter.</li><li>Use 64 shards for top counters and 8 to 16 for the long tail.</li><li>Compress and tier the event log, keeping only the window needed for replay.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why is incrementing a counter hard at scale?</strong> All writers target the same row, so row locks serialize updates; the arithmetic is cheap but the coordination is not.</div><div class="followup"><strong>How does a sharded counter work?</strong> The logical counter is split into physical shards, each write increments one shard, and a read sums the shards or a base snapshot plus deltas.</div><div class="followup"><strong>How many shards do you use?</strong> Size from peak write rate with headroom, because more shards improve writes but increase read amplification and make resizing harder.</div><div class="followup"><strong>Can you just use Redis INCR?</strong> It is fast and atomic, but it is memory-bound, a hot key still lands on one node, and persistence can lose recent increments, so use it in front of a durable log.</div><div class="followup"><strong>How do you count unique viewers?</strong> Store distinct IDs per window at small scale, and use one HyperLogLog per window at large scale, merging sketches instead of adding daily counts.</div><div class="followup"><strong>How do you handle duplicate events?</strong> Attach a stable event ID, enforce it with a unique constraint or dedupe table at the sink, and size the dedupe window to cover retries and reprocessing.</div><div class="followup"><strong>What is a watermark in stream aggregation?</strong> It is the processor's estimate that all events up to a time have arrived, which decides when a window closes and how late events are handled.</div><div class="followup"><strong>How do you correct a wrong count?</strong> Recompute from the immutable event log for the affected key and window, then overwrite the serving value; without raw events you can only guess.</div><div class="followup"><strong>Why use batch processing if streaming is available?</strong> Batch recomputation is authoritative and repairs drift across long histories, while streaming supplies freshness; many systems run both.</div><div class="followup"><strong>How do you count a celebrity post without a hot key?</strong> Pre-aggregate at the edge, split the counter into more shards, cache the displayed total, and keep ranking on a separate pipeline.</div><div class="followup"><strong>How do multi-region counters converge?</strong> Use a CRDT such as a G-counter or PN-counter, where each region tracks its own contribution and replicas merge by combining state.</div><div class="followup"><strong>When is approximate counting unacceptable?</strong> For billing, quotas, rate limits, and votes, or any number a user can audit against their own actions.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Running a live COUNT over a large event table on every page view.</li><li>Sharding a counter but then reading it with one query per shard on the hot path.</li><li>Treating Redis as durable when persistence can lose recent increments.</li><li>Adding daily unique counts to compute a weekly unique count.</li><li>Assuming exactly-once delivery without making the sink idempotent.</li><li>Letting a billing or ranking path depend on a stale display cache.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="unique-id-generation.html"><span>← Previous</span><strong>Generate Unique IDs</strong></a><span></span></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

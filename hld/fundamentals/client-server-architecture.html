@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Client-Server Architecture — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 40 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Client-Server Architecture</h1>
+    <p class="dek">Architectural Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/client-server-architecture">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What client-server architecture is</a>
+<a href="#s2">The request-response cycle</a>
+<a href="#s3">What the client does</a>
+<a href="#s4">What the server does</a>
+<a href="#s5">Why centralize on the server</a>
+<a href="#s6">Thin clients and thick clients</a>
+<a href="#s7">Who starts the conversation: polling and WebSockets</a>
+<a href="#s8">Stateless and stateful servers</a>
+<a href="#s9">Tiers: one-tier and two-tier</a>
+<a href="#s10">Tiers: three-tier and n-tier</a>
+<a href="#s11">The server as a single point of failure</a>
+<a href="#s12">Network latency and dependency</a>
+<a href="#s13">Security and the trust boundary</a>
+<a href="#s14">Where you see it, and when it fits</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Client-server architecture splits responsibilities between clients that handle interaction and servers that own shared data, business rules, and permissions — communicating over a network through a request-response contract.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Client</dt><dd>The program that starts a request: a browser, mobile app, desktop app, or another backend service.</dd></div><div class="term"><dt>Server</dt><dd>The program that accepts requests, enforces business rules, and returns responses; in production usually many instances behind a load balancer.</dd></div><div class="term"><dt>Request-response cycle</dt><dd>The client sends a request, the server processes it, and the server returns a response that the client renders or acts on.</dd></div><div class="term"><dt>Thin client</dt><dd>A client that performs little local processing and relies on the server for most logic, such as a server-rendered website.</dd></div><div class="term"><dt>Thick client</dt><dd>A client that performs substantial processing locally, such as a single-page app or a video editor.</dd></div><div class="term"><dt>Polling</dt><dd>The client repeatedly asks the server for updates at an interval, wasting requests when nothing has changed.</dd></div><div class="term"><dt>WebSocket</dt><dd>A persistent bidirectional connection that lets either side send messages after the initial client-initiated handshake.</dd></div><div class="term"><dt>Stateless server</dt><dd>A server that keeps no client-specific state between requests, so any instance can handle any request.</dd></div><div class="term"><dt>Tier</dt><dd>A layer with a distinct responsibility, such as presentation, application, or data; tiers may be separate deployable services.</dd></div><div class="term"><dt>Trust boundary</dt><dd>The line between code the user controls and infrastructure you control; everything across it must be treated as untrusted.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What client-server architecture is</h2>
+<p class="lede">A local to-do app can keep its interface, logic, and data on one machine. The moment the same list must appear on a phone, a laptop, and a teammate's computer, a shared source of truth is needed.</p>
+<ul><li>Responsibilities are divided between two roles: the <strong>client</strong> starts a request, and the <strong>server</strong> processes it and responds.</li><li>The client handles user interaction and presentation; the server owns shared data and enforces business rules.</li><li>The <strong>network</strong> is part of the architecture, including DNS, routers, firewalls, proxies, and the protocols between them.</li><li>A <strong>protocol</strong> defines the message format and rules — HTTP, gRPC, WebSocket, SMTP, or a database protocol.</li><li>Client and server are roles, not machine types: a payment service can be a server to checkout and a client to fraud detection.</li><li>In production the server is usually a fleet of processes behind a load balancer, not one physical machine.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Component</th><th>Responsibility</th><th>Examples</th></tr></thead><tbody><tr><td>Client</td><td>Interface, input, rendering, local state</td><td>Browser, mobile app, CLI, another service</td></tr>
+<tr><td>Server</td><td>Shared data, business rules, auth, permissions</td><td>API server, application service</td></tr>
+<tr><td>Network</td><td>Move messages and resolve names</td><td>DNS, TCP, TLS, proxies, CDN</td></tr>
+<tr><td>Data store</td><td>Durable shared state</td><td>Database, cache, object storage</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The request-response cycle</h2>
+<p class="lede">Opening a website shows the full cycle in a few hundred milliseconds.</p>
+<ul><li>The browser resolves the domain to an IP address using <strong>DNS</strong>.</li><li>It establishes a connection, usually TCP plus TLS, to the server on a port such as 443.</li><li>It sends an HTTP request with a method, path, headers, and optionally a body.</li><li>The server authenticates the request, runs business logic, and queries a database or cache.</li><li>The server returns a status code and body — for example <code>200 OK</code> with HTML, or <code>404</code> for a missing resource.</li><li>The client parses the response and renders the result or updates its local state.</li><li>Every step can fail independently, so timeouts, retries, and error handling are part of the contract.</li></ul>
+
+<div class="flow"><span class="flow-step">DNS lookup</span><span class="flow-arrow">→</span><span class="flow-step">Connect (TCP/TLS)</span><span class="flow-arrow">→</span><span class="flow-step">Send request</span><span class="flow-arrow">→</span><span class="flow-step">Authenticate and process</span><span class="flow-arrow">→</span><span class="flow-step">Query data</span><span class="flow-arrow">→</span><span class="flow-step">Return response</span><span class="flow-arrow">→</span><span class="flow-step">Render or update state</span></div>
+<div class="note">A request is not free: DNS, connection setup, TLS, server processing, and data access all add latency before the first byte of content arrives.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What the client does</h2>
+<ul><li>Renders the interface and collects user input.</li><li>Sends requests that describe the user's intent, such as the product chosen and quantity, not the final price.</li><li>Displays responses and maintains temporary UI state such as an open dialog or a draft form.</li><li>Performs optimistic updates and local validation for responsiveness, while accepting that the server may reject the result.</li><li>Caches previously loaded data so some screens still work offline or on a slow connection.</li><li>Can be a browser, mobile app, desktop app, or another backend service — a client does not need a user interface.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>What the server does</h2>
+<ul><li>Listens on a port and accepts requests from many clients concurrently.</li><li>Authenticates the caller and authorizes the specific action on the specific resource.</li><li>Executes business logic such as pricing, inventory checks, and payment capture.</li><li>Reads and writes shared data in databases, caches, and object storage.</li><li>Validates input independently of any client-side checks.</li><li>Returns a response with a meaningful status code, and records logs and metrics for the request.</li><li>Coordinates with other services, where it becomes a client itself.</li></ul>
+<h3>Never trust the client</h3>
+<ul><li>Anything running on a user's device can be inspected, modified, or replayed by the user.</li><li>If the client sends a price, a malicious user can change a laptop's price to one dollar; the server must look up the price itself.</li><li>A safe checkout request sends the product ID and quantity; the server applies valid discounts and computes the total.</li><li>Client-side validation is a UX feature — immediate feedback — not a security control.</li><li>The server must enforce input validation, price and permission rules, rate limits, and idempotency.</li><li>Hiding a button in the UI prevents accidents, not attacks; only the server can reliably deny the action.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Why centralize on the server</h2>
+<ul><li><strong>One source of truth:</strong> every device reads and writes the same data, so a task completed on a phone is not still pending on a laptop.</li><li><strong>Security control:</strong> sensitive data and operations stay on infrastructure you manage; a shipped app must never contain database credentials or private API keys.</li><li><strong>Easier maintenance:</strong> fix pricing logic once on the server and every client benefits, without shipping a new version.</li><li><strong>Consistent rules:</strong> permissions, fraud checks, and validation are applied uniformly instead of being reimplemented per client.</li><li><strong>Central audit and backup:</strong> access logs, retention, and recovery are possible when data lives in one governed place.</li><li><strong>Backward compatibility:</strong> old clients keep working as long as the API contract remains compatible.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Thin clients and thick clients</h2>
+<ul><li>A <strong>thin client</strong> does little local processing: it displays server output and forwards user actions.</li><li>A server-rendered website is thin — each click asks the server for a new page.</li><li>A <strong>thick client</strong> handles substantial logic locally, such as a single-page app or a video editor.</li><li>Thin clients are easier to maintain centrally and keep rules consistent, but many actions need a network round trip.</li><li>Thick clients feel faster and can work offline, but logic ships to every device and must stay in sync with the server.</li><li>Most applications mix both: local interaction and caching, with final authority on prices and permissions left to the server.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Thin client</th><th>Thick client</th></tr></thead><tbody><tr><td>Where logic runs</td><td>Mostly server</td><td>Mostly device</td></tr>
+<tr><td>Example</td><td>Server-rendered site</td><td>Single-page app, video editor</td></tr>
+<tr><td>Maintenance</td><td>Easier, centralized</td><td>Harder, every version ships</td></tr>
+<tr><td>Responsiveness</td><td>Depends on network round trips</td><td>Many actions are instant</td></tr>
+<tr><td>Offline behavior</td><td>Limited</td><td>Better</td></tr>
+<tr><td>Main risk</td><td>Network dependency</td><td>Logic and data drift from server</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Who starts the conversation: polling and WebSockets</h2>
+<p class="lede">In the basic model the client always initiates. That breaks down when the server has new information the client needs immediately, such as an incoming message.</p>
+<ul><li><strong>Polling</strong> has the client ask periodically, for example every few seconds.</li><li>Most polls return nothing, wasting bandwidth and server capacity, and updates wait up to one interval.</li><li><strong>Long polling</strong> holds the request open until data arrives or a timeout expires, reducing empty responses.</li><li><strong>WebSockets</strong> open a persistent bidirectional connection after a client handshake, so either side can send at any time.</li><li>Server-sent events are a one-way alternative for streams the client only needs to receive.</li><li>The client still initiates a WebSocket connection; the model remains client-server, but the server no longer waits for a request to push data.</li><li>Choose polling for infrequent updates and simple infrastructure; choose WebSockets for chat, presence, collaboration, and live dashboards.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Polling</th><th>WebSocket</th></tr></thead><tbody><tr><td>Direction</td><td>Client pulls repeatedly</td><td>Bidirectional after handshake</td></tr>
+<tr><td>Latency</td><td>Up to one polling interval</td><td>Immediate push</td></tr>
+<tr><td>Wasted requests</td><td>Many empty responses</td><td>Low</td></tr>
+<tr><td>Complexity</td><td>Low</td><td>Connection lifecycle, scaling, reconnect</td></tr>
+<tr><td>Best fit</td><td>Infrequent or tolerant updates</td><td>Real-time interaction</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Stateless and stateful servers</h2>
+<ul><li>A <strong>stateless server</strong> processes each request independently; the request carries the credentials and parameters needed.</li><li>A <strong>stateful server</strong> stores client-specific information between requests, such as a session or shopping cart in memory.</li><li>With multiple servers, local state forces subsequent requests to reach the same instance, which complicates routing.</li><li>If that instance crashes, the session is lost and the user may be logged out or lose a cart.</li><li>Stateless application servers let any instance serve any request, which makes load balancing, autoscaling, and rolling deploys simple.</li><li>Shared state belongs in an external database, cache such as Redis, or a signed token, not in process memory.</li><li>Stateless does not mean no state exists; it means state is not tied to a particular server instance.</li></ul>
+
+<div class="flow"><span class="flow-step">Client</span><span class="flow-arrow">→</span><span class="flow-step">Load balancer</span><span class="flow-arrow">→</span><span class="flow-step">Any app instance</span><span class="flow-arrow">→</span><span class="flow-step">Shared session store</span><span class="flow-arrow">→</span><span class="flow-step">Response</span></div>
+<div class="note">Sticky sessions are a middle ground: simple, but they create uneven load and break when the pinned server dies.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Tiers: one-tier and two-tier</h2>
+<ul><li>A <strong>tier</strong> is a layer with a clear job; tiers can be separate services or logical layers in one deployment.</li><li><strong>1-tier</strong> keeps interface, logic, and data on one machine, like a local spreadsheet or single-user desktop tool.</li><li>One-tier is simple, has no network dependency, and is easy to run, but cannot share data or scale to many users.</li><li><strong>2-tier</strong> has the client talk directly to a server, often a database server.</li><li>Two-tier is common for small internal tools on a trusted network and has few moving parts.</li><li>Every client needs database credentials, business logic is duplicated in each client, and a schema change breaks installed clients.</li><li>Two-tier is usually a poor fit for public internet-facing systems.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Tier</th><th>Structure</th><th>Main weakness</th></tr></thead><tbody><tr><td>1-tier</td><td>UI, logic, data on one machine</td><td>No sharing or scale</td></tr>
+<tr><td>2-tier</td><td>Client to database server directly</td><td>Credentials and logic in every client</td></tr>
+<tr><td>3-tier</td><td>Presentation, application, data</td><td>More moving parts and network calls</td></tr>
+<tr><td>N-tier</td><td>Additional edge, API, services, workers</td><td>Operational and debugging complexity</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Tiers: three-tier and n-tier</h2>
+<ul><li><strong>3-tier</strong> separates presentation (browser or app), application (business logic and auth), and data (database, cache, object storage).</li><li>The client never touches the database directly; it calls the application tier, which enforces permissions.</li><li>Each tier can be secured, scaled, tested, and deployed independently.</li><li>The cost is more moving parts, network latency, and the risk of chatty APIs that require many round trips.</li><li><strong>N-tier</strong> adds layers such as a CDN or WAF at the edge, an API gateway, separate domain services, and background workers.</li><li>Extra tiers let teams scale and own high-traffic components independently and isolate failures.</li><li>They also make tracing, debugging, and backward-compatible API contracts harder; add a tier only for a real requirement.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>The server as a single point of failure</h2>
+<ul><li>A central server is also a central failure: if the only instance crashes, every client is blocked.</li><li>Run multiple application instances behind a load balancer that routes only to healthy targets.</li><li>Use database replicas and failover so a primary failure does not stop writes indefinitely.</li><li>Replicate caches, load balancers, and queues too, or they become the new single point of failure.</li><li>Health checks and automated failover reduce recovery time, but they must be tested rather than assumed.</li><li>The architecture is still client-server; the server side becomes a group of machines presenting one logical service.</li><li>Redundancy costs money and adds consistency challenges, so apply it according to the availability target.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Component</th><th>Failure impact</th><th>Mitigation</th></tr></thead><tbody><tr><td>App server</td><td>Requests fail on that instance</td><td>Multiple instances and health-checked load balancing</td></tr>
+<tr><td>Primary database</td><td>Writes unavailable</td><td>Replica and tested failover</td></tr>
+<tr><td>Load balancer</td><td>All traffic blocked</td><td>Redundant load balancers or managed service</td></tr>
+<tr><td>Cache or queue</td><td>Latency spike or work stalls</td><td>Replication and graceful degradation</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Network latency and dependency</h2>
+<ul><li>Every request takes time to travel to the server, be processed, and return.</li><li>Geography matters: a user far from the server sees a larger round-trip time.</li><li>Sequential requests add up; five round trips of 250 ms each delay the screen by more than a second.</li><li>Losing connectivity can stop a client that depends entirely on the server.</li><li>Reduce round trips with a well-designed API that returns what a screen needs in one or two calls.</li><li>Use client caching for previously loaded data and a CDN for static assets closer to users.</li><li>Design offline and error states explicitly rather than assuming the network is always available.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Security and the trust boundary</h2>
+<ul><li>The client runs on a device the user controls, so the server must treat every request as potentially hostile.</li><li><strong>Authentication</strong> identifies the user, using a session cookie or token.</li><li><strong>Authorization</strong> checks that this user may perform this action on this resource; being signed in does not grant access to someone else's orders.</li><li><strong>Input validation</strong> on the server is mandatory even when the client already validated.</li><li><strong>Encryption in transit</strong> with HTTPS protects credentials and data from interception and tampering.</li><li>Apply rate limits and idempotency keys to limit abuse and accidental duplicate actions.</li><li>Never ship secrets, database credentials, or privileged API keys inside a client application.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Where you see it, and when it fits</h2>
+<ul><li>Websites are client-server: the browser requests, the web server responds.</li><li>Database access is client-server: the application is the client and the database is the server.</li><li>Email apps connect to mail servers to send and sync messages.</li><li>Backend services form chains: order calls payment, which calls fraud detection; each is a server for one call and a client for the next.</li><li>It fits when you need centralized data, shared business rules, and consistent access control across users and devices.</li><li>Its main costs are scaling the server side, central points of failure, and dependence on network latency and connectivity.</li><li>Monoliths, microservices, and serverless all build on this model; they differ mainly in how server-side responsibilities are organized and scaled.</li></ul>
+
+<div class="flow"><span class="flow-step">Client interaction</span><span class="flow-arrow">→</span><span class="flow-step">Request over network</span><span class="flow-arrow">→</span><span class="flow-step">Server enforces rules</span><span class="flow-arrow">→</span><span class="flow-step">Shared data access</span><span class="flow-arrow">→</span><span class="flow-step">Response</span><span class="flow-arrow">→</span><span class="flow-step">Client renders</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Centralization</strong> gives one source of truth and consistent rules but concentrates load, cost, and failure risk.</li><li><strong>Thin clients</strong> are easy to update centrally but depend on the network for nearly every action.</li><li><strong>Thick clients</strong> feel fast and work offline but duplicate logic and risk drifting from server rules.</li><li><strong>Stateless servers</strong> scale and deploy easily but require external state and an extra lookup per request.</li><li><strong>Stateful servers</strong> can be simpler and faster for a single instance but make routing, scaling, and failover harder.</li><li><strong>Polling</strong> is simple and stateless but wastes requests and adds update latency.</li><li><strong>WebSockets</strong> deliver real-time push but add connection management, scaling, and reconnect complexity.</li><li><strong>More tiers</strong> improve isolation and independent scaling but increase latency, cost, and debugging difficulty.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is client-server architecture?</summary><div class="answer"><p>A model that divides responsibilities between clients, which handle interaction and send requests, and servers, which own shared data, enforce business rules, and return responses. The two communicate over a network using an agreed protocol.</p></div></details>
+<details><summary>2. Walk through a request from browser to response.</summary><div class="answer"><p>DNS resolves the host, the client opens a TCP and TLS connection, sends an HTTP request, and the server authenticates, runs logic, and queries data. The server returns a status code and body, and the client renders or updates state.</p></div></details>
+<details><summary>3. What is the difference between a client and a server?</summary><div class="answer"><p>They are roles in a conversation, not fixed machine types. The client initiates a request; the server handles it. A payment service can be a server to checkout and a client when it calls fraud detection.</p></div></details>
+<details><summary>4. Why should the server never trust the client?</summary><div class="answer"><p>Because the client runs on a device the user controls, where code, requests, and stored values can be modified. The server must independently verify prices, validate input, and enforce permissions; client-side validation is only for UX.</p></div></details>
+<details><summary>5. How would you prevent a client from changing a product price?</summary><div class="answer"><p>Accept only the product ID and quantity, then look up the current price, apply server-side discounts, and compute the total on the server. Ignore any price supplied by the client and log the discrepancy.</p></div></details>
+<details><summary>6. Why centralize data and logic on a server?</summary><div class="answer"><p>It gives every device one source of truth, keeps sensitive data and credentials off user devices, and lets you fix or update rules once. It also makes permissions, auditing, and backup consistent.</p></div></details>
+<details><summary>7. Thin client versus thick client?</summary><div class="answer"><p>A thin client keeps most logic on the server and is easier to maintain, but needs round trips. A thick client processes locally for responsiveness and offline use, but ships logic to every device and must stay in sync with server rules.</p></div></details>
+<details><summary>8. How can the server push updates to a client?</summary><div class="answer"><p>Polling has the client ask repeatedly, which is simple but wasteful. Long polling holds a request open. WebSockets keep a persistent bidirectional connection so the server can push immediately. Server-sent events cover one-way streams.</p></div></details>
+<details><summary>9. Stateless versus stateful server?</summary><div class="answer"><p>A stateless server keeps no client state between requests, so any instance can serve any request. A stateful server keeps session data locally, which forces sticky routing and loses the session if that instance dies. Most systems externalize state and keep app servers stateless.</p></div></details>
+<details><summary>10. What are tiers, and what does 3-tier mean?</summary><div class="answer"><p>Tiers are layers with distinct responsibilities. Three-tier separates presentation, application logic and auth, and data storage. The client talks only to the application tier, so each tier can be secured, scaled, and deployed independently.</p></div></details>
+<details><summary>11. When would you use n-tier over 3-tier?</summary><div class="answer"><p>When scale, security, or team ownership justifies extra layers such as a CDN or WAF, API gateway, separate domain services, and background workers. Each layer adds operational and debugging cost, so add one only for a concrete requirement.</p></div></details>
+<details><summary>12. How do you remove the server as a single point of failure?</summary><div class="answer"><p>Run multiple application instances behind a health-checked load balancer, add database replicas with tested failover, and replicate caches, queues, and load balancers. The client still sees one logical service.</p></div></details>
+<details><summary>13. What are the main limitations of client-server?</summary><div class="answer"><p>Server-side scaling cost, centralized components becoming single points of failure, and dependence on network latency and connectivity. Redundancy, caching, CDNs, fewer round trips, and server-side security checks address them.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating client-side validation as a security control.</li><li>Shipping API keys or database credentials inside a mobile or web client.</li><li>Keeping sessions in process memory and then wondering why sticky routing is needed.</li><li>Assuming the server is one machine rather than a load-balanced fleet.</li><li>Using polling for real-time interaction and ignoring the wasted requests.</li><li>Adding tiers for their own sake and increasing latency without a requirement.</li><li>Forgetting that a WebSocket connection still begins with a client request.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="data-warehousing.html"><span>← Previous</span><strong>Data Warehousing</strong></a><a class="next" href="microservices-architecture.html"><span>Next →</span><strong>Microservices Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/client-server-architecture">AlgoMaster — Client-Server Architecture</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

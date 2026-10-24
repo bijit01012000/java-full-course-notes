@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What is an API? — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 14 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>What is an API?</h1>
+    <p class="dek">API Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>11</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/what-is-an-api">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why APIs exist</a>
+<a href="#s2">What an API is</a>
+<a href="#s3">The API contract</a>
+<a href="#s4">Clients and servers</a>
+<a href="#s5">Anatomy of an API request</a>
+<a href="#s6">API endpoints</a>
+<a href="#s7">Anatomy of an API response</a>
+<a href="#s8">APIs hide implementation details</a>
+<a href="#s9">Public, private, and partner APIs</a>
+<a href="#s10">What makes a good API</a>
+<a href="#s11">Evolving an API without breaking clients</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>An API is the contract that lets one piece of software call another: it fixes the operations, the data to send, and the response to expect, while hiding everything behind the boundary.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>API</dt><dd>Application Programming Interface: the defined way for one piece of software to communicate with another.</dd></div><div class="term"><dt>API contract</dt><dd>The agreed set of operations, input shapes, response shapes, and error behavior that clients can depend on.</dd></div><div class="term"><dt>Endpoint</dt><dd>A specific URL path plus HTTP method that a client calls to interact with a resource or trigger an operation.</dd></div><div class="term"><dt>HTTP method</dt><dd>The verb on a request (GET, POST, PUT, PATCH, DELETE) that tells the server what action is intended.</dd></div><div class="term"><dt>Header</dt><dd>Metadata sent with a request or response, such as <code>Authorization</code>, <code>Content-Type</code>, or <code>Cache-Control</code>.</dd></div><div class="term"><dt>Query parameter</dt><dd>Extra input appended to the URL after <code>?</code>, typically used for filtering, paging, or sorting.</dd></div><div class="term"><dt>Request body</dt><dd>The payload carrying the actual data for methods like POST, PUT, and PATCH, usually JSON.</dd></div><div class="term"><dt>Status code</dt><dd>A three-digit number in the response that classifies the outcome as success, client error, or server error.</dd></div><div class="term"><dt>Public API</dt><dd>An API exposed to external developers, which needs documentation, authentication, rate limits, and a compatibility plan.</dd></div><div class="term"><dt>Partner API</dt><dd>An API exposed only to selected external companies or business partners under a specific agreement.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why APIs exist</h2>
+<p class="lede">Almost every system is made of pieces of software that need to talk to each other. APIs are how they do it.</p>
+<ul><li>A food delivery app calls one API for nearby restaurants, another to place an order, another to take payment, and another to track delivery.</li><li>Each of those capabilities is owned by a different system, often a different team, with its own database and deployment.</li><li>The app does not need to know how any of those systems work internally; it only needs to know how to talk to them.</li><li>APIs are the <strong>seams</strong> of a system: they define where one component ends and the next begins.</li><li>As a product grows, the number of API calls per user action grows faster than the number of features.</li><li>Even a monolith benefits from internal APIs because they force explicit boundaries between modules.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What an API is</h2>
+<ul><li>An API defines how one piece of software can communicate with another; it is an <strong>interface</strong>, not an implementation.</li><li>It is not the same as a UI: a UI is for humans, an API is for other software, even when both sit on top of the same backend.</li><li>It is also not the same as a protocol. HTTP is a transport; an API is the contract carried over it.</li><li>The same contract can be exposed over different transports, such as HTTP for browsers and gRPC for internal services.</li><li>APIs are consumed by web apps, mobile apps, command-line tools, and other backend services alike.</li><li>The API is the product boundary: what callers can rely on, and what the owner promises to keep stable.</li></ul>
+
+
+<div class="note">A useful test: if you can replace the entire backend without changing a single client, the API boundary was real.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The API contract</h2>
+<p class="lede">At a high level, an API is a contract between two pieces of software. It tells the client what operations exist, what data to send, and what response to expect.</p>
+<ul><li>The contract names the <strong>operations</strong>: which actions a client is allowed to request.</li><li>It defines the <strong>input</strong>: required fields, types, formats, and which parts are optional.</li><li>It defines the <strong>output</strong>: the shape of the response and the meaning of each field.</li><li>It defines <strong>error behavior</strong>: which status codes and error bodies a client must handle.</li><li>A request such as <code>GET /users/123</code> might return <code>{"id": 123, "name": "Alice"}</code>, and the client may rely on exactly those field names.</li><li>The client does not know or care whether that user came from a database, a cache, or another service.</li><li>If the contract changes, every client that depended on it is at risk, which is why contracts are versioned and documented.</li></ul>
+
+
+<pre class="code"><code>GET /users/123 HTTP/1.1
+Host: api.example.com
+Authorization: Bearer &lt;token&gt;
+Accept: application/json
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{&quot;id&quot;: 123, &quot;name&quot;: &quot;Alice&quot;}</code></pre>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Clients and servers</h2>
+<ul><li>The <strong>client</strong> is the application that sends the request: a web app, mobile app, CLI, or another backend service.</li><li>The <strong>server</strong> receives the request, performs work, and sends back a response.</li><li>The client always initiates in a request-response API; the server cannot push uninvited (that needs WebSockets, SSE, or webhooks).</li><li>Roles are per interaction, not per process: a service is a server to its callers and a client to its own dependencies.</li><li>One user action can fan out into many internal calls, so the user-visible latency is the sum along the slowest chain.</li><li>Every network hop can fail independently, so the client needs timeouts and error handling for each call it makes.</li></ul>
+
+<div class="flow"><span class="flow-step">Client builds the request</span><span class="flow-arrow">→</span><span class="flow-step">Request crosses the network</span><span class="flow-arrow">→</span><span class="flow-step">Server authenticates and routes it</span><span class="flow-arrow">→</span><span class="flow-step">Server reads or writes data sources</span><span class="flow-arrow">→</span><span class="flow-step">Server returns a response</span><span class="flow-arrow">→</span><span class="flow-step">Client parses it or handles the error</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Anatomy of an API request</h2>
+<p class="lede">An HTTP API request has up to five parts. Not every request uses all of them, but they are the building blocks you will see repeatedly.</p>
+<ul><li>The <strong>HTTP method</strong> states the action: <code>POST</code> here means create or trigger processing.</li><li>The <strong>endpoint</strong> identifies the resource or operation, such as <code>/orders</code>.</li><li>The <strong>headers</strong> carry metadata: authentication, the format being sent, and the format expected back.</li><li>The <strong>query parameters</strong> add input to the URL, such as <code>?category=books&amp;limit=20</code>, and are typically used for filtering and paging.</li><li>The <strong>request body</strong> carries the actual payload for POST, PUT, and PATCH; a GET normally has none.</li><li>The same information can arrive in different places, so the contract must be explicit about where each field belongs.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Part</th><th>Purpose</th><th>Example</th></tr></thead><tbody><tr><td>HTTP method</td><td>The action the client wants</td><td>POST</td></tr>
+<tr><td>Endpoint</td><td>The resource or operation to access</td><td>/orders</td></tr>
+<tr><td>Headers</td><td>Extra information about the request</td><td>Authorization, Content-Type, Accept</td></tr>
+<tr><td>Query parameters</td><td>Extra input added to the URL</td><td>?category=books&limit=20</td></tr>
+<tr><td>Request body</td><td>The actual data being sent</td><td>JSON order</td></tr></tbody></table></div>
+
+<pre class="code"><code>POST /orders HTTP/1.1
+Host: api.example.com
+Authorization: Bearer &lt;token&gt;
+Content-Type: application/json
+
+{
+  &quot;restaurant_id&quot;: 42,
+  &quot;items&quot;: [{&quot;item_id&quot;: 101, &quot;quantity&quot;: 2}]
+}</code></pre>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>API endpoints</h2>
+<ul><li>An endpoint is a specific URL a client can call to interact with a resource or perform an operation.</li><li>The <strong>path</strong> usually identifies the resource; the <strong>method</strong> says what to do with it.</li><li><code>GET /users/123</code>, <code>PATCH /users/123</code>, and <code>DELETE /users/123</code> share a path but are different operations.</li><li>Endpoints are the entry points into a service; a real backend may expose dozens or hundreds of them.</li><li>Good endpoint naming is consistent and resource-oriented, so learning one part of the API teaches you the rest.</li><li>An endpoint is a public promise: renaming one is a breaking change for every client that calls it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>What it means</th></tr></thead><tbody><tr><td>GET /users/123</td><td>Fetch user 123</td></tr>
+<tr><td>POST /users</td><td>Create a new user</td></tr>
+<tr><td>PATCH /users/123</td><td>Update part of user 123</td></tr>
+<tr><td>DELETE /users/123</td><td>Remove that user</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Anatomy of an API response</h2>
+<ul><li>A response has a <strong>status code</strong>, <strong>headers</strong>, and optionally a <strong>body</strong>.</li><li>The status code is the machine-readable outcome; clients branch on it rather than parsing prose.</li><li>2xx means the request worked, 4xx means the client sent something the server could not accept, and 5xx means the server failed.</li><li>Headers add metadata such as <code>Content-Type</code> and caching directives like <code>Cache-Control</code>.</li><li>The body is optional: a successful <code>DELETE</code> may return only a status code with no body.</li><li>A success status with an ambiguous body is a bug; the code and body must agree.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Status code</th><th>Meaning</th></tr></thead><tbody><tr><td>200 OK</td><td>The request succeeded</td></tr>
+<tr><td>201 Created</td><td>A resource was created</td></tr>
+<tr><td>400 Bad Request</td><td>The request was invalid</td></tr>
+<tr><td>401 Unauthorized</td><td>Authentication is required</td></tr>
+<tr><td>404 Not Found</td><td>The resource was not found</td></tr>
+<tr><td>500 Internal Server Error</td><td>Something went wrong on the server</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>APIs hide implementation details</h2>
+<p class="lede">One client request can hide a cache lookup, a database query, a call to another service, and a machine learning model.</p>
+<ul><li>The client sees <code>GET /recommendations</code>; the backend may consult a cache, a database, a service, and a model.</li><li>Because none of that is in the contract, the backend can change storage, add caching, or split a service without touching clients.</li><li>This boundary reduces coupling and lets teams evolve and deploy independently.</li><li>The boundary is not absolute: latency, rate limits, and error modes still leak through and must be designed for.</li><li>Hiding internals does not mean hiding failure; the contract must still state what a timeout or partial failure looks like.</li><li>A leaky API exposes internal IDs, table names, or stack traces, which then become de facto contract.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Public, private, and partner APIs</h2>
+<ul><li><strong>Public APIs</strong> are exposed to external developers, such as a payments or maps provider.</li><li>Public APIs need clear documentation, authentication, rate limits, and a careful plan for non-breaking change.</li><li><strong>Private APIs</strong>, or internal APIs, are used only inside an organization, such as Order Service calling Inventory Service.</li><li>Internal does not mean informal: internal APIs still need owners, timeouts, stable shapes, and defined failure behavior.</li><li><strong>Partner APIs</strong> are exposed only to selected external companies or business partners.</li><li>The difference is about <strong>who may call it</strong>, not about the underlying technology.</li><li>In large systems most APIs are internal, because services constantly talk to other services behind the scenes.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Type</th><th>Audience</th><th>Main extra concern</th></tr></thead><tbody><tr><td>Public</td><td>Any external developer</td><td>Documentation, rate limits, compatibility guarantees</td></tr>
+<tr><td>Partner</td><td>Selected external companies</td><td>Contractual access, scoped credentials, onboarding</td></tr>
+<tr><td>Private</td><td>Teams inside the organization</td><td>Ownership, timeouts, failure behavior</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>What makes a good API</h2>
+<ul><li>It is <strong>easy to understand</strong>: consistent naming and structure make one part predict the next.</li><li>It is <strong>predictable</strong>: the same input produces the same shape of output and the same class of errors.</li><li>It is <strong>hard to misuse</strong>: required fields are explicit, invalid combinations are rejected, and defaults are safe.</li><li>It gives <strong>clear errors</strong>: the response says what was wrong and what to do, instead of leaving the client guessing.</li><li>It handles <strong>growth</strong>: pagination, filtering, and rate limits exist before the dataset is large.</li><li>It is <strong>documented</strong>, often with a machine-readable spec such as OpenAPI, so clients can generate code and tests.</li><li>It changes <strong>carefully</strong>: backward compatibility is treated as a promise, not an afterthought.</li></ul>
+
+
+<div class="note">A good API is a product with users. Its documentation, error messages, and deprecation policy are part of the interface.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Evolving an API without breaking clients</h2>
+<ul><li><strong>Additive changes</strong> are usually safe: new optional fields, new endpoints, new enum values that clients tolerate.</li><li><strong>Breaking changes</strong> include removing or renaming fields, changing types, tightening validation, and changing status-code semantics.</li><li>Version explicitly, either in the path (<code>/v2/users</code>) or in a header, so old and new clients can coexist.</li><li>Run an <strong>expand, migrate, contract</strong> sequence: add the new shape, move clients over, then remove the old one.</li><li>Announce deprecation with a timeline, emit warnings in responses, and monitor which clients still call the old surface.</li><li>Contract tests and a published schema catch accidental breakage before it reaches production.</li><li>Every version you keep alive is a maintenance cost, so version only when a compatible path is not possible.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Thin APIs</strong> are simple to learn but force clients into many round trips; <strong>rich APIs</strong> reduce calls but return data clients may not need.</li><li><strong>Fine-grained endpoints</strong> are reusable and cacheable but multiply network calls; <strong>coarse-grained endpoints</strong> cut latency but couple the response to one screen.</li><li><strong>Strict contracts</strong> make clients safe but slow the backend down; <strong>loose contracts</strong> move faster but break callers silently.</li><li><strong>Public APIs</strong> create an ecosystem but every change becomes a compatibility negotiation with strangers.</li><li><strong>Hiding implementation</strong> enables independent evolution but can hide latency and failure modes the client must still handle.</li><li><strong>Versioning</strong> protects existing clients but doubles the surface to test, document, and operate.</li><li><strong>Machine-readable specs</strong> improve tooling and validation but must be kept in sync with the real implementation.</li><li><strong>Detailed error bodies</strong> speed up debugging but can leak internal structure or sensitive data if not sanitized.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is an API in one sentence?</summary><div class="answer"><p>A defined interface that lets one piece of software communicate with another, specifying the available operations, the data to send, and the response to expect. It hides the implementation behind the boundary.</p></div></details>
+<details><summary>2. What is an API contract and why does it matter?</summary><div class="answer"><p>The contract is the set of operations, input shapes, output shapes, and error behavior clients can depend on. It matters because clients are written against it, so any change to it is a change to every caller.</p></div></details>
+<details><summary>3. What are the parts of an HTTP request?</summary><div class="answer"><p>Method, endpoint, headers, query parameters, and an optional body. The method is the action, the endpoint identifies the resource, headers carry metadata, and the body carries data for POST, PUT, or PATCH.</p></div></details>
+<details><summary>4. What is the difference between an endpoint and a resource?</summary><div class="answer"><p>A resource is the thing being manipulated, such as a user; an endpoint is a URL plus method through which you manipulate it. <code>GET /users/123</code> and <code>DELETE /users/123</code> target the same resource through different operations.</p></div></details>
+<details><summary>5. Why are status codes important?</summary><div class="answer"><p>They give the client a machine-readable outcome without parsing the body. 2xx means success, 4xx means the client must fix the request, and 5xx means the server failed and a retry may be reasonable.</p></div></details>
+<details><summary>6. How does an API hide implementation details?</summary><div class="answer"><p>The client only sees the request and response shape. Behind the boundary the server can query a database, check a cache, call another service, or run a model, and can change all of that without breaking callers as long as the contract holds.</p></div></details>
+<details><summary>7. What is the difference between public, private, and partner APIs?</summary><div class="answer"><p>The difference is the audience, not the technology. Public APIs are open to external developers, partner APIs to selected companies, and private APIs to teams inside the organization. Each audience implies different documentation, auth, and compatibility obligations.</p></div></details>
+<details><summary>8. Why do internal APIs still need to be well designed?</summary><div class="answer"><p>They are called by other teams and services that cannot see the implementation, so they need stable shapes, owners, timeouts, and defined failure behavior. Sloppy internal APIs create the same outages as sloppy public ones, with less documentation.</p></div></details>
+<details><summary>9. What makes an API hard to misuse?</summary><div class="answer"><p>Explicit required fields, safe defaults, validation that rejects contradictory input, clear errors, and idempotent operations where retries are likely. A caller should not be able to cause silent corruption with a plausible request.</p></div></details>
+<details><summary>10. What is a breaking change, and how do you avoid one?</summary><div class="answer"><p>Removing or renaming a field, changing a type, tightening validation, or changing status-code meaning breaks existing clients. Avoid it by making additive changes, versioning when necessary, and running expand-migrate-contract with a deprecation window.</p></div></details>
+<details><summary>11. How would you design an API for a mobile screen that needs user, profile, and recent orders?</summary><div class="answer"><p>Either provide a coarse endpoint for that screen, or expose separate resources and let the client compose them. A coarse endpoint cuts round trips on mobile but couples the API to one screen; separate resources are more reusable but add latency.</p></div></details>
+<details><summary>12. What is the difference between an API and a protocol?</summary><div class="answer"><p>A protocol defines how bytes move and how a conversation is framed, such as HTTP or TCP. An API defines what operations exist and what the data means. The same API contract can be served over HTTP, gRPC, or a message bus.</p></div></details>
+<details><summary>13. How do you know your API design is good?</summary><div class="answer"><p>New developers can predict the next endpoint, clients need few round trips, errors are self-explanatory, retries are safe, and the backend can change internals without client releases. Usage metrics and support tickets confirm it.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating the API as a thin wrapper over database tables, so internal schema changes leak into the public contract.</li><li>Using 200 OK for failures and putting the error only in the body, which breaks every standard client and monitor.</li><li>Returning internal identifiers, stack traces, or table names in error responses.</li><li>Adding required fields or tightening validation and calling it a compatible change.</li><li>Designing endpoints per screen so the API becomes a set of one-off RPC calls with no reusable resources.</li><li>Documenting the API only in prose, so the spec and the implementation drift apart.</li><li>Assuming an internal API needs no timeouts or failure contract because the caller is inside the company.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="checksums.html"><span>← Previous</span><strong>Checksums</strong></a><a class="next" href="api-styles.html"><span>Next →</span><strong>API Architectural Styles</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/what-is-an-api">AlgoMaster — What is an API?</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

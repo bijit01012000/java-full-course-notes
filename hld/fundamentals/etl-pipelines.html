@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ETL Pipelines — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 36 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>ETL Pipelines</h1>
+    <p class="dek">Big Data Processing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/etl-pipelines">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: data is scattered</a>
+<a href="#s2">Extract: get the data out without hurting the source</a>
+<a href="#s3">Transform: turn source rows into agreed business entities</a>
+<a href="#s4">Load: publish atomically and know what was written</a>
+<a href="#s5">ETL versus ELT</a>
+<a href="#s6">Batch versus streaming pipelines</a>
+<a href="#s7">Orchestration: who runs what, when, and what happens on failure</a>
+<a href="#s8">Idempotency: reruns must not corrupt the target</a>
+<a href="#s9">Data quality: define what correct means and enforce it</a>
+<a href="#s10">Backfills: repairing history without breaking trust</a>
+<a href="#s11">Observability and operations</a>
+<a href="#s12">Designing a pipeline in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>An ETL pipeline moves data from many source systems into one trusted analytical store by extracting changes, transforming them into agreed shapes, and loading them in a repeatable, monitored, and replayable way.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>ETL</dt><dd>Extract, Transform, Load — data is cleaned and shaped before it reaches the target analytical store.</dd></div><div class="term"><dt>ELT</dt><dd>Extract, Load, Transform — raw data lands first and transformations run inside the target warehouse or lakehouse.</dd></div><div class="term"><dt>Change data capture (CDC)</dt><dd>Reading a database's change log to capture inserts, updates, and deletes without repeatedly scanning the whole table.</dd></div><div class="term"><dt>Watermark</dt><dd>A stored marker, such as a timestamp or offset, that records how far a pipeline has successfully processed a source.</dd></div><div class="term"><dt>DAG</dt><dd>A directed acyclic graph of tasks with explicit dependencies, used by orchestrators to schedule and retry pipeline steps.</dd></div><div class="term"><dt>Idempotency</dt><dd>The property that rerunning the same task with the same input leaves the target in the same final state.</dd></div><div class="term"><dt>Backfill</dt><dd>Reprocessing historical partitions after a bug fix, schema change, or new metric is introduced.</dd></div><div class="term"><dt>Data quality gate</dt><dd>An automated check on schema, volume, freshness, or business rules that blocks publication of bad data.</dd></div><div class="term"><dt>Schema drift</dt><dd>An unannounced change in a source's columns, types, or semantics that breaks downstream assumptions.</dd></div><div class="term"><dt>Lineage</dt><dd>The recorded path from a source column through transformations to the reports and models that depend on it.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: data is scattered</h2>
+<p class="lede">The data a business needs is rarely in one place. Each source has its own format, identifiers, and definitions, and someone has to make them agree.</p>
+<ul><li>Orders live in an OLTP database, payments at a provider, tickets in a helpdesk, and clicks in an analytics tool.</li><li>Analysts cannot join across those systems by hand; exports are stale, inconsistent, and ungoverned.</li><li>Source systems are tuned for small transactional reads and writes, so heavy analytical scans must not run against them.</li><li>The same customer may appear as an internal ID in one system and an email or account number in another, so identity resolution is part of the job.</li><li>A pipeline is a product with an owner, a freshness SLA, tests, and documentation — not a one-off script.</li><li>The hard part is usually agreeing on definitions and handling change, not moving bytes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Extract: get the data out without hurting the source</h2>
+<p class="lede">Extraction reads from sources and lands the result in a staging area. Incremental extraction is preferred once a source is large.</p>
+<ul><li>A <strong>full extract</strong> reads the entire table; it is simple but cost grows with all history, not with new changes.</li><li>An <strong>incremental extract</strong> reads rows changed since a watermark using <code>updated_at</code>, a monotonic ID, or a stored offset.</li><li><strong>CDC</strong> reads the database log to capture inserts, updates, and deletes with far less query load than repeated scans.</li><li>API sources need pagination, rate-limit backoff, retries, and a checkpoint of the last page or cursor.</li><li>File drops should be landed untouched in a raw zone first, then parsed, so a bad parse never destroys the original.</li><li>Record extraction metadata — source, extraction time, cursor, and row count — so any run can be audited or repeated.</li><li>Late-arriving and out-of-order records are normal; extraction must not assume a complete, ordered stream.</li></ul>
+
+
+<div class="note">Deletes are the classic gap. A timestamp-based extract sees updates but not rows that vanished, so CDC or a periodic reconciliation is needed.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Transform: turn source rows into agreed business entities</h2>
+<ul><li>Parse and cast types, normalize timestamps to UTC, and standardize currencies, units, and encodings.</li><li>Clean: quarantine malformed rows, handle nulls explicitly, and deduplicate on a defined business key.</li><li>Conform: rename to standard columns, map source codes to shared dimensions, and resolve entities across systems.</li><li>Enrich with reference data, geographic lookups, or derived measures such as margin, duration, or session count.</li><li>Aggregate to the grain the consumer needs — for example order level for finance and daily-per-region for a dashboard.</li><li>Keep business rules in one versioned place so every report uses the same definition of active customer or revenue.</li><li>Transformations should be deterministic and unit-tested: identical input must produce identical output.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Load: publish atomically and know what was written</h2>
+<ul><li>A <strong>full refresh</strong> replaces the target table; it is easy to reason about but expensive and briefly inconsistent.</li><li>An <strong>incremental load</strong> appends new rows or merges changes by key, which is cheaper but requires a trustworthy key.</li><li><strong>Upsert or MERGE</strong> matches on a key and updates or inserts; deduplicate the batch first or the merge becomes ambiguous.</li><li>Partition the target by date or tenant and replace only the affected partitions to make reruns cheap.</li><li>Load inside a transaction or swap a partition atomically so consumers never see half a batch.</li><li>Publish only after quality checks pass; on failure keep the previous good version and mark the new partition failed.</li><li>Write an audit row per batch with batch ID, row counts, and timestamps so source and target can be reconciled.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>ETL versus ELT</h2>
+<p class="lede">The difference is where the transformation compute runs and whether raw data is preserved in the target.</p>
+<ul><li><strong>ETL</strong> transforms in a separate engine before loading, so the warehouse receives only curated data.</li><li><strong>ELT</strong> loads raw data into a scalable warehouse or lakehouse, then transforms it with SQL in place.</li><li>ETL fits strict target schemas, limited target compute, legacy warehouses, and data that must be masked before landing.</li><li>ELT fits cheap scalable storage and compute, fast iteration, and teams that want raw history available for reprocessing.</li><li>ELT keeps the ability to derive new metrics from history; ETL may discard the intermediate detail that would enable it.</li><li>Real pipelines often blend the two: extract to staging, transform in the warehouse, then publish curated marts.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Dimension</th><th>ETL</th><th>ELT</th></tr></thead><tbody><tr><td>Transformation runs</td><td>In a separate processing engine</td><td>Inside the warehouse or lakehouse</td></tr>
+<tr><td>Target receives</td><td>Curated, modeled data</td><td>Raw data first, then modeled data</td></tr>
+<tr><td>Raw history</td><td>Often discarded</td><td>Preserved for replay and new metrics</td></tr>
+<tr><td>Best fit</td><td>Strict schemas, limited target compute, pre-load masking</td><td>Scalable compute, rapid iteration, SQL-first teams</td></tr>
+<tr><td>Main risk</td><td>Bottleneck in the ETL engine; late schema feedback</td><td>Uncontrolled raw sprawl and warehouse cost</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Batch versus streaming pipelines</h2>
+<ul><li><strong>Batch</strong> processes bounded chunks on a schedule: high throughput, simple recovery, latency in minutes or hours.</li><li><strong>Streaming</strong> processes unbounded events continuously: low latency, but needs watermarks, state, and careful delivery semantics.</li><li><strong>Micro-batch</strong> is the compromise — small, frequent batches with batch-style recovery and near-real-time latency.</li><li>Choose batch when the consumer makes daily or hourly decisions; choose streaming when a decision expires in seconds.</li><li>Every streaming pipeline still needs a batch or replay path for backfills; reprocessing a whole event log is expensive.</li><li>A <strong>Lambda</strong> design keeps batch and speed paths; a <strong>Kappa</strong> design keeps one stream path and relies on replayable storage.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Batch</th><th>Streaming</th></tr></thead><tbody><tr><td>Input</td><td>Bounded files or table slices</td><td>Unbounded event stream</td></tr>
+<tr><td>Latency</td><td>Minutes to hours</td><td>Seconds or less</td></tr>
+<tr><td>Recovery</td><td>Rerun the batch</td><td>Resume from checkpoint or replay</td></tr>
+<tr><td>Main complexity</td><td>Scheduling and backfills</td><td>State, watermarks, ordering, exactly-once</td></tr></tbody></table></div>
+
+<div class="note">Do not choose streaming because it sounds modern. If the dashboard is read every morning, a nightly batch is cheaper and easier to operate.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Orchestration: who runs what, when, and what happens on failure</h2>
+<ul><li>Model the pipeline as a <strong>DAG</strong> with explicit dependencies instead of a chain of cron jobs.</li><li>The orchestrator handles scheduling, retries, alerts, concurrency limits, and run history.</li><li>Trigger on time, on upstream data arrival, or on an event; time-only triggers silently process missing data.</li><li>Keep tasks small and restartable so a failure reruns one step rather than the whole pipeline.</li><li>Use bounded retries with backoff; endless retries hide a broken source and burn capacity.</li><li>Define SLAs and alert on duration, freshness, and row counts — not just on task failure.</li><li>Pass run metadata such as batch ID and partition through tasks so every output is traceable.</li></ul>
+<h3>Backpressure and dependencies</h3>
+<ul><li>If a source is late, wait on a data sensor rather than running on an empty partition.</li><li>Cap concurrent backfills so they do not starve the daily run of source or warehouse capacity.</li><li>A downstream task should fail fast when its upstream partition is missing or failed.</li></ul>
+
+
+
+<div class="flow"><span class="flow-step">Extract</span><span class="flow-arrow">→</span><span class="flow-step">Land raw</span><span class="flow-arrow">→</span><span class="flow-step">Validate schema</span><span class="flow-arrow">→</span><span class="flow-step">Transform</span><span class="flow-arrow">→</span><span class="flow-step">Quality gate</span><span class="flow-arrow">→</span><span class="flow-step">Load and publish</span><span class="flow-arrow">→</span><span class="flow-step">Notify and record audit</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Idempotency: reruns must not corrupt the target</h2>
+<p class="lede">Networks time out, workers die, and orchestrators retry. A pipeline that appends on every attempt will duplicate data.</p>
+<ul><li>A task is <strong>idempotent</strong> if rerunning it with the same input leaves the same final state.</li><li>Append-only loads duplicate rows on retry; use a merge key or delete-and-reinsert for the affected partition.</li><li>Write to a temporary location and atomically rename or swap the partition only after success.</li><li>Carry a deterministic batch ID and deduplicate on an event ID or on <code>(source, key, event_time)</code>.</li><li>Use transactional table formats that support <code>MERGE</code>, snapshot isolation, and safe concurrent writes.</li><li>Store processed offsets or watermarks in the same transaction as the output when the store allows it.</li><li>End-to-end exactly-once is rare; at-least-once delivery plus idempotent writes is the practical target.</li></ul>
+
+
+<pre class="code"><code>-- Idempotent upsert keyed by order_id
+MERGE INTO curated.orders AS t
+USING staged.orders_batch AS s
+  ON t.order_id = s.order_id
+WHEN MATCHED AND s.updated_at &gt; t.updated_at THEN UPDATE SET *
+WHEN NOT MATCHED THEN INSERT *;</code></pre>
+<div class="note">Deleting and reloading a whole partition is also idempotent and often simpler than a complex merge — if the partition is small enough.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Data quality: define what correct means and enforce it</h2>
+<ul><li>Check <strong>schema</strong>: required columns exist, types match, and unexpected columns are flagged.</li><li>Check <strong>business rules</strong>: amounts are non-negative, statuses are in the allowed set, dates are plausible.</li><li>Check <strong>volume</strong>: row counts fall within an expected band relative to previous runs and source counts.</li><li>Check <strong>freshness</strong>: the latest event timestamp is recent enough for the promised SLA.</li><li>Check <strong>uniqueness and referential integrity</strong> on keys before any merge or join.</li><li>Quarantine bad rows with a reason and a link back to the source instead of dropping them silently.</li><li>Fail the publish step on critical checks and warn on non-critical ones; review expectations when a source changes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Backfills: repairing history without breaking trust</h2>
+<ul><li>A <strong>backfill</strong> reprocesses historical partitions after a bug fix, schema change, or new metric.</li><li>Design the pipeline to be partition-addressable so a date range can be rerun independently of today's run.</li><li>Bound concurrency and run backfills off-peak; they compete for source, network, and warehouse capacity.</li><li>Replace affected partitions rather than appending, or the backfill doubles the history.</li><li>Version transformation logic so old and new outputs are distinguishable during the transition.</li><li>Reconcile row counts and spot-check results before swapping backfilled data into production.</li><li>Record the backfill in the audit log; silent historical rewrites destroy confidence in every dashboard.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Observability and operations</h2>
+<ul><li>Monitor at three levels: infrastructure, task execution, and the data itself.</li><li>Log rows in and out per stage; a sudden drop is often the first sign of a broken source or filter.</li><li>Track lineage from source column to report so impact analysis is possible when a source changes.</li><li>Alert a named owner with a runbook; alerts without an owner are eventually ignored.</li><li>Route repeatedly failing records to a dead-letter table or quarantine for inspection and replay.</li><li>Run reconciliation jobs that compare source and target totals for critical entities such as payments.</li><li>Treat runtime and cost as operational metrics; a pipeline that finishes after its SLA has failed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Designing a pipeline in an interview</h2>
+<ul><li>Start from the consumer: what question, what freshness, what grain, and how much history is needed.</li><li>Inventory sources by volume, change rate, access method, and whether deletes matter.</li><li>Choose ingestion per source — CDC, API, or file drop — instead of forcing one pattern everywhere.</li><li>Decide ETL versus ELT based on where compute and governance already live.</li><li>Define the output contract: schema, keys, partitioning, freshness SLA, and quality thresholds.</li><li>Build idempotency, backfill, and quality gates into the first version; they are not later polish.</li></ul>
+
+<div class="flow"><span class="flow-step">Consumers and questions</span><span class="flow-arrow">→</span><span class="flow-step">Sources and change patterns</span><span class="flow-arrow">→</span><span class="flow-step">Ingestion mode</span><span class="flow-arrow">→</span><span class="flow-step">Transform and model</span><span class="flow-arrow">→</span><span class="flow-step">Quality gates</span><span class="flow-arrow">→</span><span class="flow-step">Publish and monitor</span></div>
+<div class="note">State the freshness requirement early. It determines batch versus streaming, cost, and most of the operational complexity.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Incremental extraction</strong> lowers source load and runtime but depends on reliable watermarks and must handle late or deleted rows.</li><li><strong>CDC</strong> captures deletes and near-real-time changes but adds log access, connector operations, and schema-evolution work.</li><li><strong>ELT</strong> preserves raw history and speeds iteration but can create raw sprawl and uncontrolled warehouse compute cost.</li><li><strong>ETL</strong> gives tight control and pre-load masking but adds a separate engine and delays feedback from the target.</li><li><strong>Streaming</strong> reduces latency but multiplies complexity through state, watermarks, ordering, and replay.</li><li><strong>Full refresh</strong> is simple and self-correcting but becomes expensive and slow as history grows.</li><li><strong>MERGE-based loads</strong> avoid duplicates but need a stable key and can be costly on large targets.</li><li><strong>Strict quality gates</strong> protect consumers but can block a business-critical report when the source is late.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is an ETL pipeline?</summary><div class="answer"><p>A pipeline that extracts data from source systems, transforms it into a consistent modeled form, and loads it into a target such as a warehouse or mart. It exists so analytical consumers get one trustworthy, queryable view instead of stitching together exports.</p></div></details>
+<details><summary>2. Walk me through the three stages.</summary><div class="answer"><p>Extract reads source data, preferably incrementally, and lands it in staging. Transform cleans, conforms, enriches, and aggregates it to the required grain. Load writes it to the target atomically and records audit metadata. Orchestration, quality checks, and monitoring wrap all three.</p></div></details>
+<details><summary>3. ETL versus ELT — how do you choose?</summary><div class="answer"><p>Choose based on where compute and governance live. ETL when the target is expensive or constrained, the schema is strict, or sensitive data must be masked before landing. ELT when storage and compute scale cheaply, raw history is valuable, and the team iterates in SQL.</p></div></details>
+<details><summary>4. How do you extract only changes?</summary><div class="answer"><p>Use an <code>updated_at</code> watermark, a monotonic ID, or CDC from the database log. APIs need cursor-based pagination and checkpointing. Whatever the method, handle late-arriving rows and deletes, and store the watermark durably.</p></div></details>
+<details><summary>5. Why is CDC better than polling a table?</summary><div class="answer"><p>CDC reads the log rather than scanning the table, so it adds little query load, captures deletes, and sees changes close to real time. The cost is connector infrastructure and careful handling of schema changes and log retention.</p></div></details>
+<details><summary>6. What does idempotent mean for a pipeline and why does it matter?</summary><div class="answer"><p>Rerunning a task with the same input produces the same final state. It matters because retries, timeouts, and worker crashes are normal; without idempotency, every retry risks duplicate or partially written data.</p></div></details>
+<details><summary>7. How do you make a load idempotent?</summary><div class="answer"><p>Use a deterministic batch key and deduplicate before writing, then MERGE on a stable key or delete and replace the affected partition. Write to a temp location and swap atomically, and store the processed offset in the same transaction when possible.</p></div></details>
+<details><summary>8. Batch or streaming — what decides it?</summary><div class="answer"><p>The freshness the consumer actually needs. Daily decisions fit batch. If a fraud block or live dashboard must react in seconds, stream. Streaming brings state, watermark, ordering, and replay complexity, so do not pay for it without a latency requirement.</p></div></details>
+<details><summary>9. How do you handle a bad batch?</summary><div class="answer"><p>Fail the quality gate before publishing, keep the previous good partition live, quarantine bad rows with reasons, and alert the owner. Fix the cause, then rerun only the affected partition idempotently and reconcile counts.</p></div></details>
+<details><summary>10. What is a backfill and how do you run one safely?</summary><div class="answer"><p>Reprocessing historical partitions after a logic or schema change. Make partitions addressable, limit concurrency, replace rather than append, reconcile against source totals, and record the operation in the audit log.</p></div></details>
+<details><summary>11. How do you detect schema drift?</summary><div class="answer"><p>Validate incoming schema against a registered contract, compare column sets and types run over run, and fail or quarantine unexpected changes. Alert on new nullable columns and on type widening before downstream models break.</p></div></details>
+<details><summary>12. What would you monitor for a pipeline?</summary><div class="answer"><p>Task success and duration, freshness, row counts in and out, duplicate rates, quality-check results, queue or lag depth, and cost. Alert on data anomalies, not only on job failures.</p></div></details>
+<details><summary>13. Design a pipeline that loads orders from three systems into one revenue report.</summary><div class="answer"><p>Extract with CDC or incremental API pulls into a raw zone, standardize currency and timestamps, resolve customer and order identity, deduplicate on order ID, then build a fact table at order grain with conformed date and customer dimensions. Gate on completeness and reconciliation, publish atomically, and keep a replayable raw layer for backfills.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Appending on every retry and calling the pipeline reliable.</li><li>Using a timestamp watermark without handling late-arriving rows or deletes.</li><li>Choosing streaming when the consumer only needs a daily refresh.</li><li>Transforming only in a script with no version control, tests, or lineage.</li><li>Skipping quality gates so bad data reaches dashboards and looks authoritative.</li><li>Running a backfill at full concurrency against a production source.</li><li>Assuming the source schema will never change, then silently dropping new columns.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="batch-vs-stream-processing.html"><span>← Previous</span><strong>Batch vs Stream Processing</strong></a><a class="next" href="mapreduce.html"><span>Next →</span><strong>MapReduce</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/etl-pipelines">AlgoMaster — ETL Pipelines</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JWT vs Server-side Sessions — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 23 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · Security</span></div>
+    <h1>JWT vs Server-side Sessions</h1>
+    <p class="dek">Authentication appears in almost every system-design prompt, and the JWT-versus-session choice exposes whether you understand revocation, token storage, and browser threat models. Interviewers probe for a defensible default and a hybrid, not a slogan.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Default to server-side sessions for a first-party app, use short-lived JWTs when many services must verify identity locally, and keep refresh tokens opaque, rotated, and revocable.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Log a user in with credentials or an OIDC provider and issue a credential for subsequent requests.</li><li>Authenticate API calls and enforce scopes or roles per endpoint.</li><li>Refresh an expired access credential without forcing the user to log in again.</li><li>Log out one device or all devices, and revoke access after a password change or role change.</li><li>Support multiple services verifying identity without a per-request call to the auth service.</li><li>Rotate signing keys and publish the current public keys for verifiers.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Access-token lifetime is short, on the order of minutes, to bound the damage from theft.</li><li>Revocation takes effect within a defined window, and high-risk actions check current state and fail closed.</li><li>The auth service stays off the hot path for normal API calls.</li><li>Tokens are protected against XSS and CSRF according to the client type.</li><li>Signing keys rotate without breaking verification, with old keys kept until their tokens expire.</li><li>Auth failures return 401 and authorization failures return 403, with no token material in logs.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 5M monthly users and 20M API requests/day: about 230 average RPS, with peaks several times higher.</li><li>Fifteen-minute access tokens mean at most 96 refreshes per continuously active user per day, far below request volume.</li><li>A 1 KB JWT travels on every request; at 1k RPS that is about 1 MB/s of extra header traffic, so keep claims small.</li><li>An opaque session lookup in Redis adds a sub-millisecond store hop but makes that store a shared dependency on every authenticated request.</li><li>A deny-list check at 1k RPS needs a highly available store; reserve it for high-risk actions rather than every read.</li><li>Refresh tokens live for days to weeks and are tracked server-side, so storage grows with active devices rather than request rate.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">User</span><span class="fields">user_id, email, password_hash, token_version, status</span></div><div class="entity"><span class="name">Session</span><span class="fields">session_id, user_id, device_id, created_at, last_seen_at, expires_at, ip, user_agent</span></div><div class="entity"><span class="name">RefreshToken</span><span class="fields">token_hash, session_id, family_id, expires_at, rotated_at, revoked_at, reuse_detected</span></div><div class="entity"><span class="name">SigningKey</span><span class="fields">kid, alg, public_key, private_key_ref, status, not_before, retire_at</span></div><div class="entity"><span class="name">RevocationEntry</span><span class="fields">jti, user_id, expires_at, reason</span></div><div class="entity"><span class="name">ClientApp</span><span class="fields">client_id, client_type, redirect_uris, allowed_scopes</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/auth/login</code></td><td>Verify credentials and create a session or an access and refresh token pair.</td></tr><tr><td><code>POST</code></td><td><code>/v1/auth/refresh</code></td><td>Rotate the refresh token and issue a new short-lived access token.</td></tr><tr><td><code>POST</code></td><td><code>/v1/auth/logout</code></td><td>Revoke the current session or the entire refresh-token family.</td></tr><tr><td><code>GET</code></td><td><code>/v1/auth/me</code></td><td>Return the authenticated principal from a verified token or session.</td></tr><tr><td><code>GET</code></td><td><code>/.well-known/jwks.json</code></td><td>Publish current and overlapping public keys selected by kid.</td></tr><tr><td><code>POST</code></td><td><code>/v1/auth/revoke</code></td><td>Revoke all sessions for a user after a password change or suspected compromise.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Default credential for first-party web</td><td>Server-side session with an opaque ID in a Secure, HttpOnly, SameSite cookie</td><td>The server can revoke it instantly and reason about it centrally, which is simpler than token revocation for a single application.</td></tr><tr><td>Access token format</td><td>Short-lived JWT with minimal claims: sub, iss, aud, exp, iat, jti, tenant, and scopes</td><td>Many services can verify it locally without an auth-service call, while the short lifetime bounds the revocation gap.</td></tr><tr><td>Refresh token</td><td>An opaque random value, hashed at rest, tracked per device, and rotated on every use with reuse detection</td><td>The auth server can revoke it, bind it to a device, and detect a stolen token when an old value is replayed.</td></tr><tr><td>Revocation</td><td>Per-user token_version for global invalidation plus a jti deny list only for high-risk or immediate cases</td><td>Normal reads stay stateless, while a role change, logout-all, or compromise can still invalidate tokens quickly.</td></tr><tr><td>Signing and key distribution</td><td>RS256 or ES256 with a kid header and a cached JWKS endpoint; overlap old and new keys during rotation</td><td>Verifiers can check tokens without holding a signing secret, and rotation does not require a synchronized redeploy.</td></tr><tr><td>Browser storage</td><td>Access token in memory and refresh token in a Secure, HttpOnly, SameSite cookie with CSRF protection</td><td>This keeps the long-lived credential away from JavaScript while reducing, not eliminating, both XSS and CSRF exposure.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  U[📱 Client] -->|login| A[🔑 Auth Service]
+  A --> DB[(🗄️ User Store)]
+  A --> R[⚡ Session and Refresh Store]
+  A -->|short-lived JWT| U
+  U -->|Bearer JWT| G[🛡️ API Gateway]
+  G --> V[✅ Token Verifier]
+  V --> K[🗝️ JWKS Cache]
+  V --> S[⚙️ Resource Service]
+  G -.->|opaque session| R
+  A -->|rotate keys| K
+  L[📊 Auth Audit Log] --> A
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef service fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef data fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef ops fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class U client;
+  class G,V,K edge;
+  class A,S service;
+  class DB,R data;
+  class L ops;</div><div class="diagram-caption">A hybrid design issues a short-lived JWT for API calls, keeps the refresh and optional session state server-side, and lets the edge verify tokens locally from a cached JWKS.</div></div>
+        <ul><li>Verify the signature and then iss, aud, exp, and nbf with a small clock skew; a valid signature alone is not authentication.</li><li>Allowlist algorithms server-side and never let the alg header choose the verification method.</li><li>Cache JWKS by kid, refresh on an unknown kid with rate limiting, and keep old keys until their tokens have expired.</li><li>Treat claims as a snapshot: role changes need a token version bump or a server-side check for privileged actions.</li><li>Do not log Authorization headers, and keep access tokens out of URLs, analytics events, and crash reports.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Server-side sessions</td><td>Instant revocation and a simple, centralized model.</td><td>A shared session-store lookup on every request and another store to scale and keep available.</td></tr><tr><td>Stateless JWTs</td><td>Local verification with no auth-service hop on the hot path.</td><td>Revocation is hard and claims go stale until the token expires.</td></tr><tr><td>Short access-token lifetimes</td><td>A stolen token has a small usable window.</td><td>More refresh traffic and a dependency on the auth server for renewal.</td></tr><tr><td>Asymmetric signing</td><td>Many verifiers can check tokens without being able to mint them.</td><td>More CPU and the JWKS and key-rotation machinery.</td></tr><tr><td>Symmetric signing</td><td>Simple and fast, with one shared secret.</td><td>Every verifier holds the signing secret, so one compromised service can forge tokens for all.</td></tr><tr><td>HTTP-only cookies</td><td>JavaScript cannot read the credential after an XSS bug.</td><td>The browser sends it automatically, so CSRF protection is required.</td></tr><tr><td>Local storage for tokens</td><td>Easy to use with an Authorization header and no CSRF exposure.</td><td>Any XSS bug becomes full token theft.</td></tr><tr><td>Deny list or token version</td><td>Immediate revocation for high-risk cases.</td><td>Reintroduces the per-request state lookup that JWTs were meant to remove.</td></tr></tbody></table></div>
+        <ul><li>Keep access tokens short-lived and refresh tokens long-lived, opaque, and rotated.</li><li>Verify JWTs locally at the edge and cache the JWKS to avoid an auth-service call per request.</li><li>Store minimal stable claims and fetch volatile profile data from a cache or service.</li><li>Use a session lookup only where immediate revocation matters, and keep that store highly available.</li><li>Enable refresh-token reuse detection to revoke an entire token family on theft.</li><li>Bind refresh tokens to a device and support revoke-all on password change.</li><li>Reuse TLS connections and HTTP/2 to amortize authentication overhead.</li><li>Use separate signing keys and issuers per environment so a staging token cannot work in production.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>What problem does a JWT solve?</strong> It carries signed claims that many services can verify locally without a central session lookup, but it is a token format rather than an authentication protocol.</div><div class="followup"><strong>When would you choose sessions over JWTs?</strong> For a first-party app or monolith where immediate revocation matters and no third party needs to verify tokens, sessions are simpler and easier to invalidate.</div><div class="followup"><strong>What are the three parts of a JWT?</strong> Header, payload, and signature, each Base64URL-encoded and joined by dots, where the signature covers the encoded header and payload.</div><div class="followup"><strong>Is a JWT encrypted?</strong> Normally no, it is only signed and encoded, so anyone holding it can read the claims and no secret or sensitive personal data belongs in the payload.</div><div class="followup"><strong>HS256 versus RS256?</strong> HS256 shares one secret between issuer and verifier, while RS256 or ES256 lets many services verify with a public key without the ability to mint tokens.</div><div class="followup"><strong>How does a service verify a token from another service?</strong> It fetches and caches the issuer's JWKS, selects the key by kid, verifies the signature, and then checks exp, iss, aud, and the required scopes.</div><div class="followup"><strong>How does key rotation work without breaking clients?</strong> Publish the new public key, start signing with the new private key, keep the old key until all tokens it signed have expired, then remove it.</div><div class="followup"><strong>Why split access and refresh tokens?</strong> The short-lived access token limits theft, while the long-lived refresh token is sent only to the auth server and can be tracked, rotated, and revoked.</div><div class="followup"><strong>Where should a browser store a JWT?</strong> A common pattern is a short-lived access token in memory plus a refresh token in a Secure, HttpOnly, SameSite cookie, with CSRF protection.</div><div class="followup"><strong>How do you revoke a JWT before it expires?</strong> Use short lifetimes and refresh-token revocation for routine logout, plus a jti deny list or per-user token version for immediate cases.</div><div class="followup"><strong>Which claims must an API validate?</strong> Signature first, then exp and nbf with a small skew, iss against the expected issuer, aud against this API, and finally the scopes the operation requires.</div><div class="followup"><strong>What is the algorithm-confusion attack?</strong> An attacker sets alg to HS256 and signs a forged token using the issuer's public key as the HMAC secret, so verifiers must allowlist algorithms and never use a public key as an HMAC key.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Treating a signed JWT as encrypted and putting secrets or sensitive personal data in the payload.</li><li>Validating only the signature and skipping iss, aud, and expiry checks.</li><li>Trusting the alg header or accepting alg none and RS256-to-HS256 confusion.</li><li>Issuing long-lived access tokens so a stolen token stays usable for days.</li><li>Accepting an OIDC ID token as an API access token.</li><li>Putting roles in the token and expecting permission changes to take effect immediately.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="search-typeahead.html"><span>← Previous</span><strong>Search and Typeahead</strong></a><a class="next" href="tls-mtls.html"><span>Next →</span><strong>TLS and mTLS</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

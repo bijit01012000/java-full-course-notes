@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Types of System Design Questions — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Introduction</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Types of System Design Questions</h1>
+    <p class="dek">Identify the question type before you design. The same 45 minutes buys very different depth depending on what the interviewer is testing.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>4</strong> question types</span>
+      <span class="pill">6 technical challenge groups</span>
+      <span class="pill">Interview-oriented</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/question-types">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#why">Why the type matters</a>
+      <a href="#product">Product design</a>
+      <a href="#infra">Infrastructure design</a>
+      <a href="#api">API / product architecture</a>
+      <a href="#data">Data processing</a>
+      <a href="#groups">Grouping by technical challenge</a>
+      <a href="#directions">Same question, different directions</a>
+      <a href="#rounds">Other interview rounds</a>
+      <a href="#identify">How to identify the type</a>
+      <a href="#checklist">What to prioritize</a>
+      <a href="#traps">Traps</a>
+    </nav>
+
+    <main>
+      <div class="one-liner">
+        <span class="label">The interview lens</span>
+        “Design Instagram” and “Design a rate limiter” are both system design questions, but they reward different behaviour. Scope first, then choose where to spend your depth.
+      </div>
+
+      <dl class="key-terms">
+        <div class="term"><dt>Product design</dt><dd>Design a user-facing application end to end after narrowing the feature scope.</dd></div>
+        <div class="term"><dt>Infrastructure design</dt><dd>Build one shared component — cache, queue, rate limiter, KV store — that other services depend on.</dd></div>
+        <div class="term"><dt>API / product architecture</dt><dd>Focus on endpoints, request/response contracts, data models, and client interaction.</dd></div>
+        <div class="term"><dt>Data processing</dt><dd>Ingest, transform, and serve large event streams accurately and reliably.</dd></div>
+        <div class="term"><dt>Technical challenge</dt><dd>A reusable problem shape — real-time, location, feed, media, search, transactional.</dd></div>
+        <div class="term"><dt>Scope</dt><dd>The features and constraints you explicitly include or exclude before designing.</dd></div>
+      </dl>
+
+      <section class="section-block" id="why">
+        <h2><span class="n">01</span>Why the question type matters</h2>
+        <p class="lede">Most interviews follow the same format — a short prompt and about 45 minutes — but the skills being tested change with the question.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Type</th><th>Sounds like</th><th>Main focus</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Product design</strong></td><td>“Design Twitter,” “Design Uber”</td><td>Narrow scope, then design the full application end to end</td></tr>
+            <tr><td><strong>Infrastructure design</strong></td><td>“Design a rate limiter,” “Design a KV store”</td><td>Make one shared component efficient and reliable at scale</td></tr>
+            <tr><td><strong>API / product architecture</strong></td><td>“Design a comment system”</td><td>Endpoints, contracts, data model, client interaction</td></tr>
+            <tr><td><strong>Data processing</strong></td><td>“Design an ad click aggregator”</td><td>Process large event streams accurately, including failures</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li><strong>Product design:</strong> a rate-limiter answer would waste time on “features,” while an Instagram answer without scope would never finish.</li>
+          <li><strong>Infrastructure design:</strong> the API is simple; the interview is in distribution, replication, consistency, latency, and failure.</li>
+          <li><strong>API design:</strong> scalability still matters, but the contract and data model are the centre of the discussion.</li>
+          <li><strong>Data processing:</strong> correctness under late, duplicate, and out-of-order events is the hard part.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “Before I design, I’ll confirm what kind of problem this is and where you want the depth.”</div>
+      </section>
+
+      <section class="section-block" id="product">
+        <h2><span class="n">02</span>Product design</h2>
+        <p class="lede">The most common type: design a user-facing application such as Twitter, Instagram, YouTube, Uber, or Ticketmaster.</p>
+        <ul>
+          <li><strong>Start by narrowing scope.</strong> These apps have many features; you cannot cover all of them in one interview.</li>
+          <li><strong>Agree on 2–4 core features.</strong> Example for Twitter: post tweets, follow users, view the home timeline.</li>
+          <li><strong>Explain the end-to-end flow</strong> for each feature: storage, read path, write path, and fan-out.</li>
+          <li><strong>Then go into scale and trade-offs:</strong> timeline generation on write vs read; celebrity fan-out; cache strategy.</li>
+          <li><strong>What is tested:</strong> prioritization, architecture, component interaction, and the ability to connect features to the system.</li>
+        </ul>
+        <div class="note trap"><strong>Trap:</strong> spending 30 minutes on login and profile pages before touching the feed. Scope the core product first.</div>
+      </section>
+
+      <section class="section-block" id="infra">
+        <h2><span class="n">03</span>Infrastructure design</h2>
+        <p class="lede">These questions ask you to build a component that other services depend on: a rate limiter, distributed cache, key-value store, message queue, job scheduler, or unique ID generator.</p>
+        <ul>
+          <li><strong>The API is usually simple.</strong> A KV store needs <code>get</code> and <code>put</code>; a rate limiter decides allow/reject.</li>
+          <li><strong>Depth is in the internals:</strong> data distribution, replication, consistency, failure handling, and tail latency.</li>
+          <li><strong>Availability matters because other services depend on it.</strong> If the rate limiter is down, do you fail open or fail closed?</li>
+          <li><strong>Explain the operational cost:</strong> coordination, hot keys, rebalancing, and monitoring.</li>
+          <li><strong>Common in senior and infrastructure-focused interviews.</strong></li>
+        </ul>
+        <div class="flow">
+          <span class="flow-step">Simple contract</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Distribution</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Replication</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Failure modes</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Latency + availability</span>
+        </div>
+        <div class="note"><strong>Interview line:</strong> “The API is small, so I’ll spend the time on how the component behaves at scale and when a node fails.”</div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">04</span>API design and product architecture</h2>
+        <p class="lede">These questions focus on how clients interact with the backend: endpoints, request/response formats, data models, and edge cases.</p>
+        <ul>
+          <li><strong>Start from user actions:</strong> post a comment, reply, fetch comments for an article.</li>
+          <li><strong>Define the contract:</strong> method, path, request body, response, status codes, auth.</li>
+          <li><strong>Model the data:</strong> entities, relationships, ordering, pagination.</li>
+          <li><strong>Call out client-facing edge cases:</strong> nested replies, live updates, duplicate comments, stable pagination.</li>
+          <li><strong>Scalability still matters,</strong> but the interviewer is mainly testing API judgment and contract design.</li>
+        </ul>
+        <div class="note"><strong>Example:</strong> page-number pagination can duplicate or skip comments when new ones arrive; cursor-based pagination with stable ordering avoids that.</div>
+      </section>
+
+      <section class="section-block" id="data">
+        <h2><span class="n">05</span>Data processing</h2>
+        <p class="lede">These systems collect and process large amounts of data: ad click aggregators, top-K trending videos, monitoring pipelines, and log collection.</p>
+        <ul>
+          <li><strong>Decide batch, stream, or both.</strong> The choice depends on freshness and correctness requirements.</li>
+          <li><strong>Handle time:</strong> windows (per minute/hour), event time vs processing time, and late-arriving events.</li>
+          <li><strong>Handle duplicates:</strong> retries and at-least-once delivery are normal; make aggregation idempotent.</li>
+          <li><strong>Name the role of each technology:</strong> Kafka for transport, Flink/Spark for processing, storage for query.</li>
+          <li><strong>Correctness is the point:</strong> for billing or metrics, a small error can be expensive.</li>
+        </ul>
+        <div class="flow">
+          <span class="flow-step">Events</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Queue / log</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Stream or batch</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Aggregates</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Query / dashboard</span>
+        </div>
+      </section>
+
+      <section class="section-block" id="groups">
+        <h2><span class="n">06</span>Grouping by technical challenge</h2>
+        <p class="lede">Many applications share the same underlying challenge even when the product looks different.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Group</th><th>Examples</th><th>Key decisions</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Real-time communication</strong></td><td>Chat, live comments, collaboration</td><td>WebSockets vs SSE/polling, presence, fan-out, ordering</td></tr>
+            <tr><td><strong>Location-based</strong></td><td>Uber, Yelp, food delivery</td><td>Geospatial index, nearby search, matching, freshness</td></tr>
+            <tr><td><strong>Social feeds</strong></td><td>Twitter, Instagram, Facebook</td><td>Fan-out on write vs read, ranking, cache, celebrity problem</td></tr>
+            <tr><td><strong>Media platforms</strong></td><td>YouTube, Spotify, Netflix</td><td>Object storage, transcoding, CDN, adaptive bitrate</td></tr>
+            <tr><td><strong>Search systems</strong></td><td>Autocomplete, web search, product search</td><td>Inverted index, ranking, sharding, freshness</td></tr>
+            <tr><td><strong>Transactional systems</strong></td><td>Booking, payments, inventory</td><td>Atomicity, idempotency, locking, double-booking prevention</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><strong>Use it:</strong> identify the challenge behind the product. “Design Ticketmaster” is partly a transactional/double-booking problem, not just a product design problem.</div>
+      </section>
+
+      <section class="section-block" id="directions">
+        <h2><span class="n">07</span>The same question can go in different directions</h2>
+        <ul>
+          <li>“Design Instagram” could focus on the <strong>feed</strong>, <strong>photo upload</strong>, <strong>search</strong>, or <strong>notifications</strong>.</li>
+          <li>“Design Uber” could focus on <strong>location matching</strong>, <strong>pricing</strong>, <strong>trip state</strong>, or <strong>payments</strong>.</li>
+          <li>“Design a chat app” could focus on <strong>real-time delivery</strong>, <strong>history</strong>, <strong>ordering</strong>, or <strong>multi-device sync</strong>.</li>
+          <li>Ask which direction matters; a good answer is not “everything.”</li>
+          <li>State the scope in one sentence so the interviewer can correct you early.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “There are several directions we could take this. I’d suggest focusing on X because it drives the most interesting trade-offs. Does that match what you want?”</div>
+      </section>
+
+      <section class="section-block" id="rounds">
+        <h2><span class="n">08</span>Other interview rounds</h2>
+        <ul>
+          <li><strong>Coding:</strong> algorithms and data structures; system design may be a separate round or a follow-up.</li>
+          <li><strong>Behavioral:</strong> ownership, conflict, failure, influence; stories should connect to engineering decisions.</li>
+          <li><strong>Deep dives:</strong> a focused follow-up on one part of your design — database, cache, consistency, failure.</li>
+          <li><strong>Domain rounds:</strong> frontend, infrastructure, data, or ML-specific design.</li>
+          <li><strong>Level expectations differ:</strong> a mid-level candidate is not expected to lead a staff-level discussion.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="identify">
+        <h2><span class="n">09</span>How to identify the type</h2>
+        <ol>
+          <li><strong>Listen to the noun:</strong> a product (“Instagram”) vs a component (“rate limiter”) vs an API (“comment system”) vs a pipeline (“click aggregator”).</li>
+          <li><strong>Clarify the focus:</strong> “Do you want the full product, or primarily the API/contract?”</li>
+          <li><strong>Choose the depth:</strong> product → end-to-end; infrastructure → internals; API → contract and data model; data → correctness and time.</li>
+          <li><strong>State the plan:</strong> “I’ll spend five minutes on scope, then go deep on X.”</li>
+          <li><strong>Adjust if the interviewer redirects.</strong> The type is a hypothesis, not a lock-in.</li>
+        </ol>
+        <div class="note"><strong>For a 3–5 YOE candidate:</strong> you are usually expected to identify the type correctly, scope it, and produce a complete design with clear trade-offs — not to deliver a staff-level multi-team strategy.</div>
+      </section>
+
+      <section class="section-block" id="checklist">
+        <h2><span class="n">✓</span>What to prioritize</h2>
+        <ul>
+          <li><strong>Product design:</strong> scope, core flows, data model, scale, fan-out.</li>
+          <li><strong>Infrastructure design:</strong> contract, partitioning, replication, consistency, failure, hot keys.</li>
+          <li><strong>API design:</strong> endpoints, payloads, status codes, pagination, idempotency, versioning.</li>
+          <li><strong>Data processing:</strong> windows, event time, duplicates, late data, correctness, backfills.</li>
+          <li><strong>All types:</strong> requirements, estimates, trade-offs, failure modes, and what you would monitor.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps">
+          <ul>
+            <li>Approaching every question as a full product design.</li>
+            <li>Scoping too broadly and never finishing a core flow.</li>
+            <li>Diving into database internals before explaining the product.</li>
+            <li>Treating an API question as a scalability question.</li>
+            <li>Ignoring late, duplicate, and out-of-order events in data pipelines.</li>
+            <li>Waiting for the interviewer to tell you the question type.</li>
+          </ul>
+        </div>
+      </section>
+
+      <nav class="page-nav">
+        <a class="prev" href="index.html"><span>← Course index</span><strong>Interview concepts</strong></a>
+        <a class="next" href="expectations-by-level.html"><span>Next →</span><strong>Expectations by Level</strong></a>
+      </nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/question-types">AlgoMaster — Types of System Design Interview Questions</a>.</p>
+        <p><strong>Course:</strong> System Design Interviews · concept notes.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

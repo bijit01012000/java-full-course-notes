@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Absorbing Traffic Spikes — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 04 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Absorbing Traffic Spikes</h1>
+    <p class="dek">Interview Patterns · Scaling Under Load</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/traffic-spikes">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What a traffic spike is</a>
+<a href="#s2">Why spikes break healthy systems</a>
+<a href="#s3">Where this pattern shows up</a>
+<a href="#s4">Characterize the spike before designing</a>
+<a href="#s5">Provision for the peak</a>
+<a href="#s6">Rate limiting and quotas</a>
+<a href="#s7">Queueing and backpressure</a>
+<a href="#s8">Load shedding and admission control</a>
+<a href="#s9">Caching and origin offload</a>
+<a href="#s10">Graceful degradation</a>
+<a href="#s11">Protecting dependencies</a>
+<a href="#s12">Testing and operating for spikes</a>
+<a href="#s13">Discussing traffic spikes in an interview</a>
+<a href="#s14">Key takeaways</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A spike is a short, extreme deviation from normal load, so the design goal is to absorb or reject excess traffic without letting it cascade — not to provision forever for a peak that lasts minutes.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Traffic spike</dt><dd>A sudden, large increase in request rate above the normal baseline, often lasting seconds to hours.</dd></div><div class="term"><dt>Headroom</dt><dd>Spare capacity deliberately kept above expected peak load so the system can absorb a surge or a node failure.</dd></div><div class="term"><dt>Autoscaling</dt><dd>Adding or removing instances based on observed load, which reacts after a delay and cannot handle an instantaneous surge alone.</dd></div><div class="term"><dt>Pre-warming</dt><dd>Preparing capacity, caches, connections, and data before a known event so the system does not start cold.</dd></div><div class="term"><dt>Rate limiting</dt><dd>Capping how many requests a client, key, or endpoint may make in a time window.</dd></div><div class="term"><dt>Backpressure</dt><dd>Telling producers to slow down or retry later when consumers or buffers cannot keep up.</dd></div><div class="term"><dt>Load shedding</dt><dd>Deliberately rejecting or downgrading some requests to protect capacity for the rest.</dd></div><div class="term"><dt>Graceful degradation</dt><dd>Serving a reduced but useful response when a dependency or feature is overloaded.</dd></div><div class="term"><dt>Thundering herd</dt><dd>Many clients retrying or reconnecting simultaneously, turning a brief failure into a sustained overload.</dd></div><div class="term"><dt>Waiting room</dt><dd>A queue in front of the system that admits users at a controlled rate during an extreme event.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What a traffic spike is</h2>
+<p class="lede">Most of the time a system runs comfortably within its capacity. A spike is a sudden jump to many times the normal level, caused by an event rather than gradual growth.</p>
+<ul><li>A spike is characterized by <strong>magnitude</strong>, <strong>ramp speed</strong>, and <strong>duration</strong>, not just a higher average.</li><li>It can be planned, such as a ticket sale or a scheduled promotion, or unplanned, such as breaking news.</li><li>It can be concentrated on a few endpoints or a few keys rather than spread evenly.</li><li>It can be mostly reads, mostly writes, or a mix; each stresses a different part of the system.</li><li>The system must survive the peak and then return to a healthy state without a long recovery tail.</li><li>Spikes are a capacity and control problem, not only a scaling problem.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why spikes break healthy systems</h2>
+<ul><li>Requests arrive faster than they can be served, so they queue; queueing raises latency even before capacity is exhausted.</li><li>Latency increases hold connections and memory longer, which reduces effective capacity further.</li><li>Thread pools, connection pools, and worker queues fill up, and new work is rejected or waits indefinitely.</li><li>Timeouts trigger <strong>retries</strong>, and retries add load to a system that is already saturated.</li><li>Clients that retry in lockstep create a <strong>thundering herd</strong> that can outlast the original trigger.</li><li>Autoscaling reacts after a delay, and new instances start cold with empty caches and no warm connections.</li><li>A saturated dependency can fail fast, but a saturated queue usually fails slowly, which is harder to recover from.</li><li>The failure is rarely isolated: one slow tier propagates latency and errors to every caller.</li></ul>
+
+<div class="flow"><span class="flow-step">Traffic jumps</span><span class="flow-arrow">→</span><span class="flow-step">Queues grow</span><span class="flow-arrow">→</span><span class="flow-step">Latency rises</span><span class="flow-arrow">→</span><span class="flow-step">Timeouts and retries</span><span class="flow-arrow">→</span><span class="flow-step">More load on saturated tiers</span><span class="flow-arrow">→</span><span class="flow-step">Cascading failure</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Where this pattern shows up</h2>
+<ul><li>A <strong>concert or ticket on-sale</strong> where thousands of users arrive at the exact start time.</li><li>A <strong>flash sale</strong> with a fixed start and a limited inventory.</li><li>A <strong>breaking news event</strong> that sends a large audience to the same article or live page.</li><li>A <strong>viral post</strong> or celebrity announcement that concentrates traffic on a few keys.</li><li>A <strong>livestream or live sports event</strong> where viewership ramps within seconds.</li><li>A <strong>scheduled batch or cron job</strong> that wakes up many workers at once.</li><li>A <strong>retry storm</strong> or reconnect storm after a brief outage or deploy.</li><li>A <strong>bot or scraping surge</strong> that looks like legitimate traffic but has no real user value.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Characterize the spike before designing</h2>
+<p class="lede">The right response depends on the shape of the spike. Clarify these properties before choosing techniques.</p>
+<ul><li>How large is the peak relative to normal traffic, and how quickly does it ramp?</li><li>How long does it last: seconds, minutes, or hours?</li><li>Is the event planned, so capacity can be pre-warmed, or unexpected?</li><li>Which endpoints, keys, or tenants are affected?</li><li>Is the traffic read-heavy, write-heavy, or a mix?</li><li>Can requests be queued, delayed, or rejected, and what is the business cost of rejecting one versus serving it slowly?</li><li>Is the traffic from real users, or can bots and abuse be filtered?</li><li>Set a target: the system should degrade predictably rather than fail completely.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Property</th><th>Why it changes the design</th></tr></thead><tbody><tr><td>Magnitude</td><td>Decides whether headroom, autoscaling, or admission control is enough</td></tr>
+<tr><td>Ramp speed</td><td>Faster ramps defeat reactive autoscaling and require pre-warming</td></tr>
+<tr><td>Duration</td><td>Short spikes suit queues and buffers; long ones need real capacity</td></tr>
+<tr><td>Planned or not</td><td>Planned events allow pre-scaling and cache warming</td></tr>
+<tr><td>Read or write</td><td>Reads can be cached and replicated; writes need queues or sharding</td></tr>
+<tr><td>Tolerance for rejection</td><td>Decides whether load shedding or a waiting room is acceptable</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Provision for the peak</h2>
+<p class="lede">You cannot autoscale your way out of an instantaneous spike. Capacity has to exist before the traffic arrives, either as headroom or as pre-warmed instances.</p>
+<ul><li>Size capacity for the peak you must survive, not the daily average.</li><li>Keep deliberate <strong>headroom</strong> so a surge or a lost node does not immediately saturate the system.</li><li>Scale the bottleneck tier, not every tier uniformly; the database or a downstream API is often the real limit.</li><li>Autoscaling helps with sustained growth but reacts after a delay and starts cold.</li><li>Use <strong>pre-warming</strong> before known events: add capacity, warm caches, open connection pools, and validate quotas.</li><li>Raise quotas and limits with third-party dependencies before the event, not during it.</li><li>Test the provisioned peak with a load test so the capacity number is measured rather than assumed.</li></ul>
+<h3>Headroom versus autoscaling</h3>
+<ul><li>Headroom is available immediately but costs money while idle.</li><li>Autoscaling is cheaper at baseline but cannot respond instantly to a step change.</li><li>The faster the ramp, the more the design depends on headroom and pre-warming.</li><li>Combine both: a baseline with headroom plus autoscaling for the sustained portion.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Reaction time</th><th>Cost</th><th>Best for</th></tr></thead><tbody><tr><td>Static headroom</td><td>Immediate</td><td>Higher at idle</td><td>Sharp, short, or unpredictable spikes</td></tr>
+<tr><td>Reactive autoscaling</td><td>Delayed</td><td>Lower at baseline</td><td>Gradual or sustained growth</td></tr>
+<tr><td>Scheduled pre-warming</td><td>Ready before the event</td><td>Temporary cost</td><td>Known launches, sales, and broadcasts</td></tr></tbody></table></div>
+
+<h3>Why new instances are not ready instantly</h3>
+<ul><li>A new instance must boot, load configuration, and establish connections.</li><li>Its caches are empty, so it sends more traffic to the database until they warm.</li><li>Health checks and load balancer registration add more delay.</li><li>A cold fleet can amplify a spike instead of absorbing it.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Rate limiting and quotas</h2>
+<p class="lede">Rate limiting protects the system by capping demand before it reaches shared resources. It is the first line of defense when traffic cannot all be served.</p>
+<ul><li>Limit per user, per API key, per IP, or per tenant so one caller cannot consume the whole system.</li><li>Apply limits at the edge and again at critical internal boundaries.</li><li>Use a <strong>token bucket</strong> or leaky bucket to allow short bursts while enforcing a sustained rate.</li><li>Return a clear rejection, such as HTTP 429 with a retry hint, rather than letting the request time out.</li><li>Separate limits for reads and writes, and for expensive endpoints versus cheap ones.</li><li>Give priority or higher quotas to critical traffic such as payments or existing sessions.</li><li>Rate limiting also defends against bots and abuse that would otherwise look like a spike.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Queueing and backpressure</h2>
+<p class="lede">A buffer converts a sudden burst into a backlog that can be drained later. It works only if the backlog is bounded and the system can eventually catch up.</p>
+<ul><li>Put a queue between the burst and the work that cannot run at that rate, such as writes or third-party calls.</li><li>Respond to the user with an accepted state when the work can genuinely be completed asynchronously.</li><li>Bound the queue; an unbounded buffer just delays the failure and consumes memory.</li><li>Apply <strong>backpressure</strong> when the buffer is full: slow producers, return retry-later, or reject.</li><li>Monitor queue depth, age of the oldest item, and consumer lag.</li><li>Make consumers idempotent because retries and redelivery are normal.</li><li>A queue absorbs a burst, but it cannot fix a sustained deficit between production and consumption.</li></ul>
+
+<div class="flow"><span class="flow-step">Burst arrives</span><span class="flow-arrow">→</span><span class="flow-step">Enqueue work</span><span class="flow-arrow">→</span><span class="flow-step">Acknowledge quickly</span><span class="flow-arrow">→</span><span class="flow-step">Consumers drain at a safe rate</span><span class="flow-arrow">→</span><span class="flow-step">Backpressure if the queue fills</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Load shedding and admission control</h2>
+<p class="lede">When demand exceeds capacity, serving everything badly is worse than serving most requests well. Shedding is a deliberate choice about which requests to drop.</p>
+<ul><li>Reject requests early when the system is near saturation, before they consume threads and connections.</li><li>Shed low-value or expensive traffic first: bots, background jobs, analytics, and non-critical reads.</li><li>Protect critical flows such as checkout, login, and payments from the same limits as browsing.</li><li><strong>Admission control</strong> decides at the front door whether a request may enter at all.</li><li>Use per-endpoint concurrency limits so one slow dependency cannot consume the whole pool.</li><li>Return a fast, honest error or a degraded response instead of a timeout.</li><li>A <strong>waiting room</strong> is admission control for a known event: hold users in a queue and let them in at a rate the system can serve.</li><li>Shedding must be observable so you can tell the difference between protection and an outage.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Caching and origin offload</h2>
+<ul><li>Serve repeated public responses from a CDN so they never reach the origin.</li><li>Use short TTLs and <code>stale-while-revalidate</code> so a surge does not force synchronous revalidation.</li><li>Cache at the edge, at the application, and in a shared cache, each absorbing a different share.</li><li>Precompute expensive responses before the event so the first request does not trigger the work.</li><li>Watch for <strong>cache stampedes</strong>: one popular key expiring under high traffic can hit the database hard.</li><li>Protect against <strong>cache penetration</strong> from requests for keys that do not exist with negative caching.</li><li>A CDN also absorbs bot traffic and retries that would otherwise reach your servers.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Graceful degradation</h2>
+<p class="lede">Some features are essential and some are nice to have. Under extreme load, turn off the expensive optional work so the core flow survives.</p>
+<ul><li>Define a small set of critical user journeys and protect them explicitly.</li><li>Disable recommendations, personalization, live counters, and other expensive non-critical features under load.</li><li>Serve stale or approximate data when fresh computation is too expensive.</li><li>Switch to a simpler response format or a reduced page instead of failing.</li><li>Use feature flags so degradation can be enabled quickly without a deploy.</li><li>Make degradation automatic where possible, with a manual override for operators.</li><li>Tell the user when data is delayed or a feature is temporarily limited rather than silently lying.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Protecting dependencies</h2>
+<ul><li>Set aggressive <strong>timeouts</strong> so slow calls release resources instead of piling up.</li><li>Use <strong>circuit breakers</strong> to stop calling a failing dependency and let it recover.</li><li>Retry only idempotent operations, with exponential backoff and <strong>jitter</strong> to avoid synchronized retry storms.</li><li>Cap retries so a failure does not multiply load.</li><li>Isolate connection pools per dependency so one slow service cannot starve the rest.</li><li>Cache fallback responses for dependencies that are temporarily unavailable.</li><li>Apply bulkheads so a failure in one part of the system does not consume all shared capacity.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Testing and operating for spikes</h2>
+<ul><li>Run load tests at the expected peak and above it to find the real bottleneck.</li><li>Test the ramp shape, not just a steady high load; a step change is harder than a gradual climb.</li><li>Run game days and failure injection to see how degradation and shedding actually behave.</li><li>Measure p95 and p99 latency, error rate, saturation, queue depth, and autoscaling lag.</li><li>Watch the recovery tail: how long until latency and backlog return to normal after the spike.</li><li>Keep runbooks for enabling degradation, raising limits, and draining queues.</li><li>Review each real spike afterwards and adjust capacity, limits, and thresholds.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Discussing traffic spikes in an interview</h2>
+<ul><li>Ask whether the spike is planned, how large it is, how fast it ramps, and how long it lasts.</li><li>Ask what can be rejected or delayed, and which flows are business-critical.</li><li>Estimate peak load and compare it with current capacity and the bottleneck tier.</li><li>Describe the layers in order: edge caching and rate limiting, then admission control and queueing, then capacity.</li><li>Explain what degrades and what is shed when the system reaches its limit.</li><li>Cover retries, timeouts, and circuit breakers so one failure does not cascade.</li><li>Say what you would monitor and how you would validate the design before the event.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Key takeaways</h2>
+<ul><li>A spike is defined by magnitude, ramp speed, and duration; design for that shape rather than an average.</li><li>Keep headroom and pre-warm for known events; autoscaling alone reacts too late for a step change.</li><li>Rate limiting and admission control cap demand before it consumes shared resources.</li><li>Bounded queues absorb short bursts; backpressure prevents them from becoming an unbounded failure.</li><li>Shed low-value traffic and degrade non-critical features so the core flow survives.</li><li>Protect dependencies with timeouts, circuit breakers, capped retries, and jitter.</li><li>Test the peak, watch the recovery tail, and make degradation and shedding observable.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Headroom</strong> buys immediate absorption but costs money while idle; autoscaling is cheaper but reacts after a delay.</li><li><strong>Pre-warming</strong> makes a known event safe but requires accurate forecasting and temporary extra capacity.</li><li><strong>Rate limiting</strong> protects shared capacity but rejects or delays legitimate users during a genuine surge.</li><li><strong>Queueing</strong> absorbs bursts and improves responsiveness but adds delay, duplicates, and a backlog that must drain.</li><li><strong>Load shedding</strong> keeps the system responsive for most requests but explicitly fails some of them.</li><li><strong>Graceful degradation</strong> preserves the core flow but gives users an incomplete or stale experience.</li><li><strong>Aggressive timeouts</strong> free resources quickly but can abort requests that would have succeeded.</li><li><strong>Circuit breakers</strong> protect the system from a failing dependency but can fail fast on traffic that might have worked.</li><li><strong>Waiting rooms</strong> keep an event from collapsing but add friction and a second system to operate.</li><li><strong>Autoscaling</strong> reduces idle cost but can oscillate, overshoot, and start cold instances that add load.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a traffic spike?</summary><div class="answer"><p>A sudden, large increase in request rate above the normal baseline. Its impact depends on magnitude, ramp speed, duration, and which resources the traffic touches.</p></div></details>
+<details><summary>2. Why can a system with enough total capacity still fail during a spike?</summary><div class="answer"><p>Capacity is not instantly available where it is needed. Requests queue, latency rises, pools fill, retries add load, and autoscaling reacts late. The failure is about rate and concentration, not just total capacity.</p></div></details>
+<details><summary>3. How do you decide between headroom and autoscaling?</summary><div class="answer"><p>Use headroom for sharp, short, or unpredictable spikes where reaction time matters. Use autoscaling for gradual or sustained growth. Most systems combine a baseline with headroom and autoscaling for the rest.</p></div></details>
+<details><summary>4. Why isn't autoscaling enough for a ticket on-sale?</summary><div class="answer"><p>The spike arrives in seconds, while autoscaling takes time to detect load, launch instances, pass health checks, and warm caches. Pre-warming before the event and admission control during it are more reliable.</p></div></details>
+<details><summary>5. How does rate limiting help?</summary><div class="answer"><p>It caps demand before it reaches shared resources, keeps one caller from consuming the system, and gives a clear rejection instead of a slow timeout. Limits can be per user, key, tenant, or endpoint.</p></div></details>
+<details><summary>6. What is backpressure?</summary><div class="answer"><p>A signal that producers must slow down or retry later when the system cannot keep up. It is implemented with bounded queues, concurrency limits, or explicit rejection, and it prevents unbounded memory growth and collapse.</p></div></details>
+<details><summary>7. When does a queue help and when does it only hide the problem?</summary><div class="answer"><p>It helps a short burst that consumers can later drain. It hides the problem when consumers are persistently slower than producers, because the backlog grows without limit and the delay becomes unbounded.</p></div></details>
+<details><summary>8. What is load shedding and what would you shed first?</summary><div class="answer"><p>Deliberately rejecting or downgrading requests to protect capacity. Shed bots, background jobs, analytics, and expensive non-critical features first; protect checkout, login, and payments.</p></div></details>
+<details><summary>9. How do you prevent a retry storm?</summary><div class="answer"><p>Retry only idempotent operations, cap the number of attempts, use exponential backoff with jitter, and put a circuit breaker in front of failing dependencies. Respect server retry hints.</p></div></details>
+<details><summary>10. What is graceful degradation?</summary><div class="answer"><p>Serving a reduced but useful response when a feature or dependency is overloaded: disabling recommendations, returning stale data, or showing a simpler page instead of failing the request.</p></div></details>
+<details><summary>11. When would you use a waiting room?</summary><div class="answer"><p>For a known high-demand event where demand far exceeds capacity but users can wait, such as a ticket sale. It admits users at a controlled rate so the purchase path stays healthy, at the cost of friction.</p></div></details>
+<details><summary>12. What would you monitor during a spike?</summary><div class="answer"><p>Request rate, p95 and p99 latency, error and rejection rates, saturation of CPU, connections and pools, queue depth and age, cache hit ratio, consumer lag, autoscaling activity, and the time to recover after the peak.</p></div></details>
+<details><summary>13. How do you test for a spike before it happens?</summary><div class="answer"><p>Load test at and above the expected peak, with a realistic ramp shape and dependency latencies. Run game days that exercise degradation, shedding, and failover, and verify that recovery returns to baseline.</p></div></details>
+<details><summary>14. What is the biggest mistake in spike design?</summary><div class="answer"><p>Assuming autoscaling will handle it. Spikes are usually too fast and too concentrated for reactive scaling, so the design needs headroom, admission control, caching, and a plan for what to reject.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming autoscaling alone will absorb a sudden step change in traffic.</li><li>Provisioning for the daily average and calling it peak capacity.</li><li>Leaving queues unbounded and treating the growing backlog as success.</li><li>Retrying aggressively without backoff or jitter, turning a blip into an outage.</li><li>Scaling every tier except the actual bottleneck, such as the database or a third-party API.</li><li>Rate limiting critical payment or login traffic with the same policy as browsing.</li><li>Forgetting that new instances start with cold caches and empty connection pools.</li><li>Testing only steady high load and never the ramp or the recovery tail.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="handling-hot-keys.html"><span>← Previous</span><strong>Handling Hot Keys</strong></a><a class="next" href="pushing-real-time-updates.html"><span>Next →</span><strong>Pushing Real-time Updates</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/traffic-spikes">AlgoMaster — Absorbing Traffic Spikes</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

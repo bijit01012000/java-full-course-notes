@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generate Unique IDs — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 31 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p2">P2 · Specialized</span></div>
+    <h1>Generate Unique IDs</h1>
+    <p class="dek">It tests whether you can reason about coordination, clock behaviour, and the storage consequences of an ID format, not just recite Snowflake.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Generate IDs locally from a timestamp, worker, and sequence layout, lease worker identities, and keep a separate random public identifier when enumeration matters.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Generate globally unique 64-bit IDs at high throughput.</li><li>Support batch generation for bulk inserts and imports.</li><li>Keep IDs roughly ordered by creation time for pagination and index locality.</li><li>Expose an opaque public identifier for URLs and APIs.</li><li>Assign and reclaim worker identities across restarts and autoscaling.</li><li>Provide a migration path from existing sequential IDs.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>No network hop per ID; local generation under about 1 ms p99.</li><li>Unique across services, regions, restarts, and retries.</li><li>Available when the central allocator is briefly unreachable.</li><li>Monotonic per worker; never reuse a timestamp and sequence pair.</li><li>Compact enough to be a primary key in every secondary index.</li><li>Recover safely from clock skew and rollback.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 20k IDs/s average and 100k/s peak across all writers.</li><li>A 41-bit millisecond timestamp with a custom epoch lasts about 69 years.</li><li>10 worker bits allow 1024 live generators; 12 sequence bits allow 4096 IDs per ms per worker.</li><li>A 64-bit ID as BIGINT is 8 B, versus 16 B for raw UUID bytes or 36 B as text.</li><li>Segments of 10k IDs keep allocator calls to a handful per minute per node at typical rates.</li><li>At 100k IDs/s the 64-bit space is not the limit; worker-ID space and clock discipline are.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">IdWorker</span><span class="fields">worker_id, node_name, region, lease_epoch, expires_at, last_heartbeat_at, status</span></div><div class="entity"><span class="name">IdRange</span><span class="fields">range_id, allocator_id, start_value, end_value, owner_worker, status, allocated_at</span></div><div class="entity"><span class="name">ClockState</span><span class="fields">worker_id, last_timestamp_ms, last_sequence, updated_at</span></div><div class="entity"><span class="name">PublicId</span><span class="fields">public_id, internal_id, created_at, revoked_at</span></div><div class="entity"><span class="name">IdRequest</span><span class="fields">request_id, client_key, count, issued_ids, created_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/ids</code></td><td>Issue a batch of N IDs, idempotent per client key.</td></tr><tr><td><code>POST</code></td><td><code>/v1/workers/lease</code></td><td>Lease a worker ID for a node with a TTL and fencing epoch.</td></tr><tr><td><code>POST</code></td><td><code>/v1/workers/{workerId}/renew</code></td><td>Renew the lease so the node may keep generating.</td></tr><tr><td><code>DELETE</code></td><td><code>/v1/workers/{workerId}</code></td><td>Release a worker ID after draining; it is not reused until the lease expires.</td></tr><tr><td><code>GET</code></td><td><code>/v1/ids/{publicId}</code></td><td>Resolve a public ID to its internal record after authorization.</td></tr><tr><td><code>POST</code></td><td><code>/v1/admin/ranges</code></td><td>Reserve a larger block for a region or a dedicated tenant.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Bit layout</td><td>1 sign bit, 41-bit millisecond timestamp with a custom epoch, 10 worker bits, 12 sequence bits</td><td>Produces a compact, time-ordered 64-bit ID with enough per-worker burst capacity.</td></tr><tr><td>Worker assignment</td><td>Lease from etcd or a database row with a TTL and fencing epoch</td><td>Cloned or autoscaled nodes cannot keep sharing an identity after a restart.</td></tr><tr><td>Clock rollback</td><td>Wait if drift is under about 5 ms; otherwise refuse to issue and alert</td><td>Reusing an old timestamp with a reset sequence would duplicate IDs.</td></tr><tr><td>Range allocation</td><td>Persist the high-water mark before returning a range; nodes cache ranges locally</td><td>A restart cannot reissue an ID, and a short allocator outage does not stop generation.</td></tr><tr><td>Storage type</td><td>BIGINT primary key, with monotonic inserts landing near the end of the B-tree</td><td>Smaller indexes and fewer page splits than random 128-bit keys.</td></tr><tr><td>Public identity</td><td>Separate random base62 or UUIDv7 public ID mapped to the internal ID</td><td>Prevents enumeration without giving up a compact internal key.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> S[⚙️ ID service]
+  S --> L[🔑 Local ID generator]
+  L --> B[🕒 Clock + sequence]
+  L --> R[📦 Cached ID range]
+  R --> A[🎫 Range allocator]
+  A --> T[(🗄️ Range table)]
+  L --> W[🔒 Worker lease]
+  W --> E[(🗄️ Lease registry)]
+  S --> D[(🗄️ App tables BIGINT)]
+  S --> P[🔐 Public ID map]
+  P --> D
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef service fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef hot fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  class C client;
+  class S,L,A,P service;
+  class T,E,D store;
+  class B,R,W hot;</div><div class="diagram-caption">Generators issue IDs locally from clock, worker, and sequence state, while the allocator and lease registry supply durable ranges and unique worker identities.</div></div>
+        <ul><li>Generation is in-process; the only coordination is worker identity and occasional range allocation.</li><li>Worker IDs are leased, not configured, so a cloned instance cannot keep the same identity.</li><li>A node with a cached range keeps serving through a short allocator outage.</li><li>The timestamp gives ordering, the worker bits prevent collisions, and the sequence handles same-millisecond bursts.</li><li>When the sequence overflows, spin to the next millisecond; never reset the sequence against an old timestamp.</li><li>Internal IDs stay compact; public IDs are separate and every read still enforces authorization.</li><li>Retries reuse the ID generated for the logical operation rather than minting a second record.</li><li>Regions get disjoint worker-ID slices so one registry outage does not block another region.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Auto-increment</td><td>Compact, ordered, and trivially simple on one database</td><td>Single writer bottleneck, cross-shard collisions, and enumerable values</td></tr><tr><td>Random UUID v4</td><td>Coordination-free generation anywhere</td><td>Scattered B-tree inserts and a larger index footprint</td></tr><tr><td>Snowflake-style 64-bit ID</td><td>Compact, time-sortable, and local generation</td><td>Requires unique worker IDs and disciplined clocks</td></tr><tr><td>Segment allocator</td><td>Few central calls and compact ranges</td><td>Gaps after crashes and a dependency on durable allocator state</td></tr><tr><td>Time-sortable IDs</td><td>Good insert locality and keyset pagination</td><td>Reveals approximate creation time and depends on clock behaviour</td></tr><tr><td>Embedding a shard or region in the ID</td><td>Explicit routing without a lookup</td><td>Makes rebalancing and later ID changes harder</td></tr><tr><td>Separate random public ID</td><td>Resists enumeration and scraping</td><td>An extra mapping and lookup on public reads</td></tr><tr><td>Larger random identifiers</td><td>Stronger unguessability</td><td>More storage in every primary and foreign key</td></tr></tbody></table></div>
+        <ul><li>Batch ID allocation for bulk inserts instead of one call per row.</li><li>Keep generation in-process to avoid a network hop on the write path.</li><li>Use time-ordered 64-bit keys so inserts stay near the end of the index.</li><li>Preallocate ranges sized for a few minutes of traffic rather than one ID per call.</li><li>Monitor clock offset continuously and alert before rollback becomes a duplicate risk.</li><li>Shard application tables by an entity key unless the ID deliberately embeds the shard.</li><li>Cache the worker lease locally and renew well before expiry.</li><li>Use a public-ID mapping only where an opaque identifier is required.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why does auto-increment break in a distributed system?</strong> It depends on one database writer, so it becomes a throughput bottleneck and a single point of failure, and independent databases each start their own sequence and collide.</div><div class="followup"><strong>How do UUIDs guarantee uniqueness without coordination?</strong> They draw from a very large random or time-plus-random space, making collisions negligibly unlikely, so any node can generate one offline.</div><div class="followup"><strong>What is the downside of a random UUID primary key?</strong> Random inserts scatter across the B-tree, causing page splits and write amplification, and the 128-bit width makes every index larger.</div><div class="followup"><strong>Explain a Snowflake ID.</strong> It packs a timestamp, a worker identifier, and a per-tick sequence into 64 bits, so each worker generates locally, time orders the result, and the worker bits prevent collisions.</div><div class="followup"><strong>What happens if the clock moves backwards?</strong> Wait for small drift, refuse to issue and alert for large drift, and never reuse an old timestamp with a reset sequence.</div><div class="followup"><strong>How do you assign worker IDs?</strong> Lease a unique ID from a registry such as etcd or ZooKeeper with a TTL and fencing epoch, and reclaim it only after the old lease has expired.</div><div class="followup"><strong>How does a segment allocator work?</strong> A central service durably reserves a disjoint block of IDs for a node, the node issues locally until the block is exhausted, and then requests another.</div><div class="followup"><strong>When would you choose ULID over UUID v4?</strong> When you want local generation plus lexical time ordering for pagination and recent-first queries, accepting a larger text form and the same clock concerns.</div><div class="followup"><strong>How do IDs affect sharding?</strong> An ID can embed a shard or region for explicit routing, or stay independent and be mapped through a directory; embedding simplifies routing but makes rebalancing harder.</div><div class="followup"><strong>How do you expose IDs safely in a public API?</strong> Use random or signed public identifiers and enforce authorization on every request, because secrecy alone is not access control.</div><div class="followup"><strong>How would you migrate from sequential IDs?</strong> Add the new column, backfill in batches, dual-write, update foreign keys and caches, switch reads, then retire the old column while keeping a rollback path.</div><div class="followup"><strong>What would you monitor?</strong> Generation rate and latency, duplicate-key errors, clock offset and rollback events, worker-lease conflicts, range exhaustion, and allocator availability.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming a UUID is automatically a good primary key without considering index locality.</li><li>Letting two nodes share a worker ID after cloning or autoscaling.</li><li>Ignoring clock rollback and reusing an old timestamp with a reset sequence.</li><li>Using sequential IDs in public URLs and treating unguessability as authorization.</li><li>Making every ID a string because it is convenient, then paying for it in every index.</li><li>Choosing a scheme without a migration plan for existing primary and foreign keys.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="location-based-search.html"><span>← Previous</span><strong>Location-Based Search</strong></a><a class="next" href="counting-at-scale.html"><span>Next →</span><strong>Counting at Scale</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

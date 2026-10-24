@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scalability — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 03 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Scalability</h1>
+    <p class="dek">Core Concepts · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>10</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">7 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/scalability">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Measuring the load</a>
+<a href="#s3">Vertical scaling (scale up)</a>
+<a href="#s4">Separating the database</a>
+<a href="#s5">Horizontal scaling (scale out)</a>
+<a href="#s6">Caching</a>
+<a href="#s7">Read replicas</a>
+<a href="#s8">Sharding</a>
+<a href="#s9">Queues and background work</a>
+<a href="#s10">Choosing the next step</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Scalability is the ability to handle more users, traffic, and data without collapsing — but only after you identify the resource that is actually the bottleneck.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Load</dt><dd>The demand placed on the system: users, requests per second, data volume, and read/write mix.</dd></div><div class="term"><dt>Vertical scaling</dt><dd>Making one machine bigger (more CPU, RAM, or disk). Simple, but bounded and still one failure domain.</dd></div><div class="term"><dt>Horizontal scaling</dt><dd>Adding more machines and distributing work across them. Needs stateless servers and a load balancer.</dd></div><div class="term"><dt>Stateless server</dt><dd>A server that does not keep user session state locally, so any instance can serve any request.</dd></div><div class="term"><dt>Read replica</dt><dd>A copy of the database that serves reads, reducing load on the primary.</dd></div><div class="term"><dt>Sharding</dt><dd>Partitioning data across multiple databases by a shard key when one database cannot handle the volume.</dd></div><div class="term"><dt>Bottleneck</dt><dd>The component whose capacity limits end-to-end throughput.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">A small application can run comfortably on one server. Growth changes which resource runs out first.</p>
+<ul><li>More users mean more concurrent requests, more connections, and more CPU contention.</li><li>More data means larger tables, larger indexes, slower backups, and more disk I/O.</li><li>A read-heavy product stresses the database differently from a write-heavy one.</li><li>The first bottleneck is often the database, not the application code.</li><li>Scaling is not one action: it is a sequence of measured fixes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Measuring the load</h2>
+<ul><li>Track <strong>requests per second</strong> (average and peak), not just total users.</li><li>Track the <strong>read/write ratio</strong>; it decides whether replicas or sharding help first.</li><li>Track <strong>data size</strong> and growth rate; storage and index size affect query cost.</li><li>Track <strong>p95/p99 latency</strong>, error rate, queue depth, and saturation.</li><li>Use load tests and production metrics; an imagined bottleneck is not a design input.</li></ul>
+
+
+<div class="note">Peak traffic is usually several times the average. Design for the peak you must survive, not the daily average.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Vertical scaling (scale up)</h2>
+<p class="lede">Vertical scaling gives the existing machine more resources.</p>
+<ul><li><strong>Pros:</strong> no application changes, no distributed coordination, simple operations.</li><li><strong>Cons:</strong> hardware ceiling, rising cost, downtime for some upgrades, and a single failure domain.</li><li>It is often the right first move for a small system or a database primary.</li><li>It postpones the complexity of distribution; it does not remove the need to plan for it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Vertical</th><th>Horizontal</th></tr></thead><tbody><tr><td>Approach</td><td>Bigger machine</td><td>More machines</td></tr>
+<tr><td>Complexity</td><td>Low</td><td>Higher</td></tr>
+<tr><td>Ceiling</td><td>Hardware limit</td><td>Near-limitless with coordination</td></tr>
+<tr><td>Failure domain</td><td>One machine</td><td>Multiple machines</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Separating the database</h2>
+<ul><li>Running the app and database on one server couples CPU, memory, disk, and failure.</li><li>Move the database to its own host so each tier can be scaled and tuned independently.</li><li>Use connection pooling so app instances do not exhaust database connections.</li><li>After separation, the database often becomes the next visible bottleneck.</li><li>This is usually the first structural step before caching or replication.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Horizontal scaling (scale out)</h2>
+<p class="lede">Horizontal scaling adds more application servers behind a load balancer.</p>
+<ul><li>The load balancer distributes requests across healthy instances.</li><li>Application servers should be <strong>stateless</strong> so any instance can handle any request.</li><li>Move sessions to a shared store or use signed tokens instead of local memory.</li><li>Shared state — database, cache, object storage — must be external to the app instances.</li><li>More instances improve capacity and fault isolation but add coordination and observability work.</li></ul>
+<h3>The session problem</h3>
+<ul><li>Sticky sessions pin a user to one server; simple, but uneven and fragile when that server dies.</li><li>A shared session store keeps any server able to serve the user.</li><li>Stateless app servers make rolling deploys and autoscaling much easier.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Caching</h2>
+<ul><li>Cache hot reads to reduce database load and latency.</li><li>Use a TTL or explicit invalidation; every cache accepts some staleness.</li><li>Cache at the right layer: browser, CDN, application, or distributed cache.</li><li>A cache can make a read-heavy system scale without touching the database tier.</li><li>Measure hit ratio and miss cost; a low hit ratio adds complexity without much benefit.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Read replicas</h2>
+<ul><li>Replicas copy the primary database and serve read traffic.</li><li>They improve read throughput and can provide failover capacity.</li><li>Replication is usually asynchronous, so replicas may be slightly stale.</li><li>Read-your-writes requires routing that specific read to the primary or waiting for replication.</li><li>Replicas do not solve write throughput; they add read capacity and availability.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Sharding</h2>
+<ul><li>Sharding partitions data across multiple databases by a shard key.</li><li>It is the write-scale and data-size tool, not the first read-scale tool.</li><li>Choose the shard key for even distribution and common query access.</li><li>Cross-shard joins, transactions, and aggregations become expensive.</li><li>Sharding adds routing, resharding, and operational complexity; use it late.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Queues and background work</h2>
+<ul><li>Move slow, non-critical work out of the request path into a queue.</li><li>Workers process thumbnails, emails, feed updates, or analytics asynchronously.</li><li>Queues absorb bursts and let producers and consumers scale independently.</li><li>The user may see eventual completion rather than an immediate result.</li><li>Monitor queue depth, age, retries, and dead-letter messages.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Choosing the next step</h2>
+<ul><li>Measure the bottleneck before choosing a technique.</li><li>Read-bound: cache, CDN, read replicas, denormalization.</li><li>Write-bound: batch, queue, partition, shard.</li><li>CPU-bound: horizontal app scaling or a more efficient algorithm.</li><li>Add one layer at a time and re-measure; every layer adds failure modes.</li></ul>
+
+<div class="flow"><span class="flow-step">Measure</span><span class="flow-arrow">→</span><span class="flow-step">Fix the bottleneck</span><span class="flow-arrow">→</span><span class="flow-step">Re-measure</span><span class="flow-arrow">→</span><span class="flow-step">Repeat</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Vertical scaling</strong> is simple but has a hardware ceiling and remains a single failure domain.</li><li><strong>Horizontal scaling</strong> improves capacity and fault isolation but adds load balancing, distributed state, and operational complexity.</li><li><strong>Read replicas</strong> improve read scale and availability but introduce replication lag and read-after-write anomalies.</li><li><strong>Sharding</strong> improves write scale and data size but makes cross-shard queries and transactions expensive.</li><li><strong>Caching</strong> improves latency and database load but accepts staleness and invalidation complexity.</li><li><strong>Queues</strong> improve responsiveness and absorb spikes but introduce eventual completion and duplicate-processing risk.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What does scalability mean?</summary><div class="answer"><p>The ability to handle growth in users, traffic, or data without a disproportionate drop in performance or availability. It is measured against a specific bottleneck, not as a generic property.</p></div></details>
+<details><summary>2. How do you find the bottleneck?</summary><div class="answer"><p>Measure throughput, latency percentiles, CPU, memory, disk I/O, connection pools, queue depth, and downstream calls under realistic load. Fix the resource that saturates first.</p></div></details>
+<details><summary>3. When would you scale vertically instead of horizontally?</summary><div class="answer"><p>When the system is small, the database is hard to distribute, or the simplest fix is more CPU/RAM. Vertical scaling is fast and operationally simple, but it has a ceiling and does not remove the single failure domain.</p></div></details>
+<details><summary>4. Why do horizontal app scaling and stateless servers go together?</summary><div class="answer"><p>If any instance can serve any request, the load balancer can distribute freely and failed instances can be replaced. Local session state forces sticky routing and makes scaling and deploys harder.</p></div></details>
+<details><summary>5. How would you scale reads?</summary><div class="answer"><p>Cache hot data, add read replicas, use a CDN for static content, and denormalize expensive joins. Measure whether the database or the network is the actual read bottleneck.</p></div></details>
+<details><summary>6. How would you scale writes?</summary><div class="answer"><p>Reduce write amplification, batch writes, move non-critical work to a queue, and partition or shard when one primary cannot keep up. Sharding is usually the last step.</p></div></details>
+<details><summary>7. What is the difference between replication and sharding?</summary><div class="answer"><p>Replication copies the same data for read scale and availability. Sharding partitions different data across nodes for write scale and size. They solve different problems and can be combined.</p></div></details>
+<details><summary>8. What breaks when you add read replicas?</summary><div class="answer"><p>Replication lag can make reads stale, so read-after-write may need the primary. Failover and routing also become more complex.</p></div></details>
+<details><summary>9. Why is sharding hard?</summary><div class="answer"><p>You must choose a shard key, route queries, handle cross-shard joins and transactions, avoid hot shards, and reshard as data grows. It adds significant operational complexity.</p></div></details>
+<details><summary>10. How do queues help scalability?</summary><div class="answer"><p>They decouple producers from consumers, absorb bursts, and let slow work scale independently. The cost is eventual completion, duplicates, and more infrastructure to monitor.</p></div></details>
+<details><summary>11. What is a reasonable scaling order?</summary><div class="answer"><p>Measure, optimize queries and indexes, separate the database, add caching, add read replicas, move slow work to queues, then consider partitioning or sharding.</p></div></details>
+<details><summary>12. How do you know scaling worked?</summary><div class="answer"><p>The target bottleneck moved, p95/p99 latency stayed within budget, error rate stayed flat, and cost increased proportionally. Re-measure after each change.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Reaching for sharding before measuring the bottleneck.</li><li>Adding more app servers while the database remains the bottleneck.</li><li>Keeping session state on individual app servers and calling the tier stateless.</li><li>Assuming read replicas are strongly consistent.</li><li>Adding a cache without a plan for invalidation or staleness.</li><li>Scaling every tier at once and losing the ability to attribute the improvement.</li><li>Ignoring the cost and operational complexity of each new layer.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="top-30-system-design-concepts.html"><span>← Previous</span><strong>Top 30 System Design Concepts</strong></a><a class="next" href="availability.html"><span>Next →</span><strong>Availability</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/scalability">AlgoMaster — Scalability</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

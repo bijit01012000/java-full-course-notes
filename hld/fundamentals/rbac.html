@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RBAC — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 49 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>RBAC</h1>
+    <p class="dek">Security · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/rbac">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: permissions assigned directly to users</a>
+<a href="#s2">The RBAC model</a>
+<a href="#s3">Designing permissions</a>
+<a href="#s4">Least privilege</a>
+<a href="#s5">Default deny</a>
+<a href="#s6">The permission check on each request</a>
+<a href="#s7">Role design: functional vs organizational</a>
+<a href="#s8">Role explosion</a>
+<a href="#s9">Inheritance and hierarchy</a>
+<a href="#s10">Separation of duties and constraints</a>
+<a href="#s11">The limits of RBAC: ABAC and ReBAC</a>
+<a href="#s12">Multi-tenancy and delegated administration</a>
+<a href="#s13">Audit, review, and lifecycle</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>RBAC replaces per-user permission assignments with roles: permissions are grouped into named bundles, roles are assigned to users, and every request is checked against the result — which stays manageable only if roles are designed and reviewed deliberately.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>RBAC</dt><dd>Role-Based Access Control: an authorization model where permissions are grouped into roles and roles are assigned to subjects.</dd></div><div class="term"><dt>Principal</dt><dd>The entity being authorized: a user, group, service account, or API client.</dd></div><div class="term"><dt>Permission</dt><dd>A single allowed action on a resource, such as <code>orders:refund</code> or <code>reports:read</code>.</dd></div><div class="term"><dt>Role</dt><dd>A named bundle of permissions that represents a job function or responsibility, not an individual.</dd></div><div class="term"><dt>Least privilege</dt><dd>Granting only the permissions required for the task, for only as long as they are needed.</dd></div><div class="term"><dt>Default deny</dt><dd>The authorization decision is deny unless an explicit grant matches; failures and missing policy fail closed.</dd></div><div class="term"><dt>Role explosion</dt><dd>A combinatorial growth of near-duplicate roles that becomes as unmanageable as per-user permissions.</dd></div><div class="term"><dt>Role hierarchy</dt><dd>Inheritance where a senior role includes the permissions of junior roles, reducing duplication.</dd></div><div class="term"><dt>Separation of duties</dt><dd>A constraint that no single principal can complete a sensitive workflow alone, enforced through mutually exclusive roles.</dd></div><div class="term"><dt>ABAC / ReBAC</dt><dd>Attribute-based and relationship-based access control: decisions use attributes or graph relationships instead of static roles.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: permissions assigned directly to users</h2>
+<p class="lede">An internal tool with five people and a handful of permissions is easy: assign each permission to each person. Growth breaks that model.</p>
+<ul><li>At five users, direct assignment is clear and nobody needs a system for it.</li><li>At thousands of users and a hundred permissions, onboarding requires remembering exactly which subset a new hire needs.</li><li>When a policy changes, someone must edit hundreds of users individually, and some will be missed.</li><li>When an employee moves teams, old permissions usually stay behind — this is privilege creep.</li><li>Nobody can answer the basic audit question: <em>who can do what in this system?</em></li><li>The fix is indirection: group permissions into roles, then assign roles to users.</li><li>The indirection also gives you one place to review, version, and change a permission set.</li></ul>
+
+<div class="flow"><span class="flow-step">User</span><span class="flow-arrow">→</span><span class="flow-step">Role assignment</span><span class="flow-arrow">→</span><span class="flow-step">Role</span><span class="flow-arrow">→</span><span class="flow-step">Permission set</span><span class="flow-arrow">→</span><span class="flow-step">Resource</span></div>
+<div class="note">If adding a person means choosing twenty checkboxes by memory, the model is already broken.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The RBAC model</h2>
+<ul><li>A <strong>principal</strong> is the thing being authorized: user, group, service account, or API client.</li><li>A <strong>permission</strong> is one action on one resource type, expressed as a stable identifier.</li><li>A <strong>role</strong> is a named collection of permissions, chosen to match a job or responsibility.</li><li>Assignments are many-to-many: a user can hold several roles, and a role can be held by many users.</li><li>The check is a join: resolve the principal's roles, union their permissions, and test the requested action.</li><li>Sessions can activate a subset of roles, so an admin role is only live when explicitly assumed.</li><li>Resources are usually scoped — tenant, organization, project — and the scope is part of the decision, not an afterthought.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Entity</th><th>Represents</th><th>Example</th></tr></thead><tbody><tr><td>Principal</td><td>Who is asking</td><td>user:42, service:reporting, group:support</td></tr>
+<tr><td>Permission</td><td>What may be done</td><td>orders:read, orders:refund, users:invite</td></tr>
+<tr><td>Role</td><td>Why they may do it</td><td>support_agent, billing_admin, auditor</td></tr>
+<tr><td>Scope</td><td>Where it applies</td><td>tenant:acme, project:apollo</td></tr>
+<tr><td>Assignment</td><td>The binding</td><td>user:42 has support_agent in tenant:acme</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Designing permissions</h2>
+<ul><li>Model resources and actions first; roles are a packaging decision made afterwards.</li><li>Use stable identifiers such as <code>resource:action</code>, not UI labels or database column names.</li><li>Granularity is a trade-off: a single <code>admin</code> permission destroys least privilege, while one permission per button becomes unmanageable.</li><li>Put scope in the permission or the assignment (<code>project:123:read</code>), and check it on every decision.</li><li>Separate read, write, and destructive actions so a read-only role is genuinely read-only.</li><li>Do not encode fast-changing business rules as permissions; keep those in policy or application logic.</li><li>Treat the permission catalog as an API: version it, document it, and make breaking changes deliberately.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Too coarse</th><th>Better</th><th>Why</th></tr></thead><tbody><tr><td>admin</td><td>orders:read, orders:refund, orders:cancel</td><td>Each capability can be granted separately</td></tr>
+<tr><td>edit</td><td>products:create, products:update, products:delete</td><td>Destructive actions are separable</td></tr>
+<tr><td>view_reports</td><td>reports:read (scoped to team)</td><td>Scope limits data exposure</td></tr>
+<tr><td>manage_users</td><td>users:invite, users:disable, roles:assign</td><td>Role assignment is a privileged action of its own</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Least privilege</h2>
+<ul><li>Grant the minimum permissions needed for the task, for the minimum time.</li><li>New accounts should start with no roles, not a broad default role that nobody revisits.</li><li>Use time-bound or just-in-time elevation for rare administrative tasks instead of permanent admin roles.</li><li>Scope service accounts to one workload; shared accounts with broad permissions destroy accountability.</li><li>Missing permissions are visible — someone complains. Extra permissions are invisible until they are abused.</li><li>Least privilege limits blast radius: a compromised account or token can do less damage.</li><li>Review permissions after incidents and role changes; drift is normal unless it is actively corrected.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Default deny</h2>
+<ul><li>The decision must fail closed: if no grant matches, deny.</li><li>When the model supports explicit deny, it should override any allow, so exceptions are unambiguous.</li><li>New resources start private; sharing or publishing is an explicit action with an audit trail.</li><li>A missing role, an unavailable policy service, or an evaluation error must result in deny, not allow.</li><li>Default allow appears accidentally when checks are optional, applied only in the UI, or skipped for internal callers.</li><li>Test the deny path explicitly — most test suites only cover the happy path.</li><li>A 403 should be logged and observable, because repeated denials often indicate a broken role assignment or an attack.</li></ul>
+
+
+<pre class="code"><code>decision = DENY
+for grant in principal.grants(scope):
+    if grant.permission == requested and grant.scope covers resource:
+        decision = ALLOW
+if explicit_deny_matches(principal, requested, resource):
+    decision = DENY
+if policy_engine_error:
+    decision = DENY
+return decision</code></pre>
+<div class="note">A missing policy is a denial, not an exception. Authorization failures must never fall through to allow.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>The permission check on each request</h2>
+<p class="lede">Authentication establishes who is calling; authorization decides whether that principal may perform this action on this resource.</p>
+<ul><li>Authenticate first, then authorize — never derive identity from a client-supplied role or user ID.</li><li>Evaluate the tuple (principal, action, resource, scope) against the resolved grants; a role name alone is not enough.</li><li>Return <strong>401</strong> when the caller is unauthenticated and <strong>403</strong> when authenticated but not permitted.</li><li>Enforce at every entry point: gateway, service, and data layer for critical operations. One unchecked path defeats the model.</li><li>Hiding a button is user experience, not authorization; the API must reject the call anyway.</li><li>Check against the resource actually fetched, not an ID supplied by the client — otherwise you have an IDOR vulnerability.</li><li>Cache resolved permissions carefully and invalidate on role change; a stale cache is a silent privilege bug.</li><li>Log both allows and denials for sensitive actions so audits and investigations have evidence.</li></ul>
+
+<div class="flow"><span class="flow-step">Authenticate the principal</span><span class="flow-arrow">→</span><span class="flow-step">Resolve roles and scope</span><span class="flow-arrow">→</span><span class="flow-step">Evaluate action on resource</span><span class="flow-arrow">→</span><span class="flow-step">Allow or deny</span><span class="flow-arrow">→</span><span class="flow-step">Record the decision</span></div>
+<pre class="code"><code>GET /tenants/acme/orders/9812/refund
+Authorization: Bearer ...
+
+-&gt; authenticated: user:42
+-&gt; roles in tenant:acme: support_agent
+-&gt; permission orders:refund? yes
+-&gt; resource belongs to tenant:acme? yes
+-&gt; 200 OK</code></pre>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Role design: functional vs organizational</h2>
+<ul><li>Functional roles describe a job: support agent, billing administrator, auditor, read-only analyst.</li><li>Organizational or scope roles describe where access applies: team lead for EMEA, owner of project Apollo.</li><li>Prefer a small set of functional roles plus scopes over many narrow roles encoding every combination.</li><li>Never create roles named after individuals or one-off exceptions; those are assignments, not roles.</li><li>Roles should be stable. A role that changes every sprint usually means context belongs somewhere else.</li><li>Every role needs a description, an owner, and a documented reason to exist.</li><li>Keep the role count small enough that a reviewer can actually understand the whole set.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Role</th><th>Type</th><th>Permissions</th><th>Scope</th></tr></thead><tbody><tr><td>support_agent</td><td>Functional</td><td>orders:read, orders:refund, tickets:update</td><td>Assigned tenant</td></tr>
+<tr><td>billing_admin</td><td>Functional</td><td>invoices:read, invoices:write, payouts:read</td><td>Assigned tenant</td></tr>
+<tr><td>auditor</td><td>Functional</td><td>audit_logs:read, reports:read</td><td>Whole organization</td></tr>
+<tr><td>project_owner</td><td>Organizational</td><td>project:manage, members:invite</td><td>One project</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Role explosion</h2>
+<ul><li>Role explosion is the combinatorial growth of roles created for every team, region, tenant, or exception.</li><li>It happens when roles are used to encode context instead of using scopes, attributes, or relationships.</li><li>Symptoms: hundreds of near-duplicate roles, roles with a single member, and no clear owner for most of them.</li><li>Fixes: role hierarchy to share common permissions, scopes for where access applies, and permission groups for reuse.</li><li>When the variation is genuinely contextual, move that part to ABAC or ReBAC instead of multiplying roles.</li><li>Merging roles reduces administration but increases the permissions each holder gets — re-check least privilege afterwards.</li><li>Creating a new role should require review, a name, an owner, and a justification; otherwise the set only grows.</li><li>Measure roles per user, orphaned roles, and single-member roles to detect the pattern early.</li></ul>
+
+
+<div class="note">A role per customer is usually a sign that tenancy belongs in the scope or the data model, not in the role name.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Inheritance and hierarchy</h2>
+<ul><li>A role hierarchy lets a senior role include all permissions of a junior role instead of duplicating the list.</li><li>Inheritance keeps changes consistent: adding a permission to the base role updates every role above it.</li><li>It is transitive, so a change high in the tree affects many users — powerful and easy to over-grant.</li><li>Keep hierarchies shallow; a deep tree is hard to reason about and harder to audit.</li><li>Scope inheritance mirrors reality: organization roles flow to teams, team roles flow to projects, with explicit overrides.</li><li>Mix of inheritance and explicit deny can produce confusing outcomes, so define precedence once and document it.</li><li>Provide a <em>why can this user do X</em> tool that shows the resolved permission and the path that granted it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Level</th><th>Inherits from</th><th>Adds</th></tr></thead><tbody><tr><td>viewer</td><td>—</td><td>read permissions</td></tr>
+<tr><td>editor</td><td>viewer</td><td>create and update</td></tr>
+<tr><td>manager</td><td>editor</td><td>approve, assign roles within scope</td></tr>
+<tr><td>org_admin</td><td>manager</td><td>billing, tenant settings, user lifecycle</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Separation of duties and constraints</h2>
+<ul><li>Separation of duties ensures no single principal can complete a sensitive workflow alone: create a vendor and approve its payment, for example.</li><li>Enforce it with mutually exclusive roles, not just a written policy nobody checks at runtime.</li><li><strong>Static</strong> separation forbids assigning conflicting roles to the same principal at all.</li><li><strong>Dynamic</strong> separation forbids holding them active in the same session, allowing the person to switch hats.</li><li>Cardinality constraints limit how many principals may hold a sensitive role.</li><li>Prerequisite constraints require another role or an approval before a role can be granted.</li><li>Break-glass access should be temporary, require justification, and generate an alert and a review item.</li><li>Small teams often cannot satisfy strict separation; use compensating controls such as approval workflows and audit review.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>The limits of RBAC: ABAC and ReBAC</h2>
+<ul><li>RBAC answers <em>does this role allow this action?</em> It does not naturally answer <em>is this the user's own record?</em> or <em>is this during business hours?</em></li><li><strong>ABAC</strong> evaluates attributes of the subject, resource, action, and environment through policy rules.</li><li><strong>ReBAC</strong> evaluates relationships — owner, editor, member of team, parent folder — which fits sharing and nested resources.</li><li>ABAC and ReBAC handle context and per-object sharing but are harder to reason about, test, and audit.</li><li>Hybrid is normal: RBAC for job function, ABAC or ReBAC for ownership, tenant scope, and sharing.</li><li>Policy-as-code with unit tests keeps complex rules reviewable and prevents regressions.</li><li>Choose the simplest model that expresses the requirement; start with RBAC and add context only when a real case demands it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>Decision based on</th><th>Strength</th><th>Weakness</th></tr></thead><tbody><tr><td>RBAC</td><td>Assigned roles</td><td>Simple, auditable, predictable</td><td>Poor at per-object ownership and context</td></tr>
+<tr><td>ABAC</td><td>Attributes and policy</td><td>Expressive, context-aware</td><td>Complex, hard to audit, policy sprawl</td></tr>
+<tr><td>ReBAC</td><td>Relationship graph</td><td>Natural for sharing and hierarchies</td><td>Graph queries, harder mental model</td></tr>
+<tr><td>Hybrid</td><td>Roles + attributes/relations</td><td>Practical coverage</td><td>Two systems to keep consistent</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Multi-tenancy and delegated administration</h2>
+<ul><li>Every permission should be scoped to a tenant, and cross-tenant access must be an explicit, rare grant.</li><li>Tenant isolation must be enforced in data access, not only in the API layer; a missing filter leaks another customer's data.</li><li>Delegated administration lets tenant admins manage their own users inside a permission boundary.</li><li>An admin must not be able to grant permissions they do not hold — otherwise delegation becomes privilege escalation.</li><li>Keep a canonical role catalog and let tenants choose from it; per-tenant custom roles drift and multiply.</li><li>Test with two tenants and a guessed resource ID to catch tenant-leak and IDOR bugs before attackers do.</li><li>Platform administrator and tenant administrator are different roles with very different blast radius; never merge them.</li></ul>
+
+<div class="flow"><span class="flow-step">Request with tenant context</span><span class="flow-arrow">→</span><span class="flow-step">Authenticate principal</span><span class="flow-arrow">→</span><span class="flow-step">Resolve roles within that tenant</span><span class="flow-arrow">→</span><span class="flow-step">Authorize action + resource ownership</span><span class="flow-arrow">→</span><span class="flow-step">Scope the data query</span><span class="flow-arrow">→</span><span class="flow-step">Respond</span></div>
+<div class="note">If the tenant is inferred from the request body rather than the authenticated principal, isolation is already broken.</div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Audit, review, and lifecycle</h2>
+<ul><li>Log every grant, revoke, role change, and sensitive authorization decision with actor, target, scope, time, and reason.</li><li>Audit logs should be append-only or tamper-evident, and retained according to policy and regulation.</li><li>Run periodic access reviews where managers certify that each principal still needs each role.</li><li>Joiner, mover, leaver: provision on day one, change roles on transfer, and revoke everything on exit.</li><li>Stale access is the most common audit finding; detect unused roles and permissions rather than waiting for a review cycle.</li><li>Reviews only work if reviewers can see effective permissions, not just raw role names.</li><li>Measure time to revoke access, orphaned accounts, and roles without owners; these expose lifecycle failures.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Event</th><th>Action</th><th>Evidence</th></tr></thead><tbody><tr><td>Joiner</td><td>Assign roles from the approved template</td><td>Ticket, approver, role list</td></tr>
+<tr><td>Mover</td><td>Remove old scope, add new</td><td>Before and after effective permissions</td></tr>
+<tr><td>Leaver</td><td>Disable account and revoke sessions</td><td>Timestamp and revocation confirmation</td></tr>
+<tr><td>Periodic review</td><td>Certify or remove each role</td><td>Reviewer sign-off and date</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Roles as indirection</strong> make permissions manageable at scale but add a layer that must be designed, documented, and audited.</li><li><strong>Fine-grained permissions</strong> enable least privilege but multiply the permission catalog and the chance of misconfiguration; coarse permissions are simpler but over-grant.</li><li><strong>Few broad roles</strong> are easy to administer but give each user more access; many narrow roles improve least privilege but cause role explosion.</li><li><strong>Role inheritance</strong> removes duplication and keeps changes consistent but makes a single edit affect many users and complicates reasoning.</li><li><strong>Centralized enforcement</strong> gives consistency and auditability but creates a shared dependency and a potential latency or availability bottleneck.</li><li><strong>Permission caching</strong> keeps authorization fast but risks stale grants after a role change; no cache is correct but slower.</li><li><strong>Static separation of duties</strong> is easy to verify but inflexible for small teams; dynamic separation is flexible but harder to enforce and audit.</li><li><strong>ABAC/ReBAC</strong> express ownership and context that RBAC cannot, at the cost of policy complexity, testing burden, and explainability.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is RBAC?</summary><div class="answer"><p>Role-Based Access Control: permissions are grouped into roles, roles are assigned to principals, and each request is checked against the permissions those roles grant. It replaces per-user permission lists with a manageable indirection layer.</p></div></details>
+<details><summary>2. Why not assign permissions directly to users?</summary><div class="answer"><p>It does not scale. Onboarding depends on memory, policy changes require editing hundreds of users, transfers leave stale permissions, and nobody can answer who can do what. Roles centralize the permission set so it can be reviewed and changed once.</p></div></details>
+<details><summary>3. How does a permission check work on a request?</summary><div class="answer"><p>Authenticate the principal, resolve the roles assigned in the relevant scope, union their permissions, and test whether the requested action on that specific resource is allowed. Then enforce it at the service and data layer, and log the decision. Role names alone are not a decision.</p></div></details>
+<details><summary>4. What is least privilege and how do you enforce it?</summary><div class="answer"><p>Grant only what the task requires, for only as long as it is required. Start accounts with no roles, scope permissions to a tenant or project, use just-in-time elevation for admin work, and review grants regularly. Missing access is visible; excess access is not.</p></div></details>
+<details><summary>5. What does default deny mean in practice?</summary><div class="answer"><p>No matching grant means deny, and any evaluation failure also denies. Explicit denies override allows, new resources start private, and every entry point enforces the check. Optional or UI-only checks create accidental default allow.</p></div></details>
+<details><summary>6. What is role explosion and how do you fix it?</summary><div class="answer"><p>It is the runaway growth of near-duplicate roles per team, tenant, or exception. Fix it by using scopes for where access applies, hierarchy and permission groups for reuse, and moving genuinely contextual rules to ABAC/ReBAC. Review new role requests and track single-member roles.</p></div></details>
+<details><summary>7. How does role inheritance help and what is the risk?</summary><div class="answer"><p>Inheritance lets senior roles reuse junior permission sets, so a change is made once. The risk is that edits high in the hierarchy silently affect many users, and deep trees become hard to audit. Keep hierarchies shallow and provide an effective-permissions view.</p></div></details>
+<details><summary>8. What is separation of duties?</summary><div class="answer"><p>A constraint that no single principal can complete a sensitive workflow alone — for example, the person who creates a vendor cannot also approve its payment. Enforce it with mutually exclusive roles, either statically (never assign both) or dynamically (never active in the same session).</p></div></details>
+<details><summary>9. When does RBAC stop being enough?</summary><div class="answer"><p>When decisions depend on attributes (time, department, data classification) or relationships (owner of this document, member of this team). Then add ABAC for attribute policy or ReBAC for relationship graphs, usually alongside RBAC rather than replacing it.</p></div></details>
+<details><summary>10. What is the difference between RBAC, ABAC, and ReBAC?</summary><div class="answer"><p>RBAC decides from assigned roles, ABAC from attributes of subject, resource, action, and environment, and ReBAC from relationships in a graph such as ownership or group membership. RBAC is simplest to audit; ABAC and ReBAC are more expressive but harder to reason about.</p></div></details>
+<details><summary>11. How do you prevent privilege escalation through role administration?</summary><div class="answer"><p>Only allow a principal to grant roles and permissions it already holds, require approval for sensitive roles, and restrict who can edit role definitions. Log every grant. Treat role administration itself as a privileged permission.</p></div></details>
+<details><summary>12. Where should authorization be enforced?</summary><div class="answer"><p>At the service boundary for every operation, and again at the data layer for critical or tenant-scoped access. The gateway can do coarse checks, but it cannot know object ownership. UI hiding is not enforcement — the API must reject unauthorized calls on its own.</p></div></details>
+<details><summary>13. How do you handle multi-tenancy with RBAC?</summary><div class="answer"><p>Scope every role assignment and permission to a tenant, derive the tenant from the authenticated principal rather than the request body, and filter all data access by it. Give tenant admins delegated control within a boundary so they cannot grant more than they hold. Never merge tenant admin with platform admin.</p></div></details>
+<details><summary>14. What should an access audit include?</summary><div class="answer"><p>Every grant, revoke, role-definition change, and sensitive allow/deny decision with actor, target, scope, timestamp, and reason. Plus periodic reviews that certify each principal's effective permissions, and lifecycle checks for joiners, movers, and leavers. Tamper-evident retention matters for compliance.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Checking permissions only in the UI while the API accepts any authenticated request.</li><li>Creating a role per user, team, or customer instead of using scopes — role explosion by another name.</li><li>Granting a broad default role to new accounts and never reviewing it.</li><li>Letting a missing policy or a failed policy service fall through to allow.</li><li>Authorizing against a client-supplied user ID or role instead of the authenticated principal.</li><li>Trusting a stale permission cache after a role change or termination.</li><li>Letting admins grant permissions they do not hold, which turns delegation into escalation.</li><li>Assuming RBAC handles object ownership and tenant isolation without explicit checks.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="ssl-tls.html"><span>← Previous</span><strong>SSL/TLS</strong></a><span></span></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/rbac">AlgoMaster — RBAC</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

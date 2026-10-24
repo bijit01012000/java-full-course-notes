@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Design Fundamentals — Video Concepts</title>
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem("sd-theme");
+      var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    } catch (e) {}
+  })();
+</script>
+<style>
+  :root {
+    color-scheme: light;
+    --bg:#f6f4ee; --paper:#fffdf8; --ink:#17211f; --muted:#5d6a66;
+    --line:#d8ded6; --line-strong:#b8c4bb;
+    --teal:#0f766e; --teal-soft:#e2f4ef; --blue:#1d4ed8; --blue-soft:#e8efff;
+    --amber:#a85b00; --amber-soft:#fff2d6; --rose:#b42342; --rose-soft:#ffe8ec;
+    --violet:#6d3fc4; --violet-soft:#f0e9ff;
+    --shadow:0 16px 48px rgba(23,33,31,.07);
+    --code-bg:#eef3f0; --code-line:#dbe5df;
+  }
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --bg:#0d1413; --paper:#131c1a; --ink:#e8f0ec; --muted:#9aaba5;
+    --line:#2a3a35; --line-strong:#3e534d;
+    --teal:#5eead4; --teal-soft:#12332f; --blue:#8ab4ff; --blue-soft:#16243d;
+    --amber:#f0b35a; --amber-soft:#352713; --rose:#f07a92; --rose-soft:#3a1822;
+    --violet:#b79aff; --violet-soft:#271b3d;
+    --shadow:0 16px 48px rgba(0,0,0,.35);
+    --code-bg:#17231f; --code-line:#2a3d36;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    margin:0; background:
+      radial-gradient(circle at 6% 0%, rgba(15,118,110,.08), transparent 34rem),
+      radial-gradient(circle at 100% 6%, rgba(29,78,216,.06), transparent 30rem),
+      var(--bg);
+    color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:16px; line-height:1.62; -webkit-font-smoothing:antialiased;
+    transition:background-color .18s ease, color .18s ease;
+  }
+  a { color:var(--teal); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .wrap { max-width:1280px; margin:0 auto; padding:28px 24px 72px; }
+
+  .hero {
+    position:relative; overflow:hidden; padding:40px 44px 34px;
+    background:linear-gradient(135deg,var(--paper) 0%,var(--teal-soft) 62%,var(--paper) 100%);
+    border:1px solid var(--line); border-radius:24px; box-shadow:var(--shadow);
+  }
+  .hero::after { content:""; position:absolute; right:-90px; top:-140px; width:390px; height:390px; border-radius:50%; background:radial-gradient(circle,rgba(15,118,110,.16),transparent 68%); pointer-events:none; }
+  .topline { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:14px; }
+  .eyebrow { display:flex; align-items:center; gap:10px; color:var(--teal); font-size:.76rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+  .eyebrow::before { content:""; width:30px; height:2px; background:var(--teal); border-radius:2px; }
+  .actions { display:flex; gap:8px; flex:0 0 auto; }
+  .btn { border:1px solid var(--line-strong); background:var(--paper); color:var(--muted); border-radius:999px; padding:7px 12px; font:inherit; font-size:.74rem; font-weight:750; cursor:pointer; white-space:nowrap; }
+  .btn:hover { border-color:var(--teal); color:var(--teal); }
+  .btn.primary { background:var(--teal-soft); border-color:var(--teal); color:var(--teal); }
+  h1 { margin:0; max-width:900px; font-family:Georgia,"Times New Roman",serif; font-size:clamp(2.2rem,4.8vw,4.1rem); line-height:1.03; letter-spacing:-.035em; font-weight:600; }
+  .dek { max-width:820px; margin:17px 0 0; color:var(--muted); font-size:1.08rem; line-height:1.55; }
+  .meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:22px; }
+  .pill { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--line); background:color-mix(in srgb,var(--paper) 82%,transparent); color:var(--muted); border-radius:999px; padding:6px 11px; font-size:.74rem; font-weight:650; }
+  .pill strong { color:var(--ink); }
+  .pill.accent { background:var(--teal-soft); border-color:var(--teal); color:var(--teal); }
+
+  .layout { display:grid; grid-template-columns:248px minmax(0,1fr); gap:38px; margin-top:38px; align-items:start; }
+  .toc { position:sticky; top:18px; background:color-mix(in srgb,var(--paper) 82%,transparent); border:1px solid var(--line); border-radius:16px; padding:16px 13px; backdrop-filter:blur(10px); }
+  .toc-title { margin:0 0 8px 10px; color:var(--muted); font-size:.68rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+  .search { width:100%; border:1px solid var(--line); background:var(--bg); color:var(--ink); border-radius:9px; padding:8px 10px; font:inherit; font-size:.8rem; margin-bottom:10px; outline:none; }
+  .search:focus { border-color:var(--teal); }
+  .toc a { display:flex; gap:8px; align-items:baseline; color:var(--muted); border-left:2px solid transparent; border-radius:0 8px 8px 0; padding:5px 9px; font-size:.81rem; line-height:1.35; text-decoration:none; }
+  .toc a:hover { background:var(--teal-soft); color:var(--teal); }
+  .toc a .n { color:var(--line-strong); font-variant-numeric:tabular-nums; font-weight:750; font-size:.72rem; }
+  .toc .extra { margin-top:9px; padding-top:9px; border-top:1px solid var(--line); }
+
+  main { min-width:0; }
+  .chapter { margin:0 0 46px; scroll-margin-top:18px; }
+  .chapter-head { display:flex; align-items:baseline; justify-content:space-between; gap:16px; border-bottom:1px solid var(--line); padding-bottom:9px; margin-bottom:8px; }
+  h2 { margin:0; font-family:Georgia,"Times New Roman",serif; font-size:1.7rem; line-height:1.18; letter-spacing:-.015em; font-weight:600; }
+  .chapter-count { color:var(--muted); font-size:.69rem; font-weight:750; text-transform:uppercase; letter-spacing:.08em; white-space:nowrap; }
+  .chapter-blurb { margin:0 0 16px; color:var(--muted); font-size:.9rem; }
+  .topic { background:var(--paper); border:1px solid var(--line); border-left:3px solid var(--teal); border-radius:0 13px 13px 0; padding:15px 18px 16px; margin:0 0 13px; scroll-margin-top:18px; }
+  .topic-head { display:flex; align-items:baseline; gap:9px; margin-bottom:7px; }
+  .topic-head .num { flex:0 0 auto; color:var(--teal); font-size:.7rem; font-weight:800; letter-spacing:.06em; font-variant-numeric:tabular-nums; }
+  h3 { margin:0; font-size:1.02rem; line-height:1.3; font-weight:760; }
+  .src { margin-left:auto; flex:0 0 auto; color:var(--muted); font-size:.67rem; font-weight:650; white-space:nowrap; }
+  .src:hover { color:var(--teal); }
+  .core { margin:0 0 9px; padding:7px 10px; background:var(--teal-soft); border-radius:7px; color:var(--ink); font-size:.87rem; line-height:1.5; }
+  .core-label { display:block; color:var(--teal); font-size:.61rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; margin-bottom:2px; }
+  .points { margin:0; padding-left:1.15rem; }
+  .points li { margin:4px 0; font-size:.87rem; line-height:1.55; }
+  .points li::marker { color:var(--line-strong); }
+  .note { margin-top:9px; padding:7px 10px; border-left:2px solid var(--teal); background:color-mix(in srgb,var(--teal-soft) 50%,transparent); border-radius:0 6px 6px 0; color:var(--muted); font-size:.8rem; line-height:1.5; }
+  .note a { font-weight:700; }
+
+  .flow { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:10px 0 2px; }
+  .flow-step { border:1px solid var(--line); background:var(--bg); color:var(--ink); border-radius:999px; padding:4px 9px; font-size:.74rem; font-weight:650; }
+  .flow-arrow { color:var(--teal); font-weight:800; font-size:.78rem; }
+
+  .table-wrap { margin:10px 0 4px; border:1px solid var(--line); border-radius:9px; overflow:auto; background:var(--paper); }
+  table { width:100%; border-collapse:collapse; font-size:.8rem; line-height:1.45; }
+  th { background:var(--teal-soft); color:var(--muted); text-align:left; font-size:.64rem; letter-spacing:.06em; text-transform:uppercase; font-weight:800; padding:7px 9px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  td { padding:7px 9px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr:last-child td { border-bottom:0; }
+  tbody tr:nth-child(even) { background:color-mix(in srgb,var(--teal-soft) 24%,transparent); }
+
+  .concept-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; margin:10px 0 2px; }
+  .concept { border:1px solid var(--line); background:var(--bg); border-radius:8px; padding:8px 9px; }
+  .concept .cnum { display:block; color:var(--line-strong); font-size:.62rem; font-weight:800; letter-spacing:.05em; }
+  .concept strong { display:block; color:var(--ink); font-size:.78rem; line-height:1.35; margin:1px 0 2px; }
+  .concept span:last-child { display:block; color:var(--muted); font-size:.7rem; line-height:1.4; }
+
+  .code { margin:10px 0 2px; padding:10px 12px; background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px; overflow:auto; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.76rem; line-height:1.5; white-space:pre-wrap; }
+
+  .qa-tools { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; margin:12px 0 10px; }
+  .qa-tools p { margin:0; color:var(--muted); font-size:.8rem; }
+  .qa { border:1px solid var(--line); border-radius:11px; background:var(--paper); overflow:hidden; }
+  .qa details { border-bottom:1px solid var(--line); }
+  .qa details:last-child { border-bottom:0; }
+  .qa summary { cursor:pointer; list-style:none; display:flex; gap:9px; align-items:flex-start; padding:10px 13px; font-size:.86rem; font-weight:680; color:var(--ink); }
+  .qa summary::-webkit-details-marker { display:none; }
+  .qa summary::before { content:"+"; flex:0 0 auto; width:18px; height:18px; margin-top:1px; border-radius:50%; background:var(--teal-soft); color:var(--teal); font-size:.76rem; font-weight:800; display:inline-flex; align-items:center; justify-content:center; }
+  .qa details[open] summary::before { content:"−"; }
+  .qa .answer { padding:0 14px 11px 40px; color:var(--muted); font-size:.83rem; line-height:1.55; }
+  .qa .answer p:last-child { margin-bottom:0; }
+
+  .traps { border:1px solid var(--line); border-radius:11px; background:var(--paper); padding:14px 16px; margin:12px 0 0; }
+  .traps ul { margin:0; padding-left:1.15rem; }
+  .traps li { margin:5px 0; font-size:.86rem; line-height:1.5; }
+
+  .footer { margin-top:46px; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); font-size:.75rem; line-height:1.55; }
+  .footer strong { color:var(--ink); }
+
+  @media (max-width:980px) {
+    .layout { grid-template-columns:1fr; gap:18px; }
+    .toc { position:static; display:grid; grid-template-columns:1fr 1fr; gap:0 8px; }
+    .toc-title,.search,.toc .extra { grid-column:1/-1; }
+    .hero { padding:30px 26px 28px; }
+    .concept-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  }
+  @media (max-width:640px) {
+    .wrap { padding:14px 12px 48px; }
+    .hero { padding:24px 19px 22px; border-radius:18px; }
+    .topline { flex-direction:column; align-items:flex-start; }
+    .actions { width:100%; }
+    .btn { flex:1; text-align:center; }
+    .toc { grid-template-columns:1fr; }
+    .chapter-head { flex-direction:column; align-items:flex-start; gap:2px; }
+    h2 { font-size:1.45rem; }
+    .concept-grid { grid-template-columns:1fr; }
+    .topic { padding:13px 13px 14px; }
+    .src { display:none; }
+  }
+  @media print {
+    @page { margin:15mm 13mm; }
+    :root, html[data-theme="dark"] {
+      color-scheme:light;
+      --bg:#fff; --paper:#fff; --ink:#17211f; --muted:#5d6a66; --line:#d8ded6; --line-strong:#b8c4bb;
+      --teal:#0f766e; --teal-soft:#e2f4ef; --blue:#1d4ed8; --blue-soft:#e8efff;
+      --amber:#a85b00; --amber-soft:#fff2d6; --rose:#b42342; --rose-soft:#ffe8ec;
+      --violet:#6d3fc4; --violet-soft:#f0e9ff; --code-bg:#f4f6f3; --code-line:#dbe5df;
+    }
+    body { background:#fff; font-size:10pt; line-height:1.42; }
+    .wrap { max-width:none; padding:0; }
+    .hero { box-shadow:none; border:0; border-bottom:2px solid #17211f; border-radius:0; padding:0 0 12px; background:#fff; }
+    .hero::after,.actions,.toc { display:none; }
+    h1 { font-size:28pt; }
+    .dek { font-size:10.5pt; }
+    .layout { display:block; margin-top:16px; }
+    .chapter { break-inside:auto; margin-bottom:18px; }
+    .chapter-head { break-after:avoid; }
+    h2 { font-size:15pt; }
+    .topic { break-inside:avoid; box-shadow:none; }
+    .table-wrap,.qa,.traps,.code { break-inside:avoid; box-shadow:none; }
+    .qa details > .answer { display:block !important; }
+    a { color:inherit; text-decoration:none; }
+    .footer { font-size:8pt; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · Video Concepts</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>System Design Fundamentals</h1>
+    <p class="dek">All 49 video concepts in course order — crisp notes, key trade-offs, and the questions that matter in interviews.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>49</strong> video topics</span>
+      <span class="pill">13 sections</span>
+      <span class="pill">22 interview questions</span>
+      <span class="pill">Light + dark theme</span>
+      <span class="pill">Offline · no dependencies</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">Contents</p>
+      <input class="search" id="topicSearch" type="search" placeholder="Filter topics…" aria-label="Filter topics">
+      <a href="#sec-intro"><span class="n">01</span>Introduction</a>
+<a href="#sec-core"><span class="n">02</span>Core Concepts</a>
+<a href="#sec-networking"><span class="n">03</span>Networking</a>
+<a href="#sec-api"><span class="n">04</span>API Fundamentals</a>
+<a href="#sec-databases"><span class="n">05</span>Databases &amp; Storage</a>
+<a href="#sec-dbscale"><span class="n">06</span>Database Scaling Techniques</a>
+<a href="#sec-caching"><span class="n">07</span>Caching</a>
+<a href="#sec-async"><span class="n">08</span>Asynchronous Communications</a>
+<a href="#sec-micro"><span class="n">09</span>Microservices</a>
+<a href="#sec-bigdata"><span class="n">10</span>Big Data Processing</a>
+<a href="#sec-architecture"><span class="n">11</span>Architectural Patterns</a>
+<a href="#sec-observability"><span class="n">12</span>Observability</a>
+<a href="#sec-security"><span class="n">13</span>Security</a>
+      <div class="extra">
+        <a href="#traps"><span class="n">!</span>Traps</a>
+        <a href="#questions"><span class="n">?</span>Interview questions</a>
+      </div>
+    </nav>
+
+    <main>
+      <div class="callout" style="margin:0 0 26px; padding:13px 16px; border:1px solid var(--line); border-left:4px solid var(--teal); border-radius:0 10px 10px 0; background:color-mix(in srgb,var(--paper) 86%,transparent);">
+        <strong>How to use:</strong> this is the quick pass. For the full treatment, open the <a href="fundamentals/index.html">detailed one-page-per-topic notes →</a>. Search filters the topic list; theme choice is saved in this browser.
+      </div>
+
+      
+    <section class="chapter" id="sec-intro">
+      <div class="chapter-head">
+        <h2>Introduction</h2>
+        <span class="chapter-count">2 topics</span>
+      </div>
+      <p class="chapter-blurb">What system design is, plus the 30-concept map the rest of the course expands.</p>
+      
+      <article class="topic" id="t-what-is-system-design" data-title="what is system design?">
+        <div class="topic-head">
+          <span class="num">01</span>
+          <h3>What is System Design?</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/what-is-system-design" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Turn requirements into components, responsibilities, data flow, and defended trade-offs.</p><ul class="points"><li><strong>Definition:</strong> system design is one level above code — servers, databases, caches, queues, network, and failure.</li>
+<li><strong>Requirements first:</strong> functional = what it does; non-functional = how well (latency, availability, durability).</li>
+<li>One server works for a few thousand users; storage, failure, distance, and spikes change the constraints at scale.</li>
+<li>Photo app path: client → LB → app → DB/object storage; add cache, CDN, and queue only when the bottleneck justifies them.</li>
+<li>Every component earns its place by solving a problem; every choice makes something else worse.</li>
+<li>Interview flow: clarify → estimate → sketch → deep dive → trade-offs.</li></ul><div class="note">Full topic note: <a href="01-what-is-system-design.html">What is System Design? →</a></div>
+      </article>
+      <article class="topic" id="t-top-30-system-design-concepts" data-title="top 30 system design concepts">
+        <div class="topic-head">
+          <span class="num">02</span>
+          <h3>Top 30 System Design Concepts</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/top-30-system-design-concepts" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>A one-screen map of the vocabulary every later topic assumes.</p>
+        <div class="concept-grid"><div class="concept"><span class="cnum">01</span><strong>Client-server</strong><span>Clients request; servers hold the source of truth.</span></div><div class="concept"><span class="cnum">02</span><strong>IP address</strong><span>Host address; a port selects the service.</span></div><div class="concept"><span class="cnum">03</span><strong>DNS</strong><span>Domain → IP; cached by TTL.</span></div><div class="concept"><span class="cnum">04</span><strong>Proxy vs reverse proxy</strong><span>Client-side vs server-side intermediary.</span></div><div class="concept"><span class="cnum">05</span><strong>Latency</strong><span>Time per request; distance and RTT dominate.</span></div><div class="concept"><span class="cnum">06</span><strong>HTTP / HTTPS</strong><span>Request/response; HTTPS adds TLS.</span></div><div class="concept"><span class="cnum">07</span><strong>APIs</strong><span>Contract between client and server.</span></div><div class="concept"><span class="cnum">08</span><strong>REST</strong><span>Resources + HTTP verbs; stateless.</span></div><div class="concept"><span class="cnum">09</span><strong>GraphQL</strong><span>Client asks for exact fields; schema-driven.</span></div><div class="concept"><span class="cnum">10</span><strong>WebSockets</strong><span>Full-duplex real-time connection.</span></div><div class="concept"><span class="cnum">11</span><strong>Webhooks</strong><span>Event-driven HTTP callback.</span></div><div class="concept"><span class="cnum">12</span><strong>Databases</strong><span>Durable structured state.</span></div><div class="concept"><span class="cnum">13</span><strong>SQL vs NoSQL</strong><span>Relations/ACID vs flexible/horizontal scale.</span></div><div class="concept"><span class="cnum">14</span><strong>Indexing</strong><span>Sorted structure to avoid full scans.</span></div><div class="concept"><span class="cnum">15</span><strong>Vertical partitioning</strong><span>Split columns/tables by access pattern.</span></div><div class="concept"><span class="cnum">16</span><strong>Caching</strong><span>Hot data in faster storage; TTL and invalidation.</span></div><div class="concept"><span class="cnum">17</span><strong>Denormalization</strong><span>Duplicate or precompute to avoid joins.</span></div><div class="concept"><span class="cnum">18</span><strong>Blob storage</strong><span>Large objects in object storage.</span></div><div class="concept"><span class="cnum">19</span><strong>Vertical scaling</strong><span>Bigger machine; simple but finite.</span></div><div class="concept"><span class="cnum">20</span><strong>Horizontal scaling</strong><span>More machines; stateless + load balancer.</span></div><div class="concept"><span class="cnum">21</span><strong>Load balancers</strong><span>Distribute traffic; health checks.</span></div><div class="concept"><span class="cnum">22</span><strong>Replication</strong><span>Copies for read scale and availability.</span></div><div class="concept"><span class="cnum">23</span><strong>Sharding</strong><span>Partition data by shard key.</span></div><div class="concept"><span class="cnum">24</span><strong>CAP theorem</strong><span>During a partition: consistency vs availability.</span></div><div class="concept"><span class="cnum">25</span><strong>CDN</strong><span>Cache static content near users.</span></div><div class="concept"><span class="cnum">26</span><strong>Idempotency</strong><span>Repeating a request has the same effect.</span></div><div class="concept"><span class="cnum">27</span><strong>Microservices</strong><span>Independent services, own data.</span></div><div class="concept"><span class="cnum">28</span><strong>Message queues</strong><span>Buffer and decouple work; one consumer per message.</span></div><div class="concept"><span class="cnum">29</span><strong>Rate limiting</strong><span>Protect capacity; reject with 429.</span></div><div class="concept"><span class="cnum">30</span><strong>API gateway</strong><span>Single entry for auth, routing, limits.</span></div></div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-core">
+      <div class="chapter-head">
+        <h2>Core Concepts</h2>
+        <span class="chapter-count">5 topics</span>
+      </div>
+      <p class="chapter-blurb">The five qualities and scaling ideas that every design decision is measured against.</p>
+      
+      <article class="topic" id="t-scalability" data-title="scalability">
+        <div class="topic-head">
+          <span class="num">03</span>
+          <h3>Scalability</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/scalability" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Handle more load without collapsing — and know which resource is actually the bottleneck.</p><ul class="points"><li><strong>Load:</strong> users, requests/sec, data size, read/write ratio, and peak-to-average ratio.</li>
+<li><strong>Vertical (scale up):</strong> bigger machine; simple, but has a ceiling, costs more, and remains one failure domain.</li>
+<li><strong>Horizontal (scale out):</strong> more machines; needs stateless app servers, a load balancer, and shared state handled externally.</li>
+<li><strong>Database is usually the bottleneck:</strong> separate it from the app, add indexes, cache, read replicas, then shard.</li>
+<li><strong>Sessions:</strong> avoid per-server memory; use sticky sessions or a shared session store.</li>
+<li>Measure first; add a component only when the bottleneck is real.</li></ul><div class="note"><strong>Trade-off:</strong> horizontal scaling improves capacity and fault isolation but adds coordination, data consistency, and operational cost.</div>
+      </article>
+      <article class="topic" id="t-availability" data-title="availability">
+        <div class="topic-head">
+          <span class="num">04</span>
+          <h3>Availability</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/availability" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Keep the system usable when components fail — measured in nines, not adjectives.</p><ul class="points"><li><strong>Availability:</strong> percentage of time the system is usable. 99.9% ≈ 8.8 h/year; 99.99% ≈ 52.6 min/year; 99.999% ≈ 5.3 min/year.</li>
+<li><strong>Series:</strong> availabilities multiply — more dependencies mean lower end-to-end availability.</li>
+<li><strong>Parallel:</strong> redundancy helps only when failures are independent: 1 − (1 − A)ⁿ.</li>
+<li><strong>Active-passive:</strong> standby takes over; simpler, but failover time and idle capacity.</li>
+<li><strong>Active-active:</strong> both serve traffic; better utilization, but needs conflict handling and routing.</li>
+<li>Use health checks, load balancers, multi-AZ/region placement, queues for overload, and circuit breakers to contain cascades.</li></ul><div class="note"><strong>Trap:</strong> adding a redundant component that shares the same dependency, network, or control plane does not improve availability.</div>
+      </article>
+      <article class="topic" id="t-cap-theorem" data-title="cap theorem">
+        <div class="topic-head">
+          <span class="num">05</span>
+          <h3>CAP Theorem</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/cap-theorem" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>When a network partition happens, choose consistency or availability — and state which one you chose.</p><ul class="points"><li><strong>C:</strong> every read sees the latest write (linearizable consistency).</li>
+<li><strong>A:</strong> every non-failing node returns a response.</li>
+<li><strong>P:</strong> the system keeps working despite dropped or delayed messages between nodes.</li>
+<li>Partitions are unavoidable in distributed systems, so the real choice is <strong>CP</strong> (reject or block to stay consistent) vs <strong>AP</strong> (serve potentially stale data).</li>
+<li><strong>CA</strong> is only meaningful when there is no partition — not a real distributed option.</li>
+<li><strong>PACELC:</strong> even without partitions, trade latency vs consistency.</li></ul><div class="note"><strong>Examples:</strong> CP-leaning systems reject writes during partitions; AP-leaning systems accept writes and reconcile conflicts later. Many systems are tunable per operation.</div>
+      </article>
+      <article class="topic" id="t-consistent-hashing" data-title="consistent hashing">
+        <div class="topic-head">
+          <span class="num">06</span>
+          <h3>Consistent Hashing</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/consistent-hashing" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Distribute keys across changing servers while moving as few keys as possible.</p><ul class="points"><li>Modulo hashing (<code>hash(key) % N</code>) remaps almost every key when N changes.</li>
+<li>Consistent hashing maps keys and servers onto a ring; a key belongs to the next server clockwise.</li>
+<li>Adding or removing one server moves roughly <strong>1/N</strong> of the keys, not all of them.</li>
+<li><strong>Virtual nodes:</strong> each physical server appears many times on the ring, smoothing uneven ranges and hot spots.</li>
+<li><strong>Replication:</strong> store each key on the next N distinct physical nodes clockwise.</li>
+<li>Use it for distributed caches, sharded databases, and load balancers that need stable key affinity.</li></ul><div class="note"><strong>Trade-off:</strong> better distribution and elasticity, but more metadata, rebalancing, and ring-management complexity.</div>
+      </article>
+      <article class="topic" id="t-latency-vs-throughput" data-title="latency vs throughput">
+        <div class="topic-head">
+          <span class="num">07</span>
+          <h3>Latency vs Throughput</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/latency-vs-throughput" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Latency is how long one request takes; throughput is how many finish per unit time.</p><ul class="points"><li><strong>Latency:</strong> time for one request; report p50/p95/p99, not just averages.</li>
+<li><strong>Bandwidth:</strong> capacity of the path; <strong>throughput:</strong> actual work completed per second.</li>
+<li>Small requests are latency-bound; large transfers are bandwidth-bound.</li>
+<li>Distance, round trips, queueing, and tail latency dominate user experience.</li>
+<li>Batching and concurrency improve throughput but can increase per-request latency.</li>
+<li>Find the bottleneck: CPU, memory, disk, network, lock contention, or a downstream dependency.</li></ul><div class="note"><strong>Trade-off:</strong> optimizing for throughput often means accepting higher latency; optimizing for latency often means less batching and more parallelism.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-networking">
+      <div class="chapter-head">
+        <h2>Networking</h2>
+        <span class="chapter-count">6 topics</span>
+      </div>
+      <p class="chapter-blurb">The request path: names, connections, protocols, and the checks that catch corruption.</p>
+      
+      <article class="topic" id="t-load-balancers" data-title="load balancers">
+        <div class="topic-head">
+          <span class="num">08</span>
+          <h3>Load Balancers</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/load-balancers" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Spread traffic across healthy servers and remove failed instances from rotation.</p><ul class="points"><li>Algorithms: round robin, least connections, weighted, and hashing.</li>
+<li><strong>L4</strong> routes connections by IP/port and can handle TCP/UDP without understanding HTTP.</li>
+<li><strong>L7</strong> understands HTTP: path, headers, cookies, TLS termination, and request-level routing.</li>
+<li>Health checks remove unhealthy targets; connection draining lets in-flight requests finish.</li>
+<li>Stateless app servers make horizontal scaling and load balancing simple; stateful servers need sticky sessions.</li>
+<li>The load balancer itself needs redundancy — active-passive, active-active, or anycast/DNS.</li></ul><div class="note"><strong>Default:</strong> L7 in front of stateless HTTP app servers; L4 when you need protocol-agnostic, high-throughput forwarding.</div>
+      </article>
+      <article class="topic" id="t-proxy-vs-reverse-proxy" data-title="proxy vs reverse proxy">
+        <div class="topic-head">
+          <span class="num">09</span>
+          <h3>Proxy vs Reverse Proxy</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/proxy-vs-reverse-proxy" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>A proxy is an intermediary; the difference is whose side it represents.</p><ul class="points"><li><strong>Forward proxy:</strong> sits in front of clients; hides client identity, controls egress, caches, and logs.</li>
+<li><strong>Reverse proxy:</strong> sits in front of servers; hides backend topology, terminates TLS, compresses, caches, and routes.</li>
+<li>A reverse proxy can serve static files and protect backend services from direct exposure.</li>
+<li>Reverse proxy vs load balancer: load balancing is one possible job of a reverse proxy; the categories overlap.</li>
+<li>Common implementations: NGINX, Envoy, HAProxy, cloud gateways.</li>
+<li>Use a reverse proxy for TLS offload, routing, compression, and a single controlled entry point.</li></ul><div class="note"><strong>Trap:</strong> a forward proxy protects the client; a reverse proxy protects and fronts the server. Do not use the terms interchangeably.</div>
+      </article>
+      <article class="topic" id="t-domain-name-system-dns" data-title="domain name system (dns)">
+        <div class="topic-head">
+          <span class="num">10</span>
+          <h3>Domain Name System (DNS)</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/domain-name-system-dns" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>A globally cached, hierarchical name-to-address system — and a coarse traffic-routing tool.</p><ul class="points"><li>Resolution: device cache → recursive resolver → root/TLD → authoritative name server.</li>
+<li>Record types: <code>A</code>/<code>AAAA</code> (address), <code>CNAME</code> (alias), <code>MX</code> (mail), <code>TXT</code> (verification), <code>NS</code> (delegation).</li>
+<li><strong>TTL</strong> controls cache lifetime; failover is delayed until caches expire.</li>
+<li>Recursive resolvers do the walking; authoritative servers hold the record.</li>
+<li>DNS supports geographic, weighted, and failover routing.</li>
+<li>Propagation is mostly cache expiry, not an instant global update.</li></ul><div class="note"><strong>Trap:</strong> DNS failover is not real-time health checking. Clients may keep using a stale IP until TTL expiry.</div>
+      </article>
+      <article class="topic" id="t-http-https" data-title="http/https">
+        <div class="topic-head">
+          <span class="num">11</span>
+          <h3>HTTP/HTTPS</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/http-https" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>HTTP is a stateless request/response protocol; HTTPS adds encryption, integrity, and identity.</p><ul class="points"><li>Request: method, path, headers, optional body. Response: status code, headers, body.</li>
+<li>Idempotent methods: GET, PUT, DELETE; POST is not idempotent by default.</li>
+<li>HTTP is stateless; cookies or tokens carry user state across requests.</li>
+<li>HTTPS = HTTP over TLS; it protects against eavesdropping and tampering and verifies the server certificate.</li>
+<li>HTTP/1.1: one request at a time per connection; HTTP/2: multiplexed streams over TCP; HTTP/3: QUIC over UDP.</li>
+<li>Caching headers (<code>Cache-Control</code>, <code>ETag</code>) are part of the protocol contract.</li></ul><div class="note"><strong>Interview line:</strong> “HTTP defines the contract; TLS protects the pipe; HTTP/2 and HTTP/3 change how the pipe is shared.”</div>
+      </article>
+      <article class="topic" id="t-tcp-vs-udp" data-title="tcp vs udp">
+        <div class="topic-head">
+          <span class="num">12</span>
+          <h3>TCP vs UDP</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/tcp-vs-udp" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>TCP gives reliable ordered bytes; UDP gives independent datagrams with fewer guarantees.</p><ul class="points"><li>TCP: three-way handshake, retransmission, ordering, flow control, and congestion control.</li>
+<li>TCP is a byte stream, not a message stream; the application must frame messages.</li>
+<li>TCP head-of-line blocking: one lost packet delays later data on that connection.</li>
+<li>UDP: no handshake, no retransmission, no ordering guarantee; lower overhead and no built-in recovery.</li>
+<li>Use TCP for APIs, databases, and messaging; UDP for real-time media, games, DNS, and QUIC.</li>
+<li>QUIC builds reliability and congestion control on top of UDP, avoiding TCP-level HOL blocking.</li></ul><div class="note"><strong>Trade-off:</strong> reliability vs timeliness. Choose by failure semantics, not by which protocol sounds faster.</div>
+      </article>
+      <article class="topic" id="t-checksums" data-title="checksums">
+        <div class="topic-head">
+          <span class="num">13</span>
+          <h3>Checksums</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/checksums" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Detect accidental corruption — not prove authenticity.</p><ul class="points"><li>A checksum is a compact fingerprint of data used to detect changes or transmission errors.</li>
+<li>Simple sums catch some errors; Internet checksum and CRC catch more; cryptographic hashes catch changes with very high probability.</li>
+<li>Checksums detect corruption; they do not repair it.</li>
+<li>A hash alone does not prove who created the data; use a MAC or digital signature for authenticity.</li>
+<li>Used in packets, storage systems (HDFS, ZFS), databases, and object storage.</li>
+<li>Stronger checks cost more CPU; choose based on threat model and data volume.</li></ul><div class="note"><strong>Trap:</strong> “checksum” and “cryptographic hash” are not interchangeable — CRC is for accidental errors, not attackers.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-api">
+      <div class="chapter-head">
+        <h2>API Fundamentals</h2>
+        <span class="chapter-count">4 topics</span>
+      </div>
+      <p class="chapter-blurb">Contracts, interaction styles, and the real-time and event-driven edges of APIs.</p>
+      
+      <article class="topic" id="t-what-is-an-api" data-title="what is an api?">
+        <div class="topic-head">
+          <span class="num">14</span>
+          <h3>What is an API?</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/what-is-an-api" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>A contract that lets one system use another without knowing its internals.</p><ul class="points"><li>An API defines endpoints, methods, inputs, outputs, errors, and auth requirements.</li>
+<li>Request anatomy: method, path, headers, query parameters, optional body.</li>
+<li>Response anatomy: status code, headers, body.</li>
+<li>The contract hides implementation details and allows independent evolution; version it deliberately.</li>
+<li>Public, private, and partner APIs differ in audience, stability, and access control.</li>
+<li>Good APIs are predictable, documented, idempotent where needed, and rate-limited.</li></ul><div class="note"><strong>Interview angle:</strong> define the contract before discussing the database or framework behind it.</div>
+      </article>
+      <article class="topic" id="t-api-styles" data-title="api architectural styles">
+        <div class="topic-head">
+          <span class="num">15</span>
+          <h3>API Architectural Styles</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/api-styles" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Pick the interaction style that matches the client’s access pattern — not the trendiest acronym.</p><ul class="points"><li><strong>REST:</strong> resources + HTTP verbs; stateless, cacheable, simple; can over- or under-fetch.</li>
+<li><strong>GraphQL:</strong> one endpoint, typed schema, client-selected fields; caching and query complexity are harder.</li>
+<li><strong>RPC/gRPC:</strong> action-oriented, protobuf contracts, HTTP/2, streaming; fast and typed, less browser-native.</li>
+<li><strong>WebSockets:</strong> full-duplex, persistent, real-time; not request/response.</li>
+<li><strong>Webhooks:</strong> provider pushes an event to a consumer URL; retries and duplicates are normal.</li>
+<li>Choose by latency, coupling, browser support, streaming needs, and operational complexity.</li></ul><div class="note"><strong>Default:</strong> REST for public CRUD APIs; gRPC for internal low-latency service calls; WebSockets for two-way real-time; webhooks for event notifications.</div>
+      </article>
+      <article class="topic" id="t-websockets" data-title="websockets">
+        <div class="topic-head">
+          <span class="num">16</span>
+          <h3>WebSockets</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/websockets" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>One persistent, full-duplex connection for real-time bidirectional communication.</p><ul class="points"><li>Starts as an HTTP upgrade handshake, then switches to the WebSocket protocol.</li>
+<li>Messages are frames over a long-lived TCP connection; server can push without polling.</li>
+<li>Scaling requires many connections per server, connection draining, and a pub/sub layer to route messages across servers.</li>
+<li>Heartbeats detect dead connections; clients reconnect with backoff.</li>
+<li>Use for chat, live dashboards, collaboration, multiplayer, and notifications.</li>
+<li>Not ideal for simple request/response or infrequent updates; HTTP may be simpler.</li></ul><div class="note"><strong>Trade-off:</strong> real-time responsiveness vs connection state, fan-out complexity, and resource usage.</div>
+      </article>
+      <article class="topic" id="t-webhooks" data-title="webhooks">
+        <div class="topic-head">
+          <span class="num">17</span>
+          <h3>Webhooks</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/webhooks" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>An event-driven HTTP callback: the provider pushes, the consumer must tolerate retries and duplicates.</p><ul class="points"><li>Provider sends an HTTP POST to a consumer endpoint when an event occurs.</li>
+<li>Return 2xx quickly; process heavy work asynchronously via a queue.</li>
+<li>Retries are expected — make consumers idempotent with event IDs or idempotency keys.</li>
+<li>Ordering is not guaranteed; include timestamps/sequence numbers and handle out-of-order events.</li>
+<li>Secure with HMAC signatures, TLS, allowlists, and replay protection.</li>
+<li>Provider concerns: retry policy, dead-letter handling, observability, and slow-consumer isolation.</li></ul><div class="note"><strong>Trap:</strong> a webhook is at-least-once in practice. Duplicate delivery is a design assumption, not an edge case.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-databases">
+      <div class="chapter-head">
+        <h2>Databases &amp; Storage</h2>
+        <span class="chapter-count">3 topics</span>
+      </div>
+      <p class="chapter-blurb">Choose the right storage shape, store blobs correctly, and make queries cheaper.</p>
+      
+      <article class="topic" id="t-database-types" data-title="database types">
+        <div class="topic-head">
+          <span class="num">18</span>
+          <h3>Database Types</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/database-types" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Choose by access pattern, consistency, and scale — not by one database to rule them all.</p><ul class="points"><li><strong>Relational:</strong> rows/tables, joins, ACID transactions; the default for transactional systems.</li>
+<li><strong>Key-value:</strong> simple lookups, high throughput, low-latency (Redis, DynamoDB).</li>
+<li><strong>Document:</strong> flexible JSON-like documents; good for evolving aggregates (MongoDB).</li>
+<li><strong>Wide-column:</strong> huge sparse tables, write-heavy scale (Cassandra, HBase).</li>
+<li><strong>Graph:</strong> relationship-heavy queries (Neo4j); <strong>time-series:</strong> metrics/events; <strong>search:</strong> inverted indexes; <strong>vector:</strong> embeddings.</li>
+<li>Polyglot persistence is valid, but every extra store adds consistency and operational cost.</li></ul><div class="note"><strong>Default:</strong> start relational unless a concrete access pattern or scale requirement clearly demands otherwise.</div>
+      </article>
+      <article class="topic" id="t-object-storage" data-title="object storage">
+        <div class="topic-head">
+          <span class="num">19</span>
+          <h3>Object Storage</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/object-storage" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Cheap, durable, scalable storage for large blobs — not a replacement for a database.</p><ul class="points"><li>Objects live in buckets; each object has a key, bytes, and metadata.</li>
+<li>Flat namespace and HTTP API; optimized for whole-object reads/writes, not random updates.</li>
+<li>Designed for massive durability and scale (e.g., 11 nines) at low cost.</li>
+<li>Store photos/video/backups in object storage; keep searchable metadata in a database.</li>
+<li>Use pre-signed URLs for direct client upload/download without routing bytes through the app.</li>
+<li>Integrates well with CDNs; versioning and lifecycle policies manage retention.</li></ul><div class="note"><strong>Trap:</strong> object storage is not a low-latency transactional database; do not put hot relational queries there.</div>
+      </article>
+      <article class="topic" id="t-query-optimization" data-title="query optimization">
+        <div class="topic-head">
+          <span class="num">20</span>
+          <h3>Query Optimization</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/query-optimization" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Read the plan, find the expensive step, then change the query, index, or schema.</p><ul class="points"><li>Use <code>EXPLAIN</code> / <code>EXPLAIN ANALYZE</code> to see scans, joins, sort, and row estimates.</li>
+<li>The cost-based optimizer uses statistics; stale stats can produce a bad plan.</li>
+<li>Common fixes: add the right index, avoid <code>SELECT *</code>, reduce rows early, remove N+1 queries.</li>
+<li>Watch for function calls on indexed columns, leading wildcards, and implicit type casts.</li>
+<li>Denormalization/materialized views can help read-heavy paths; caching may beat query tuning.</li>
+<li>Measure before and after; every index also slows writes.</li></ul><div class="note"><strong>Interview angle:</strong> optimize the query you can observe, not the query you imagine.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-dbscale">
+      <div class="chapter-head">
+        <h2>Database Scaling Techniques</h2>
+        <span class="chapter-count">3 topics</span>
+      </div>
+      <p class="chapter-blurb">Reads first, then writes: indexes, partitioning, denormalization, and the cost of sharding.</p>
+      
+      <article class="topic" id="t-indexing" data-title="indexing">
+        <div class="topic-head">
+          <span class="num">21</span>
+          <h3>Indexing</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/indexing" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>A sorted structure that lets the database find rows without scanning the whole table.</p><ul class="points"><li>B-tree indexes support equality, range, and ordering; hash indexes mainly support equality.</li>
+<li>Composite indexes follow the <strong>leftmost prefix</strong> rule: <code>(a,b)</code> helps queries on <code>a</code> or <code>a,b</code>, not <code>b</code> alone.</li>
+<li>A covering index contains every column a query needs, avoiding table lookups.</li>
+<li>Indexes cost storage, memory, and write amplification; too many slow inserts/updates.</li>
+<li>High selectivity is better; low-selectivity indexes may not be used.</li>
+<li>The database may ignore an index due to stats, cost, or a function on the column.</li></ul><div class="note"><strong>Rule:</strong> index for real query patterns, then verify with the plan.</div>
+      </article>
+      <article class="topic" id="t-sharding" data-title="sharding">
+        <div class="topic-head">
+          <span class="num">22</span>
+          <h3>Sharding</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/sharding" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Partition data across databases by a shard key when one database can no longer handle the write volume or size.</p><ul class="points"><li><strong>Range:</strong> contiguous ranges per shard; good for range scans, risks hot spots.</li>
+<li><strong>Hash:</strong> even distribution; range queries become cross-shard.</li>
+<li><strong>Directory:</strong> lookup table maps keys to shards; flexible but adds a dependency.</li>
+<li>The shard key determines routing, balance, and query cost — choose it carefully.</li>
+<li>Cross-shard joins, transactions, and aggregations are expensive; plan for them.</li>
+<li>Hot shards, resharding, and operational complexity are the price of scale.</li></ul><div class="note"><strong>Order:</strong> index → cache → read replicas → partition/shard. Shard late; it is hard to undo.</div>
+      </article>
+      <article class="topic" id="t-denormalization" data-title="denormalization">
+        <div class="topic-head">
+          <span class="num">23</span>
+          <h3>Denormalization</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/denormalization" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Trade write complexity and duplication for faster reads by precomputing or duplicating data.</p><ul class="points"><li>Normalization reduces duplication but can require expensive joins.</li>
+<li>Denormalize by copying fields, storing aggregates, or maintaining read models.</li>
+<li>Good for read-heavy systems, feeds, counters, and expensive joins.</li>
+<li>Costs: more storage, harder writes, and consistency logic across copies.</li>
+<li>Keep one source of truth and define how derived data is updated/repaired.</li>
+<li>Often paired with caching or materialized views; do not denormalize before measuring.</li></ul><div class="note"><strong>Trade-off:</strong> read speed vs write complexity and consistency risk.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-caching">
+      <div class="chapter-head">
+        <h2>Caching</h2>
+        <span class="chapter-count">4 topics</span>
+      </div>
+      <p class="chapter-blurb">The fastest request is the one you do not make — but every cache introduces freshness debt.</p>
+      
+      <article class="topic" id="t-what-is-caching" data-title="what is caching?">
+        <div class="topic-head">
+          <span class="num">24</span>
+          <h3>What is Caching?</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/what-is-caching" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Keep frequently used data in a faster layer to reduce latency and load on the source.</p><ul class="points"><li><strong>Hit:</strong> data found in cache. <strong>Miss:</strong> fetch from the source and optionally populate.</li>
+<li><strong>Hit ratio</strong> determines how much benefit the cache actually provides.</li>
+<li>Layers: browser, CDN, application, distributed cache, database buffer pool.</li>
+<li>Choose cache keys that include every input that changes the response.</li>
+<li>TTL balances freshness against hit rate; invalidation is the hard part.</li>
+<li>Cache hot, repeated, expensive-to-compute data — not everything.</li></ul><div class="note"><strong>When to add:</strong> repeated reads, high latency, or database load. Do not add a cache before measuring.</div>
+      </article>
+      <article class="topic" id="t-caching-strategies" data-title="caching strategies">
+        <div class="topic-head">
+          <span class="num">25</span>
+          <h3>Caching Strategies</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/caching-strategies" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Different read/write patterns need different cache responsibilities.</p><ul class="points"><li><strong>Cache-aside:</strong> app reads cache; on miss reads DB and populates; app invalidates on write.</li>
+<li><strong>Read-through:</strong> cache library loads from the source on a miss.</li>
+<li><strong>Write-through:</strong> write cache and DB synchronously; consistent but slower writes.</li>
+<li><strong>Write-behind:</strong> write cache, flush to DB asynchronously; fast but durability risk.</li>
+<li><strong>Write-around:</strong> write DB directly and bypass cache; avoids cache pollution.</li>
+<li>Choose by read/write ratio, consistency requirement, and tolerance for lost writes.</li></ul><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Read path</th><th>Write path</th><th>Main risk</th></tr></thead><tbody><tr><td>Cache-aside</td><td>App checks cache, then DB</td><td>DB write + invalidate</td><td>Stale cache</td></tr>
+<tr><td>Read-through</td><td>Cache loads from DB</td><td>Depends on write policy</td><td>Cache library complexity</td></tr>
+<tr><td>Write-through</td><td>Cache hit</td><td>Cache + DB sync</td><td>Write latency</td></tr>
+<tr><td>Write-behind</td><td>Cache hit</td><td>Cache first, DB async</td><td>Data loss</td></tr></tbody></table></div>
+      </article>
+      <article class="topic" id="t-cache-eviction-policies" data-title="cache eviction policies">
+        <div class="topic-head">
+          <span class="num">26</span>
+          <h3>Cache Eviction Policies</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/cache-eviction-policies" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>When the cache is full, the eviction policy decides which data is worth keeping.</p><ul class="points"><li>Eviction removes entries to make room; expiration/TTL removes them by age.</li>
+<li><strong>LRU:</strong> evict least recently used; good locality, vulnerable to scans.</li>
+<li><strong>LFU:</strong> evict least frequently used; protects popular items, can retain stale popularity.</li>
+<li>FIFO, random, MRU, and TTL-based policies fit narrower workloads.</li>
+<li>Consider object size and cache pollution, not just hit count.</li>
+<li>Match the policy to the access pattern; measure hit ratio and latency.</li></ul><div class="note"><strong>Trap:</strong> a high hit ratio can still hide expensive misses or stale data. Measure both.</div>
+      </article>
+      <article class="topic" id="t-content-delivery-network-cdn" data-title="content delivery network (cdn)">
+        <div class="topic-head">
+          <span class="num">27</span>
+          <h3>Content Delivery Network (CDN)</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/content-delivery-network-cdn" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Serve content from edge locations close to users and offload the origin.</p><ul class="points"><li>Edge locations/PoPs cache content near users; origin holds the authoritative copy.</li>
+<li>Pull CDN fetches on demand; push CDN uploads content ahead of time.</li>
+<li>Control caching with <code>Cache-Control</code>, TTLs, and cache keys.</li>
+<li>Use versioned/hashed URLs for long-lived static assets; purge when necessary.</li>
+<li>Routing uses DNS/anycast; origin shield reduces origin load.</li>
+<li>Benefits: latency, bandwidth cost, origin offload; costs: staleness and cache management.</li></ul><div class="note"><strong>Trap:</strong> cache keys must include every input that changes the response — including device, language, or auth scope when relevant.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-async">
+      <div class="chapter-head">
+        <h2>Asynchronous Communications</h2>
+        <span class="chapter-count">2 topics</span>
+      </div>
+      <p class="chapter-blurb">Decouple producers and consumers with queues and pub/sub, then handle duplicates and ordering.</p>
+      
+      <article class="topic" id="t-pub-sub" data-title="pub/sub">
+        <div class="topic-head">
+          <span class="num">28</span>
+          <h3>Pub/Sub</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/pub-sub" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>One event fans out to many independent subscribers.</p><ul class="points"><li>Publisher sends to a topic; every subscription receives a copy.</li>
+<li>Contrast with a queue: queue = one consumer per message; pub/sub = fan-out to all subscribers.</li>
+<li>Durable pub/sub retains messages and supports replay; ephemeral pub/sub drops them.</li>
+<li>Push vs pull delivery; consumers acknowledge to prevent redelivery.</li>
+<li>Ordering is usually per partition/key, not global.</li>
+<li>Use for events, notifications, microservice decoupling, and fan-out.</li></ul><div class="note"><strong>Trap:</strong> at-least-once delivery means duplicates; consumers must be idempotent.</div>
+      </article>
+      <article class="topic" id="t-message-queues" data-title="message queues">
+        <div class="topic-head">
+          <span class="num">29</span>
+          <h3>Message Queues</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/message-queues" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Buffer work between producer and consumer so slow or bursty tasks do not block the request path.</p><ul class="points"><li>Producer sends to a queue; one consumer processes each message.</li>
+<li>Consumer acknowledges after processing; a crash causes redelivery, so duplicates are possible.</li>
+<li>Competing consumers scale throughput by queue depth; prefetch controls in-flight work.</li>
+<li>Queues absorb spikes, decouple services, and enable retries.</li>
+<li>Poison messages go to a dead-letter queue; ordering is per queue or partition/group.</li>
+<li>A queue is not infinite storage — monitor depth, age, and consumer lag.</li></ul><div class="note"><strong>Trade-off:</strong> responsiveness and resilience vs eventual completion, duplicates, and operational complexity.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-micro">
+      <div class="chapter-head">
+        <h2>Microservices</h2>
+        <span class="chapter-count">5 topics</span>
+      </div>
+      <p class="chapter-blurb">Service boundaries, discovery, and the resilience patterns that keep distributed calls from cascading.</p>
+      
+      <article class="topic" id="t-service-discovery" data-title="service discovery">
+        <div class="topic-head">
+          <span class="num">30</span>
+          <h3>Service Discovery</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/service-discovery" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Let services find each other’s current instances without hard-coded addresses.</p><ul class="points"><li>Instances scale, restart, and move; fixed IPs go stale.</li>
+<li>A service registry tracks instances and health.</li>
+<li>Self-registration: the instance registers itself; third-party registration: a platform does it.</li>
+<li>Client-side discovery: caller queries the registry and chooses an instance; server-side: a load balancer/proxy decides.</li>
+<li>DNS-based discovery and Kubernetes Services provide simpler variants.</li>
+<li>Registry must be highly available; clients need caching and stale-result handling.</li></ul><div class="note"><strong>Default:</strong> use the platform’s built-in discovery (Kubernetes Service/DNS) unless you need finer control.</div>
+      </article>
+      <article class="topic" id="t-sidecar-pattern" data-title="sidecar pattern">
+        <div class="topic-head">
+          <span class="num">31</span>
+          <h3>Sidecar Pattern</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/sidecar-pattern" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Put cross-cutting infrastructure next to the service instead of inside its code.</p><ul class="points"><li>Sidecar runs alongside the app (same pod/host) and shares its network namespace.</li>
+<li>Handles logging, metrics, tracing, proxying, mTLS, retries, and policy.</li>
+<li>Language-agnostic: every service gets the same behavior without a shared library.</li>
+<li>Service mesh data planes are typically sidecar proxies.</li>
+<li>Costs: extra CPU/memory, added latency, and more moving parts.</li>
+<li>Use for infrastructure concerns, not business logic.</li></ul><div class="note"><strong>Trade-off:</strong> uniform operational behavior vs per-pod resource overhead and complexity.</div>
+      </article>
+      <article class="topic" id="t-circuit-breaker-pattern" data-title="circuit breaker pattern">
+        <div class="topic-head">
+          <span class="num">32</span>
+          <h3>Circuit Breaker Pattern</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/circuit-breaker-pattern" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Stop calling a failing dependency so failures do not cascade.</p><ul class="points"><li><strong>Closed:</strong> requests flow normally; failures are counted.</li>
+<li><strong>Open:</strong> fail fast or use a fallback after a threshold.</li>
+<li><strong>Half-open:</strong> allow a probe to test recovery.</li>
+<li>Trip on error rate, consecutive failures, or timeouts; reset after a cooldown.</li>
+<li>Apply per dependency, not globally; combine with timeouts and a retry budget.</li>
+<li>Prevents resource exhaustion and retry storms during outages.</li></ul><div class="flow"><span class="flow-step">Closed</span><span class="flow-arrow">→</span><span class="flow-step">Open</span><span class="flow-arrow">→</span><span class="flow-step">Half-open</span><span class="flow-arrow">→</span><span class="flow-step">Closed</span></div>
+      </article>
+      <article class="topic" id="t-saga-pattern" data-title="saga pattern">
+        <div class="topic-head">
+          <span class="num">33</span>
+          <h3>SAGA Pattern</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/saga-pattern" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Replace a distributed transaction with local transactions and compensating actions.</p><ul class="points"><li>A saga is a sequence of local transactions across services.</li>
+<li>If a step fails, run compensating actions for completed steps.</li>
+<li><strong>Choreography:</strong> services react to events; simple, but harder to see the whole flow.</li>
+<li><strong>Orchestration:</strong> a coordinator drives steps; easier to reason about, but another component to run.</li>
+<li>Provides eventual consistency, not atomicity; every step and compensation must be idempotent.</li>
+<li>Use for long-running workflows; avoid when a single database transaction can do the job.</li></ul><div class="flow"><span class="flow-step">Local tx 1</span><span class="flow-arrow">→</span><span class="flow-step">Local tx 2</span><span class="flow-arrow">→</span><span class="flow-step">Local tx 3</span><span class="flow-arrow">→</span><span class="flow-step">Compensate on failure</span></div>
+      </article>
+      <article class="topic" id="t-service-mesh" data-title="service mesh">
+        <div class="topic-head">
+          <span class="num">34</span>
+          <h3>Service Mesh</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/service-mesh" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Move service-to-service networking concerns into a dedicated infrastructure layer.</p><ul class="points"><li>Data plane: sidecar proxies handle traffic between services.</li>
+<li>Control plane: configures routing, policies, certificates, and telemetry.</li>
+<li>Features: mTLS, retries, timeouts, traffic splitting, circuit breaking, and observability.</li>
+<li>Language-agnostic and consistent across services.</li>
+<li>Costs: proxy latency, resource overhead, and a new operational layer.</li>
+<li>Use when service count and policy complexity justify it; not needed for a small system.</li></ul><div class="note"><strong>Trap:</strong> a service mesh does not fix bad service boundaries or missing idempotency.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-bigdata">
+      <div class="chapter-head">
+        <h2>Big Data Processing</h2>
+        <span class="chapter-count">5 topics</span>
+      </div>
+      <p class="chapter-blurb">Batch, stream, and the storage/processing layers that turn raw data into usable tables.</p>
+      
+      <article class="topic" id="t-batch-vs-stream-processing" data-title="batch vs stream processing">
+        <div class="topic-head">
+          <span class="num">35</span>
+          <h3>Batch vs Stream Processing</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/batch-vs-stream-processing" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Batch processes bounded data on a schedule; stream processes unbounded events continuously.</p><ul class="points"><li><strong>Batch:</strong> high throughput, high latency, simple retries; good for reports and backfills.</li>
+<li><strong>Stream:</strong> low latency, continuous, stateful; good for alerts, feeds, and real-time metrics.</li>
+<li>Streaming needs windowing, event time, watermarks, and late-data handling.</li>
+<li>State and checkpoints enable recovery; processing guarantees are at-least-once or exactly-once with care.</li>
+<li>Micro-batching blends the two; Lambda runs batch + speed layers; Kappa favors stream only.</li>
+<li>Choose by latency requirement, data boundedness, and operational cost.</li></ul><div class="table-wrap"><table><thead><tr><th></th><th>Batch</th><th>Stream</th></tr></thead><tbody><tr><td>Input</td><td>Bounded files/tables</td><td>Unbounded event flow</td></tr>
+<tr><td>Latency</td><td>Minutes to hours</td><td>Milliseconds to seconds</td></tr>
+<tr><td>Typical use</td><td>Reports, backfills, ETL</td><td>Alerts, feeds, live metrics</td></tr></tbody></table></div>
+      </article>
+      <article class="topic" id="t-etl-pipelines" data-title="etl pipelines">
+        <div class="topic-head">
+          <span class="num">36</span>
+          <h3>ETL Pipelines</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/etl-pipelines" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Extract, transform, and load data reliably from sources into analytics storage.</p><ul class="points"><li><strong>Extract</strong> from databases, APIs, logs, or files; <strong>transform</strong> clean/join/aggregate; <strong>load</strong> into a warehouse or lake.</li>
+<li>Batch ETL runs on schedules; streaming ETL processes events continuously.</li>
+<li>ELT loads raw data first and transforms inside the warehouse/lake.</li>
+<li>Orchestration (Airflow, Dagster), retries, and idempotent loads are essential.</li>
+<li>Monitor data quality, schema changes, freshness, and row counts.</li>
+<li>Design for replay/backfill; do not make pipelines one-shot scripts.</li></ul><div class="note"><strong>Trap:</strong> a pipeline that silently drops bad rows is worse than one that fails loudly.</div>
+      </article>
+      <article class="topic" id="t-mapreduce" data-title="mapreduce">
+        <div class="topic-head">
+          <span class="num">37</span>
+          <h3>MapReduce</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/mapreduce" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>A distributed batch model: map records, shuffle by key, reduce groups.</p><ul class="points"><li><strong>Map:</strong> transform each input record into key/value pairs.</li>
+<li><strong>Shuffle/sort:</strong> group values by key across the cluster.</li>
+<li><strong>Reduce:</strong> aggregate each key’s values.</li>
+<li>Fault tolerance comes from recomputing failed tasks; data locality reduces network transfer.</li>
+<li>Combiner reduces shuffle volume; skew (one huge key) is a common bottleneck.</li>
+<li>High-latency and disk-heavy; Spark/Flink often replace it, but the model is foundational.</li></ul><div class="flow"><span class="flow-step">Input split</span><span class="flow-arrow">→</span><span class="flow-step">Map</span><span class="flow-arrow">→</span><span class="flow-step">Shuffle / sort</span><span class="flow-arrow">→</span><span class="flow-step">Reduce</span><span class="flow-arrow">→</span><span class="flow-step">Output</span></div>
+      </article>
+      <article class="topic" id="t-data-lakes" data-title="data lakes">
+        <div class="topic-head">
+          <span class="num">38</span>
+          <h3>Data Lakes</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/data-lakes" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Store raw data at scale and apply schema when reading.</p><ul class="points"><li>Stores structured, semi-structured, and unstructured data in cheap object storage.</li>
+<li>Schema-on-read: flexible ingestion, but consumers must interpret the data.</li>
+<li>A catalog (e.g., Hive/Glue) provides tables and metadata; without governance it becomes a data swamp.</li>
+<li>Supports analytics, data science, and ML on the same raw data.</li>
+<li>Lakehouse formats add ACID, schema evolution, and performance on top of the lake.</li>
+<li>Watch file sizes, small files, partitioning, retention, and access control.</li></ul><div class="note"><strong>Trade-off:</strong> flexibility and cost vs governance, performance, and consistency.</div>
+      </article>
+      <article class="topic" id="t-data-warehousing" data-title="data warehousing">
+        <div class="topic-head">
+          <span class="num">39</span>
+          <h3>Data Warehousing</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/data-warehousing" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Modeled, structured data optimized for analytics and BI.</p><ul class="points"><li>Schema-on-write; data is cleaned and modeled before loading.</li>
+<li>Columnar storage and MPP engines optimize large scans and aggregations.</li>
+<li>Star schema: fact tables + dimension tables; snowflake normalizes dimensions further.</li>
+<li>Separates OLAP analytics from OLTP production databases.</li>
+<li>ETL/ELT pipelines populate it; data quality and freshness matter.</li>
+<li>Warehouse vs lake: modeled/performance vs raw/flexibility; lakehouse converges them.</li></ul><div class="note"><strong>Interview angle:</strong> do not run heavy analytics on the production OLTP database.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-architecture">
+      <div class="chapter-head">
+        <h2>Architectural Patterns</h2>
+        <span class="chapter-count">5 topics</span>
+      </div>
+      <p class="chapter-blurb">How the major system shapes differ: client-server, microservices, serverless, events, and peer-to-peer.</p>
+      
+      <article class="topic" id="t-client-server-architecture" data-title="client-server architecture">
+        <div class="topic-head">
+          <span class="num">40</span>
+          <h3>Client-Server Architecture</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/client-server-architecture" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Clients request; a central server owns the data and business rules.</p><ul class="points"><li>Client handles UI/input; server handles validation, business logic, and persistence.</li>
+<li>The server is the source of truth; never trust client-side validation.</li>
+<li>Thin client vs thick client changes where logic and state live.</li>
+<li>Servers can be stateless (easy to scale) or stateful (sticky sessions/affinity).</li>
+<li>Tiers: 1-tier (all-in-one), 2-tier (client + DB), 3-tier (client + app + DB), N-tier.</li>
+<li>Server push can use polling, long polling, SSE, or WebSockets.</li></ul><div class="note"><strong>Default:</strong> 3-tier with stateless app servers is the baseline for most web systems.</div>
+      </article>
+      <article class="topic" id="t-microservices-architecture" data-title="microservices architecture">
+        <div class="topic-head">
+          <span class="num">41</span>
+          <h3>Microservices Architecture</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/microservices-architecture" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Independent services organized by business capability, each owning its data.</p><ul class="points"><li>Services communicate via APIs or events and deploy independently.</li>
+<li>Pros: team autonomy, independent scaling, fault isolation, polyglot freedom.</li>
+<li>Cons: distributed complexity, network latency, data consistency, debugging, and operations.</li>
+<li>Requires service discovery, API gateway, observability, CI/CD, and idempotent messaging.</li>
+<li>Shared database across services is usually an anti-pattern; each service owns its data.</li>
+<li>Do not start here by default; a modular monolith is often the better first step.</li></ul><div class="note"><strong>Trade-off:</strong> autonomy and scaling vs operational and consistency overhead.</div>
+      </article>
+      <article class="topic" id="t-serverless-architecture" data-title="serverless architecture">
+        <div class="topic-head">
+          <span class="num">42</span>
+          <h3>Serverless Architecture</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/serverless-architecture" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Run code and managed services without provisioning or managing servers.</p><ul class="points"><li>FaaS: event-triggered functions; BaaS: managed databases, auth, queues, storage.</li>
+<li>Scales automatically, including to zero; pay per invocation/usage.</li>
+<li>Stateless functions; local state does not survive between invocations.</li>
+<li>Cold starts, execution time/memory limits, concurrency limits, and vendor lock-in.</li>
+<li>Good for spiky, event-driven, glue, and low-ops workloads; poor for long-running or stateful services.</li>
+<li>Watch per-request cost, observability, and local testing.</li></ul><div class="note"><strong>Trap:</strong> “serverless” does not mean no servers; it means you do not manage them.</div>
+      </article>
+      <article class="topic" id="t-event-driven-architecture" data-title="event-driven architecture">
+        <div class="topic-head">
+          <span class="num">43</span>
+          <h3>Event-Driven Architecture</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/event-driven-architecture" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Producers emit events; consumers react asynchronously without direct coupling.</p><ul class="points"><li>Events describe something that happened; producers do not know consumers.</li>
+<li>Enables decoupling, fan-out, extensibility, and async workflows.</li>
+<li>Patterns: event notification, event-carried state transfer, event sourcing.</li>
+<li>Challenges: eventual consistency, ordering, duplicates, schema evolution, and debugging.</li>
+<li>Use idempotent consumers, a schema registry, dead-letter queues, and tracing.</li>
+<li>Best when workflows are naturally event-shaped, not as a default for every call.</li></ul><div class="note"><strong>Trade-off:</strong> loose coupling and responsiveness vs harder reasoning about state and failure.</div>
+      </article>
+      <article class="topic" id="t-peer-to-peer-p2p-architecture" data-title="peer-to-peer (p2p) architecture">
+        <div class="topic-head">
+          <span class="num">44</span>
+          <h3>Peer-to-Peer (P2P) Architecture</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/peer-to-peer-p2p-architecture" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Peers act as both clients and servers; no central node is required.</p><ul class="points"><li>Decentralized: each peer can request and serve data.</li>
+<li>Structured P2P uses a DHT for deterministic lookup; unstructured uses flooding/gossip.</li>
+<li>Resilient to individual node failure and scales with participants.</li>
+<li>Hard problems: churn, NAT traversal, trust, security, and coordination.</li>
+<li>Used in file sharing, blockchain, decentralized messaging, and some CDNs.</li>
+<li>Trade-off: resilience and cost vs latency, consistency, and management complexity.</li></ul><div class="note"><strong>Interview angle:</strong> clarify whether the system needs decentralization or just scalability; a central service is often simpler.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-observability">
+      <div class="chapter-head">
+        <h2>Observability</h2>
+        <span class="chapter-count">2 topics</span>
+      </div>
+      <p class="chapter-blurb">Know what the system is doing in production: logs, metrics, alerts, and the questions they answer.</p>
+      
+      <article class="topic" id="t-logging" data-title="logging">
+        <div class="topic-head">
+          <span class="num">45</span>
+          <h3>Logging</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/logging" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Structured, contextual events that let you reconstruct what happened.</p><ul class="points"><li>Use structured logs (JSON) with consistent field names.</li>
+<li>Levels: DEBUG, INFO, WARN, ERROR, FATAL; avoid logging everything at INFO.</li>
+<li>Add request ID, correlation ID, user/tenant, service, and version — but never secrets or PII.</li>
+<li>Log key events, errors, state transitions, and decisions; avoid noisy loops and duplicate stack traces at every layer.</li>
+<li>Use asynchronous/buffered logging; centralize logs (ELK/Loki) and set retention.</li>
+<li>Sample high-volume logs; logs are for diagnosis, metrics are for trends.</li></ul><div class="note"><strong>Trap:</strong> logs without correlation IDs are nearly useless in a distributed system.</div>
+      </article>
+      <article class="topic" id="t-alert-monitoring" data-title="alert &amp; monitoring">
+        <div class="topic-head">
+          <span class="num">46</span>
+          <h3>Alert &amp; Monitoring</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/alert-monitoring" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Monitoring shows what is happening; alerting tells a human when action is needed.</p><ul class="points"><li>Golden signals: latency, traffic, errors, saturation.</li>
+<li>Alert on user-impacting symptoms/SLOs, not every internal cause.</li>
+<li>Every alert needs an owner, severity, runbook, and clear action.</li>
+<li>Use thresholds for known limits and anomaly detection for unknown patterns.</li>
+<li>Dashboards support investigation; logs/traces provide detail.</li>
+<li>Fight alert fatigue: deduplicate, group, silence during maintenance, and review noisy alerts.</li></ul><div class="note"><strong>Rule:</strong> if nobody can act on an alert, it is noise.</div>
+      </article>
+    </section>
+    <section class="chapter" id="sec-security">
+      <div class="chapter-head">
+        <h2>Security</h2>
+        <span class="chapter-count">3 topics</span>
+      </div>
+      <p class="chapter-blurb">Authentication, transport security, and authorization: JWT, TLS, and RBAC.</p>
+      
+      <article class="topic" id="t-jwt" data-title="jwt">
+        <div class="topic-head">
+          <span class="num">47</span>
+          <h3>JWT</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/jwt" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>A signed, self-contained token for stateless authentication — not an encrypted secret container.</p><ul class="points"><li>Structure: <code>header.payload.signature</code>, base64url-encoded.</li>
+<li>Claims: <code>iss</code>, <code>sub</code>, <code>aud</code>, <code>exp</code>, <code>iat</code>; never put secrets in the payload.</li>
+<li>The server verifies the signature, expiry, issuer, and audience.</li>
+<li>Stateless verification scales well, but revocation is hard; use short-lived access tokens + refresh tokens.</li>
+<li>Store tokens in HTTP-only cookies when possible; local storage is exposed to XSS.</li>
+<li>Use JWKS for key rotation and validate the algorithm explicitly.</li></ul><pre class="code"><code>header.payload.signature
+{ &quot;alg&quot;: &quot;RS256&quot;, &quot;typ&quot;: &quot;JWT&quot; } . { &quot;sub&quot;: &quot;123&quot;, &quot;exp&quot;: 1710000000 } . signature</code></pre>
+      </article>
+      <article class="topic" id="t-ssl-tls" data-title="ssl/tls">
+        <div class="topic-head">
+          <span class="num">48</span>
+          <h3>SSL/TLS</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/ssl-tls" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>TLS provides encryption, integrity, and server identity for data in transit.</p><ul class="points"><li>HTTPS = HTTP over TLS; TLS protects against eavesdropping and tampering.</li>
+<li>Handshake: ClientHello → ServerHello + certificate → key exchange → Finished.</li>
+<li>Certificates are signed by a trusted CA; the client validates hostname, expiry, and chain.</li>
+<li>TLS 1.3 reduces handshake round trips and removes weaker primitives.</li>
+<li>Terminate TLS at a load balancer/reverse proxy; re-encrypt to the backend when required.</li>
+<li>Use mTLS for service-to-service identity; use HSTS to prevent downgrade.</li></ul><div class="flow"><span class="flow-step">ClientHello</span><span class="flow-arrow">→</span><span class="flow-step">Certificate</span><span class="flow-arrow">→</span><span class="flow-step">Key exchange</span><span class="flow-arrow">→</span><span class="flow-step">Finished</span><span class="flow-arrow">→</span><span class="flow-step">Encrypted HTTP</span></div>
+      </article>
+      <article class="topic" id="t-rbac" data-title="rbac">
+        <div class="topic-head">
+          <span class="num">49</span>
+          <h3>RBAC</h3>
+          <a class="src" href="https://algomaster.io/learn/system-design/rbac" target="_blank" rel="noopener">source ↗</a>
+        </div>
+        <p class="core"><span class="core-label">Core idea</span>Grant permissions through roles, not directly to every user.</p><ul class="points"><li>Users → roles → permissions; authorization checks the permission, not the person.</li>
+<li>Apply least privilege and default deny.</li>
+<li>Roles simplify administration but can explode or become too coarse.</li>
+<li>Role inheritance and separation of duties need explicit design.</li>
+<li>ABAC uses attributes; ReBAC uses relationships — better for fine-grained cases.</li>
+<li>Enforce at the service/API boundary and audit changes.</li></ul><div class="note"><strong>Trap:</strong> authentication proves who you are; authorization decides what you can do. Do not conflate them.</div>
+      </article>
+    </section>
+
+      <section class="chapter" id="traps">
+        <div class="chapter-head">
+          <h2>Traps to avoid</h2>
+          <span class="chapter-count">12 traps</span>
+        </div>
+        <p class="chapter-blurb">The mistakes that make a design sound busy instead of reasoned.</p>
+        <div class="traps"><ul><li><strong>Technology-first:</strong> Naming Kafka, Redis, or Kubernetes before the requirement that justifies them.</li>
+<li><strong>No NFRs:</strong> Skipping latency, availability, durability, and consistency targets.</li>
+<li><strong>Boxes without flow:</strong> Drawing components but never explaining what moves between them.</li>
+<li><strong>Happy-path only:</strong> Ignoring failures, retries, timeouts, and partial data.</li>
+<li><strong>Premature scale:</strong> Adding components for imagined scale before the current bottleneck is measured.</li>
+<li><strong>Free cache:</strong> Pretending caching has no staleness or invalidation cost.</li>
+<li><strong>Retry storm:</strong> Retrying at every layer without a budget, jitter, or idempotency.</li>
+<li><strong>Single point of failure:</strong> Adding redundancy that still shares one dependency or control plane.</li>
+<li><strong>Shard too early:</strong> Reaching for sharding before indexes, caching, and replicas.</li>
+<li><strong>No idempotency:</strong> Making retries and duplicate messages unsafe.</li>
+<li><strong>No observability:</strong> Designing without logs, metrics, traces, or alert ownership.</li>
+<li><strong>Memorized design:</strong> Reciting a known architecture instead of reasoning from the problem.</li></ul></div>
+      </section>
+
+      <section class="chapter" id="questions">
+        <div class="chapter-head">
+          <h2>Most-asked interview questions</h2>
+          <span class="chapter-count">22 questions</span>
+        </div>
+        <p class="chapter-blurb">Cross-topic questions. Answer aloud before opening the outline.</p>
+        <div class="qa-tools">
+          <p><strong>Drill mode:</strong> cover the answer, say it aloud, then open it.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details>
+      <summary>1. How do you start a system design interview?</summary>
+      <div class="answer"><p>Clarify scope and non-functional targets, estimate scale, sketch components and one write/read flow, then go deeper on one or two bottlenecks. State assumptions explicitly.</p></div>
+    </details>
+<details>
+      <summary>2. SQL vs NoSQL — how do you choose?</summary>
+      <div class="answer"><p>Start with access patterns, relationships, consistency, and scale. Relational is the default for transactions and joins; NoSQL fits specific shapes like key-value, document, wide-column, graph, time-series, or search.</p></div>
+    </details>
+<details>
+      <summary>3. How do you scale reads? How do you scale writes?</summary>
+      <div class="answer"><p>Reads: cache, read replicas, CDN, denormalization. Writes: batch, queue, partition/shard, and reduce write amplification. Measure the bottleneck first.</p></div>
+    </details>
+<details>
+      <summary>4. How do you handle a hot key or hot shard?</summary>
+      <div class="answer"><p>Cache the hot value, split the key, salt the shard key, isolate the hot tenant, or rate-limit. Add a dedicated cache/shard only when the pattern is understood.</p></div>
+    </details>
+<details>
+      <summary>5. How do you keep a cache consistent with the database?</summary>
+      <div class="answer"><p>Use TTLs, invalidate on writes, write-through where needed, and version keys. Accept temporary staleness only when the product permits it.</p></div>
+    </details>
+<details>
+      <summary>6. Explain CAP in one minute.</summary>
+      <div class="answer"><p>During a network partition, choose consistency or availability. CP rejects/blocks; AP serves possibly stale data. PACELC also trades latency vs consistency when the network is healthy.</p></div>
+    </details>
+<details>
+      <summary>7. Why consistent hashing?</summary>
+      <div class="answer"><p>It maps keys and servers on a ring so adding/removing a server moves roughly 1/N of keys. Virtual nodes smooth distribution and replication uses the next N nodes.</p></div>
+    </details>
+<details>
+      <summary>8. How would you design a rate limiter?</summary>
+      <div class="answer"><p>Choose token bucket, leaky bucket, fixed window, or sliding window. Keep counters in a fast shared store, return 429 with retry info, and decide fail-open vs fail-closed.</p></div>
+    </details>
+<details>
+      <summary>9. How do you make an API idempotent?</summary>
+      <div class="answer"><p>Use an idempotency key with a unique constraint/dedupe store, make the operation safe to repeat, and return the original result for duplicates.</p></div>
+    </details>
+<details>
+      <summary>10. WebSockets vs SSE vs polling?</summary>
+      <div class="answer"><p>WebSockets: bidirectional real-time. SSE: server-to-client stream over HTTP. Polling: simple periodic requests. Choose by direction, frequency, and infrastructure.</p></div>
+    </details>
+<details>
+      <summary>11. Queue vs pub/sub?</summary>
+      <div class="answer"><p>Queue: one consumer per message; buffer and load-level. Pub/sub: every subscriber gets a copy; fan-out and events. They are often combined.</p></div>
+    </details>
+<details>
+      <summary>12. How do you handle duplicate messages?</summary>
+      <div class="answer"><p>Assume at-least-once delivery. Use idempotent consumers, dedupe keys, and unique constraints; make retries safe.</p></div>
+    </details>
+<details>
+      <summary>13. How do you prevent cascading failures?</summary>
+      <div class="answer"><p>Timeouts, retry budgets, circuit breakers, bulkheads, queues/backpressure, and graceful degradation. Do not retry aggressively during an outage.</p></div>
+    </details>
+<details>
+      <summary>14. How does service discovery work?</summary>
+      <div class="answer"><p>Instances register with a registry or platform; callers use client-side or server-side discovery. Health checks remove bad instances; clients cache and handle staleness.</p></div>
+    </details>
+<details>
+      <summary>15. Monolith or microservices?</summary>
+      <div class="answer"><p>Start with a modular monolith unless team autonomy, independent scaling, or deployment cadence justify microservices. Microservices add network, data, and operational complexity.</p></div>
+    </details>
+<details>
+      <summary>16. How do you handle a distributed transaction?</summary>
+      <div class="answer"><p>Avoid it if one database transaction suffices. Otherwise use 2PC for strong atomicity (with availability cost) or a saga with local transactions and compensations for eventual consistency.</p></div>
+    </details>
+<details>
+      <summary>17. How do you design observability?</summary>
+      <div class="answer"><p>Logs for events, metrics for trends and alerts, traces for request paths. Add correlation IDs, SLOs, dashboards, and owned runbooks.</p></div>
+    </details>
+<details>
+      <summary>18. JWT vs server-side sessions?</summary>
+      <div class="answer"><p>JWT is stateless and scales across services, but revocation is hard and tokens must be stored safely. Sessions are easy to revoke but need shared storage. Often: short-lived JWT + refresh token.</p></div>
+    </details>
+<details>
+      <summary>19. How do you secure service-to-service calls?</summary>
+      <div class="answer"><p>mTLS for identity, least-privilege authorization, network policy, short-lived credentials, and secret management. Encrypt in transit and audit access.</p></div>
+    </details>
+<details>
+      <summary>20. Batch or stream processing?</summary>
+      <div class="answer"><p>Batch for bounded data, high throughput, and tolerance for latency. Stream for unbounded events and low latency. Many systems use both (Lambda) or stream-first (Kappa).</p></div>
+    </details>
+<details>
+      <summary>21. How would you design a URL shortener?</summary>
+      <div class="answer"><p>Generate a unique short key (base62/counter/hash), store key → long URL in a KV store, redirect with 301/302, cache hot keys, and handle collisions/analytics asynchronously.</p></div>
+    </details>
+<details>
+      <summary>22. How would you design a news feed?</summary>
+      <div class="answer"><p>Clarify read/write ratio. Fan-out on write for fast reads but costly for celebrities; fan-out on read for cheap writes but slower reads. Cache timelines and rank asynchronously.</p></div>
+    </details></div>
+      </section>
+
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design">AlgoMaster — System Design Fundamentals</a>. Course order follows the 49 video topics; premium-topic notes are abbreviated to the concepts exposed on the public course pages.</p>
+        <p><strong>Companion:</strong> <a href="01-what-is-system-design.html">Full note for What is System Design?</a> · <a href="fundamentals-video-topics.html">Video topics index</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var toggle = document.getElementById("themeToggle");
+    var expand = document.getElementById("expandAll");
+    var search = document.getElementById("topicSearch");
+
+    function label() {
+      var dark = root.getAttribute("data-theme") === "dark";
+      if (toggle) {
+        toggle.textContent = dark ? "☀ Light" : "☾ Dark";
+        toggle.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+      }
+    }
+
+    if (toggle) {
+      label();
+      toggle.addEventListener("click", function () {
+        var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        try { localStorage.setItem("sd-theme", next); } catch (e) {}
+        label();
+      });
+    }
+
+    if (expand) {
+      expand.addEventListener("click", function () {
+        var open = expand.getAttribute("data-open") !== "true";
+        document.querySelectorAll("#questions details").forEach(function (d) { d.open = open; });
+        expand.setAttribute("data-open", String(open));
+        expand.textContent = open ? "Collapse all answers" : "Expand all answers";
+      });
+    }
+
+    if (search) {
+      search.addEventListener("input", function () {
+        var q = search.value.trim().toLowerCase();
+        document.querySelectorAll(".topic").forEach(function (t) {
+          t.hidden = q && !t.textContent.toLowerCase().includes(q);
+        });
+        document.querySelectorAll(".chapter").forEach(function (ch) {
+          var any = Array.prototype.some.call(ch.querySelectorAll(".topic"), function (t) { return !t.hidden; });
+          ch.hidden = q && !any;
+        });
+      });
+    }
+  })();
+</script>
+</body>
+</html>

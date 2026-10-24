@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Handling Long-Running Tasks — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 15 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Handling Long-Running Tasks</h1>
+    <p class="dek">Interview Patterns · Running Background Work</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/handling-long-running-tasks">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">What counts as long-running</a>
+<a href="#s3">Accept, persist, acknowledge</a>
+<a href="#s4">Queue and worker architecture</a>
+<a href="#s5">Job state machine and status API</a>
+<a href="#s6">Progress tracking and heartbeats</a>
+<a href="#s7">Failure handling: retries, backoff, dead letters</a>
+<a href="#s8">Very large jobs: chunk, checkpoint, fan out</a>
+<a href="#s9">Cancellation and timeouts</a>
+<a href="#s10">Isolation, priorities, and fairness</a>
+<a href="#s11">Delivery semantics and exactly-once illusions</a>
+<a href="#s12">Notifying the client</a>
+<a href="#s13">Operating the system</a>
+<a href="#s14">Choosing a design in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A request that takes minutes cannot live inside a request/response cycle. The pattern is to <strong>accept, persist, and acknowledge</strong> the work, run it on durable workers, expose progress, and make every step retryable and resumable.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Asynchronous job</dt><dd>Work accepted now and executed later by a worker, decoupled from the client connection that requested it.</dd></div><div class="term"><dt>Job record</dt><dd>The durable row describing the work: type, payload, owner, status, attempt count, progress, result location, and timestamps.</dd></div><div class="term"><dt>Job status API</dt><dd>A stable endpoint returning state (queued, running, succeeded, failed, cancelled) plus progress and result links.</dd></div><div class="term"><dt>Worker</dt><dd>A process that leases a job, executes it, and reports completion. Workers are disposable and horizontally scalable.</dd></div><div class="term"><dt>Visibility timeout / lease</dt><dd>The window during which a leased job is invisible to other workers; if the worker dies without completing, the job becomes claimable again.</dd></div><div class="term"><dt>Heartbeat</dt><dd>A periodic signal from a running worker that renews its lease and proves the job is not orphaned.</dd></div><div class="term"><dt>Checkpoint</dt><dd>A saved position in a long job so a retry resumes near the failure point instead of restarting from zero.</dd></div><div class="term"><dt>Idempotency</dt><dd>Designing each step so executing it twice produces the same result, which is required under at-least-once delivery.</dd></div><div class="term"><dt>Dead-letter queue</dt><dd>Where jobs go after exhausting retries, preserved for inspection and manual replay.</dd></div><div class="term"><dt>Backpressure</dt><dd>Limiting acceptance or slowing producers when workers cannot keep up, instead of letting the queue grow without bound.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">Normal API requests are designed to finish in milliseconds. Some work fundamentally cannot: transcoding a video, generating a year-end report, exporting a large dataset, running a model.</p>
+<ul><li>HTTP clients, load balancers, and proxies impose timeouts well below the duration of this work.</li><li>Holding a connection open consumes a worker thread or socket for the entire job, which is capacity you cannot spare.</li><li>A network blip or a client navigating away loses the connection, and the work dies with it if it lives in that request.</li><li>If the process restarts mid-job, in-memory progress disappears and the work is lost.</li><li>Users need to know what is happening, which a single blocking response cannot express.</li><li>The work is usually bursty: many submissions at once, then quiet, so provisioning for the peak inline is wasteful.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What counts as long-running</h2>
+<ul><li>Anything whose p99 exceeds the client or infrastructure timeout budget is effectively long-running.</li><li>Work whose duration is unpredictable, even if usually fast, is a candidate because the tail will break timeouts.</li><li>Work that must survive a deploy or a crash cannot be held only in process memory.</li><li>Work with external dependencies that can be slow or unavailable (third-party APIs, file scanning) benefits from retry isolation.</li><li>Quick work done inline is fine; do not queue everything, because the queue adds latency and operational surface.</li><li>The decision is about <strong>reliability and timeout budget</strong>, not about a fixed number of seconds.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Criterion</th><th>Inline</th><th>Background job</th></tr></thead><tbody><tr><td>Fits timeout budget</td><td>Yes</td><td>No, or unreliable tail</td></tr>
+<tr><td>Must survive client disconnect</td><td>No</td><td>Yes</td></tr>
+<tr><td>Needs retries and progress</td><td>Rarely</td><td>Yes</td></tr>
+<tr><td>Bursty demand</td><td>Provisioned for peak</td><td>Absorbed by queue</td></tr>
+<tr><td>User expects immediate result</td><td>Yes</td><td>No, needs status</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Accept, persist, acknowledge</h2>
+<p class="lede">The API's job changes from doing the work to recording the intent to do it.</p>
+<ul><li>Validate the request and authorization synchronously; reject bad input immediately.</li><li>Write a <strong>job record</strong> to durable storage with status queued, then enqueue its ID.</li><li>Return <code>202 Accepted</code> with a job ID and a status URL — not a fake success.</li><li>Persist before enqueueing (or use an outbox) so a crash cannot lose an accepted job.</li><li>The payload in the queue should reference the stored record, not replace it; the record is the source of truth.</li><li>The client now has a handle it can poll or subscribe to, independent of the original connection.</li></ul>
+
+<div class="flow"><span class="flow-step">Validate request</span><span class="flow-arrow">→</span><span class="flow-step">Write job row (queued)</span><span class="flow-arrow">→</span><span class="flow-step">Enqueue job ID</span><span class="flow-arrow">→</span><span class="flow-step">Return 202 + job ID</span><span class="flow-arrow">→</span><span class="flow-step">Worker executes</span><span class="flow-arrow">→</span><span class="flow-step">Client reads status</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Queue and worker architecture</h2>
+<ul><li>A broker holds pending job IDs; workers pull rather than being pushed, so load self-balances.</li><li>Workers are <strong>stateless and disposable</strong>: any worker can run any job of a type it supports.</li><li>Separate queues by job type or cost so a slow export cannot starve quick thumbnail work.</li><li>Scale workers on <strong>queue depth and age</strong>, not just CPU; a backlog with idle CPU means external I/O is the limit.</li><li>The visibility timeout must exceed the expected job duration, or the job is redelivered while still running.</li><li>Concurrency per worker must respect downstream limits such as database connections or third-party rate limits.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Job state machine and status API</h2>
+<ul><li>Model explicit states: queued, running, succeeded, failed, cancelled, and optionally retrying.</li><li>Allow only legal transitions, enforced conditionally, so a late worker cannot overwrite a cancelled job.</li><li>The status API returns state, progress, timestamps, attempt count, and a result reference.</li><li>Never block a status request; read the stored record and return immediately.</li><li>Include an estimated completion or at least an age, so the client can decide whether to keep waiting.</li><li>Store large results in object storage and return a link; do not put megabytes in the status response.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>State</th><th>Meaning</th><th>Allowed next states</th></tr></thead><tbody><tr><td>queued</td><td>Accepted, not yet leased</td><td>running, cancelled</td></tr>
+<tr><td>running</td><td>Leased by a worker</td><td>succeeded, failed, queued (lease lost)</td></tr>
+<tr><td>succeeded</td><td>Result persisted</td><td>terminal</td></tr>
+<tr><td>failed</td><td>Retries exhausted</td><td>queued (manual retry)</td></tr>
+<tr><td>cancelled</td><td>Withdrawn by user or system</td><td>terminal</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Progress tracking and heartbeats</h2>
+<ul><li>Persist progress as coarse milestones (percent, items processed, current stage), not per-item write amplification.</li><li>Throttle progress writes; updating the record on every unit of work can cost more than the work.</li><li>A <strong>heartbeat</strong> renews the lease, proving the worker is alive and letting the system detect orphans.</li><li>Without heartbeats, a long job looks stuck and gets redelivered, causing duplicate side effects.</li><li>Progress must be monotonic and safe to read from a replica if slight staleness is acceptable.</li><li>For user-facing jobs, stage labels are more useful than a precise percentage that is often wrong.</li></ul>
+
+
+<div class="note">A percentage that goes backwards destroys trust faster than no percentage at all.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Failure handling: retries, backoff, dead letters</h2>
+<ul><li>Classify errors: <strong>transient</strong> (timeout, throttling) retry; <strong>permanent</strong> (invalid input) fail fast.</li><li>Use exponential backoff with jitter so retries do not synchronize into a thundering herd.</li><li>Cap attempts and record each failure with its reason on the job record.</li><li>Make every step idempotent, because at-least-once delivery means duplicates are normal.</li><li>After the cap, move the job to a <strong>dead-letter queue</strong> with full context for inspection and replay.</li><li>Alert on dead-letter growth and on jobs whose age exceeds the expected duration.</li></ul>
+
+<div class="flow"><span class="flow-step">Attempt fails</span><span class="flow-arrow">→</span><span class="flow-step">Transient?</span><span class="flow-arrow">→</span><span class="flow-step">Backoff + jitter</span><span class="flow-arrow">→</span><span class="flow-step">Retry</span><span class="flow-arrow">→</span><span class="flow-step">Cap reached</span><span class="flow-arrow">→</span><span class="flow-step">Dead letter + alert</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Very large jobs: chunk, checkpoint, fan out</h2>
+<ul><li>Split the work into <strong>chunks</strong> that each fit comfortably inside one lease and one retry budget.</li><li>Persist a checkpoint per chunk so a retry resumes from the last completed unit.</li><li>Use a coordinator job that fans out chunk jobs and aggregates results, rather than one heroic worker.</li><li>Make chunk boundaries deterministic so a retry recomputes exactly the same partition.</li><li>Handle partial completion: define whether the final result requires all chunks or can be assembled incrementally.</li><li>For ordered output, aggregate by chunk index; parallel completion order is not output order.</li></ul>
+<h3>Fan-out shape</h3>
+<ul><li>A parent job records total chunks and counts completed ones.</li><li>Child jobs are independent and idempotent, so a lost child is simply retried.</li><li>The parent decides success only when every child has reported, or applies a documented partial-success rule.</li><li>This mirrors map-reduce and is the standard answer for exports and batch transforms.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Cancellation and timeouts</h2>
+<ul><li>Cancellation is a request, not a guarantee; the worker must observe a cancel flag or signal at safe points.</li><li>Check the flag between chunks, not mid-write, to avoid leaving inconsistent partial state.</li><li>A cancelled job should release resources (temp files, external sessions) and mark itself cancelled.</li><li>Enforce a maximum runtime so a hung job cannot hold a worker forever.</li><li>On timeout, treat it as a failure with a distinct reason, and decide whether it is retryable.</li><li>Clients must be told that cancellation is best-effort if the job already committed a side effect.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Isolation, priorities, and fairness</h2>
+<ul><li>Run untrusted or expensive jobs in separate worker pools so they cannot starve interactive work.</li><li>Assign priorities and use weighted queues; strict priority can starve low-priority jobs indefinitely.</li><li>Apply per-tenant quotas so one customer's bulk export does not consume the whole pool.</li><li>Bound concurrency per downstream dependency, not only per worker.</li><li>Use separate queues for retries so poison jobs do not delay fresh work.</li><li>Consider dedicated capacity for jobs with hard deadlines, such as nightly reports.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Delivery semantics and exactly-once illusions</h2>
+<ul><li>Most queues give <strong>at-least-once</strong> delivery; duplicates happen on redelivery, lease expiry, and retries.</li><li>Exactly-once end-to-end requires transactional coupling between queue, state, and side effects, which is rarely available.</li><li>The practical recipe: idempotency key per job plus a conditional state transition so only the first completion wins.</li><li>External side effects (email, payment, third-party API) need their own idempotency or dedupe layer.</li><li>Record completion before acknowledging the message; acknowledging first loses the job on a crash.</li><li>Design the job to be safe to run twice, and you no longer need to fear redelivery.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Notifying the client</h2>
+<ul><li><strong>Polling</strong> the status endpoint is simple, cache-friendly, and works everywhere; it costs wasted requests.</li><li><strong>Webhooks</strong> push completion to a server, but need signing, retries, and a receiver that is idempotent.</li><li><strong>Server-sent events or WebSocket</strong> give live progress in a UI without polling storms.</li><li><strong>Email or in-app notification</strong> suits jobs that finish long after the user leaves.</li><li>Whatever the channel, the status record remains the source of truth; notifications are hints to go read it.</li><li>Back off polling intervals and stop when the job reaches a terminal state.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Mechanism</th><th>Best for</th><th>Main cost</th></tr></thead><tbody><tr><td>Polling</td><td>Simple clients, infrequent jobs</td><td>Wasted requests, latency to notice</td></tr>
+<tr><td>Webhook</td><td>Server-to-server completion</td><td>Retries, signing, receiver idempotency</td></tr>
+<tr><td>SSE / WebSocket</td><td>Live progress in a UI</td><td>Connection management at scale</td></tr>
+<tr><td>Email / push</td><td>Long jobs the user leaves</td><td>Delivery uncertainty, no live progress</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Operating the system</h2>
+<ul><li>Monitor queue depth, <strong>oldest job age</strong>, throughput, failure rate, and retry rate per job type.</li><li>Alert on age, not depth: a deep queue draining fast is healthy, one stuck job is not.</li><li>Track execution duration percentiles to right-size leases and timeouts.</li><li>Log a correlation ID from submission through every worker attempt.</li><li>Watch cost per job type; transcoding and model inference can dominate spend.</li><li>Provide an admin path to inspect, retry, and cancel jobs without direct database edits.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Choosing a design in an interview</h2>
+<ul><li>Say up front which operations are synchronous and which become jobs, and why.</li><li>Describe the accept-persist-acknowledge flow with the 202 and job ID.</li><li>Name the queue, the worker pool, and the durable job record.</li><li>Show the state machine and the status endpoint the client polls.</li><li>Handle failure explicitly: retries with backoff, idempotency, dead letters, lease expiry.</li><li>Scale the hard part — chunking, checkpoints, and fan-out for very large jobs.</li><li>Finish with monitoring: oldest job age, failure rate, and dead-letter volume.</li></ul>
+
+<div class="flow"><span class="flow-step">Classify work</span><span class="flow-arrow">→</span><span class="flow-step">Accept + persist</span><span class="flow-arrow">→</span><span class="flow-step">Queue + workers</span><span class="flow-arrow">→</span><span class="flow-step">Progress + heartbeat</span><span class="flow-arrow">→</span><span class="flow-step">Retry / dead letter</span><span class="flow-arrow">→</span><span class="flow-step">Notify + monitor</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Async processing</strong> removes timeout risk and absorbs bursts but converts an immediate answer into eventual completion and a status API.</li><li><strong>Polling</strong> is trivially reliable but wastes requests; <strong>push channels</strong> are efficient but add connection or webhook infrastructure.</li><li><strong>Fine-grained progress</strong> pleases users but multiplies writes; coarse milestones are cheaper and often more honest.</li><li><strong>Long leases</strong> avoid duplicate execution for slow jobs but delay recovery when a worker dies.</li><li><strong>Small chunks</strong> make retries cheap and progress smooth but add coordination and per-job overhead.</li><li><strong>Aggressive retries</strong> improve success under transient failures but amplify load on a struggling dependency.</li><li><strong>Separate worker pools</strong> isolate noisy jobs but fragment capacity and reduce utilization.</li><li><strong>Exactly-once attempts</strong> simplify reasoning but cost coordination; at-least-once plus idempotency is usually the better trade.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why can't a long task just run inside the HTTP request?</summary><div class="answer"><p>Because clients, proxies, and load balancers time out, and holding the connection consumes capacity for the whole job. A disconnect or deploy loses the work, and there is no way to report progress. The request should record the intent and return immediately.</p></div></details>
+<details><summary>2. What does the API return for an accepted job?</summary><div class="answer"><p><code>202 Accepted</code> with a job ID and a status URL. The job record is already durable at that point, so a crash after the response does not lose the work.</p></div></details>
+<details><summary>3. How do you make sure an accepted job is not lost?</summary><div class="answer"><p>Persist the job record before enqueueing, or write the record and an outbox entry in one transaction and let a relay publish it. Acknowledge only after durability. Then a lost message can be recovered from the record.</p></div></details>
+<details><summary>4. What happens if a worker crashes mid-job?</summary><div class="answer"><p>Its lease expires because heartbeats stop, and the job becomes claimable again. Another worker retries it. That is why steps must be idempotent and why long jobs should checkpoint.</p></div></details>
+<details><summary>5. How do you avoid duplicate execution?</summary><div class="answer"><p>You cannot fully avoid it under at-least-once delivery, so you contain it: a job-level idempotency key, a conditional transition from running to succeeded so only the first completion wins, and idempotent external side effects.</p></div></details>
+<details><summary>6. How would you track progress for a large export?</summary><div class="answer"><p>Split the work into deterministic chunks, persist the count completed, and update progress at coarse intervals. A heartbeat renews the lease. On retry, resume from the last completed chunk rather than restarting.</p></div></details>
+<details><summary>7. How do you handle a job that takes hours?</summary><div class="answer"><p>Break it into chunk jobs with a coordinator, checkpoint each chunk, and keep leases and timeouts longer than one chunk rather than the whole job. A single multi-hour lease is fragile because any deploy or pause causes a duplicate run.</p></div></details>
+<details><summary>8. When do you retry versus fail immediately?</summary><div class="answer"><p>Retry transient errors such as timeouts, throttling, and temporary unavailability, with exponential backoff and jitter. Fail immediately on permanent errors like invalid input or missing authorization. Cap attempts and dead-letter the rest.</p></div></details>
+<details><summary>9. What is a dead-letter queue for?</summary><div class="answer"><p>It holds jobs that exhausted retries so they do not block the main queue and can be inspected, fixed, and replayed. Growing dead-letter volume is a signal of a systemic bug or a downstream outage.</p></div></details>
+<details><summary>10. How do you cancel a running job?</summary><div class="answer"><p>Set a cancel flag on the job record and have the worker check it at safe points between chunks. Cancellation is best-effort: if a side effect already committed, the system compensates instead of pretending nothing happened.</p></div></details>
+<details><summary>11. How do clients learn the job is done?</summary><div class="answer"><p>Poll the status endpoint, receive a webhook, subscribe over SSE or WebSocket, or get a notification. The status record is authoritative; the notification just tells the client to read it.</p></div></details>
+<details><summary>12. How do you scale workers?</summary><div class="answer"><p>Scale on queue depth and oldest job age per queue, within downstream limits. Workers should be stateless and disposable, with separate pools or queues by job type so expensive work does not starve quick work.</p></div></details>
+<details><summary>13. What would you monitor?</summary><div class="answer"><p>Queue depth, oldest job age, throughput, failure and retry rates, execution duration percentiles, lease-expiry counts, dead-letter growth, and per-job cost. Alert on age and failure rate, not only depth.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Doing the work inline and raising the load balancer timeout instead of decoupling it.</li><li>Returning 200 OK with an empty result while the job is still queued.</li><li>Enqueueing before persisting, so a crash loses an accepted job.</li><li>Setting a visibility timeout shorter than the job, causing duplicate concurrent execution.</li><li>Writing progress on every item and doubling the cost of the job.</li><li>Retrying permanent errors forever and calling the resulting load a capacity problem.</li><li>Assuming exactly-once delivery and skipping idempotency guards.</li><li>Scaling workers without respecting downstream connection or rate limits.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="preventing-double-booking.html"><span>← Previous</span><strong>Preventing Double Booking</strong></a><a class="next" href="scheduling-jobs.html"><span>Next →</span><strong>Scheduling Delayed and Recurring Jobs</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/handling-long-running-tasks">AlgoMaster — Handling Long-Running Tasks</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

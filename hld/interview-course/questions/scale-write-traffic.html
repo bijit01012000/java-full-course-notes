@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scale Write Traffic — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 09 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Scaling</span></div>
+    <h1>Scale Write Traffic</h1>
+    <p class="dek">Caches and replicas cannot absorb new data, so interviewers use write-heavy designs to see whether you understand write amplification, batching, queues, sharding, and which writes may be delayed or lost.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Writes scale by making each write cheaper, writing fewer of them, absorbing bursts in a durable log, and only then spreading them across shards keyed for even distribution.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Accept single and batched device or order events over HTTP.</li><li>Persist events durably for history, audit, and analytics.</li><li>Maintain the latest state per entity for low-latency reads.</li><li>Deduplicate retried writes and redelivered queue messages.</li><li>Replay a partition range after a consumer crash or a bad deploy.</li><li>Report ingestion lag per partition and apply backpressure when consumers fall behind.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Sustain 100k writes/s at peak and 30k writes/s on average.</li><li>p99 acknowledgement under 100 ms for async events and under 300 ms for durable order writes.</li><li>No acknowledged order or payment is lost; analytics and view counts may lag by seconds.</li><li>Ordering is guaranteed per entity, not globally across the whole stream.</li><li>Scale out by adding partitions, consumers, and shards without downtime.</li><li>A consumer restart or rebalance must not double-apply an effect.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 30k writes/s average and 100k writes/s peak at roughly 3x average.</li><li>At 1 KB per event, average ingest is about 30 MB/s, peak is about 100 MB/s, and a day is about 2.6 TB raw.</li><li>At 3x replication and 7-day hot retention, about 55 TB of hot copies exist before compression.</li><li>Batching 500 events turns 100k HTTP requests/s into about 200 requests/s.</li><li>At a measured 8k writes/s per shard, 100k/s needs 13 shards; provision 20 for headroom and growth.</li><li>Use 60 partitions so up to 60 consumers can run while each entity's events stay in one partition.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Event</span><span class="fields">event_id, entity_id, seq, type, payload, occurred_at, received_at</span></div><div class="entity"><span class="name">EntityState</span><span class="fields">entity_id, last_seq, last_value, updated_at, ttl_seconds</span></div><div class="entity"><span class="name">Shard</span><span class="fields">shard_id, key_range, leader, status, write_qps</span></div><div class="entity"><span class="name">IdempotencyRecord</span><span class="fields">scope, key, request_hash, status, response, expires_at</span></div><div class="entity"><span class="name">ConsumerOffset</span><span class="fields">group, partition, offset, committed_at, lag_events</span></div><div class="entity"><span class="name">DeadLetter</span><span class="fields">dlq_id, event_id, payload, error_class, attempts, created_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/events</code></td><td>Append one event; returns 202 with an event_id and is safe to retry with an Idempotency-Key.</td></tr><tr><td><code>POST</code></td><td><code>/v1/events:batch</code></td><td>Append up to 500 events with per-item status, cutting fixed request and commit cost.</td></tr><tr><td><code>GET</code></td><td><code>/v1/events/{id}</code></td><td>Read the accepted event and its processing status.</td></tr><tr><td><code>GET</code></td><td><code>/v1/entities/{id}/state</code></td><td>Read the latest projected state without scanning event history.</td></tr><tr><td><code>GET</code></td><td><code>/internal/pipeline/lag</code></td><td>Return consumer lag in events and in time, plus per-partition and per-shard skew.</td></tr><tr><td><code>POST</code></td><td><code>/internal/replay</code></td><td>Replay a bounded offset range into a side output after a bug or a bad deploy.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Event storage</td><td>Append-only LSM table partitioned by hash(entity_id), clustered by seq and time</td><td>Sequential appends suit high write rates, and one entity's history stays on one shard for ordered reads.</td></tr><tr><td>Latest state</td><td>Overwrite one row or Redis key per entity instead of appending a new row</td><td>Most reads want current state, and overwriting 5M entities is far cheaper than storing every update forever.</td></tr><tr><td>Idempotency</td><td>Unique (scope, key) with a request hash, written in the same transaction as the effect</td><td>A retry either replays the stored response or loses the unique race; it cannot execute the effect twice.</td></tr><tr><td>Consumer dedupe</td><td>Unique (consumer_group, message_id) committed with the business change</td><td>At-least-once delivery becomes effectively-once without a distributed transaction.</td></tr><tr><td>Publishing</td><td>Transactional outbox written with the business row, then relayed to the log</td><td>There is no gap where the database commits but the event is never published.</td></tr><tr><td>Shard key</td><td>hash(entity_id), never a timestamp or auto-increment column</td><td>Spreads writes across shards and keeps one entity's data together; increasing keys would put every new write on the newest shard.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  D[📱 Devices] --> GW[🛡️ API gateway]
+  GW --> API[⚙️ Ingest service]
+  API --> ID[🔑 Idempotency store]
+  API --> OB[📤 Outbox]
+  OB --> Q[📬 Partitioned log]
+  API --> Q
+  Q --> S[👷 State consumer]
+  S --> R[⚡ Latest-state store]
+  Q --> B[👷 Batch writer]
+  B --> DB[🗄️ Sharded LSM store]
+  Q --> DLQ[🛑 Dead letter]
+  MON[📊 Lag monitor] -.-> API
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef bus fill:#ffe8ec,stroke:#b42342,color:#17211f;
+  class D client;
+  class GW,API,ID edge;
+  class S,B svc;
+  class OB,Q,R,DB,DLQ,MON store;
+  class MON bus;</div><div class="diagram-caption">Producers append to a partitioned log, one consumer group maintains current state, another batches history into a sharded LSM store, and lag drives backpressure.</div></div>
+        <ul><li>Writes are harder than reads because every write must be durable, applied to the table, applied to every index, and replayed to every replica.</li><li>Keep only the indexes the queries use; on a write-heavy table, an unused index is pure overhead on every insert.</li><li>Use a log between the API and the database when traffic is spiky or the client does not need immediate persistence.</li><li>Partition by entity ID so one entity's events stay ordered and one consumer group can scale without cross-partition coordination.</li><li>Make consumers idempotent with a producer-assigned event ID and a dedupe record committed in the same transaction as the effect.</li><li>Separate durability classes: payments and orders wait for a durable, replicated commit; view counts and analytics can be aggregated or sampled.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Queue between API and database</td><td>Absorbs bursts, decouples acceptance from persistence, and lets consumers run at a sustainable rate</td><td>Delayed visibility, duplicate delivery, consumer lag, and another system to operate</td></tr><tr><td>Batching</td><td>Amortises network round trips, transactions, and log writes across many records</td><td>Adds latency and can lose the buffered batch if the process crashes</td></tr><tr><td>LSM-tree storage</td><td>High write throughput through sequential appends and sorted flushes</td><td>Slower reads from multiple files and background compaction that consumes CPU and disk</td></tr><tr><td>Overwrite latest state</td><td>Keeps the working set small and makes current-state reads cheap</td><td>Discards history that analytics, audit, or debugging may later need</td></tr><tr><td>Sharding</td><td>Spreads storage and write throughput across many machines</td><td>Cross-shard queries and transactions become hard, and resharding needs a migration plan</td></tr><tr><td>Consistent hashing</td><td>Moves only about 1/N of keys when a shard is added</td><td>Adds ring management and still requires dual reads or writes during the move</td></tr><tr><td>acks=all</td><td>Acknowledged writes survive a broker failure</td><td>Higher write latency and lower throughput than a single-broker acknowledgement</td></tr><tr><td>Aggregation and sampling</td><td>Cuts write volume by orders of magnitude</td><td>Loses fine-grained detail and can lose the recent window if the aggregator crashes</td></tr></tbody></table></div>
+        <ul><li>Batch writes on both the client and consumer side, flushing on a size limit or a short time limit, to amortise round trips and commits.</li><li>Choose an LSM-based store for append-only volume and accept background compaction as a real operational cost.</li><li>Overwrite latest state instead of appending history when reads only need the current value.</li><li>Aggregate counters in memory or a stream processor and write one delta per interval instead of one row per event.</li><li>Hash the entity ID for sharding and use consistent hashing so adding a shard moves roughly 1/N of keys.</li><li>Split a hot counter into several counters, update one at random, and sum on read.</li><li>Raise partition count before adding consumers, and increase consumer batch size when lag rises.</li><li>Use compression and time-based retention tiers so raw detail expires while rollups remain.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why do caches and read replicas not fix write throughput?</strong> Every write still carries new data that must be stored durably and replayed to every replica, so duplicating reads does not remove any write work.</div><div class="followup"><strong>What does one insert actually cost?</strong> A log append, a table or page update, an update to every index, row locks where needed, and replication, which is why measured write throughput is lower than expected.</div><div class="followup"><strong>When is a queue the right answer?</strong> When traffic is spiky or the client can accept delayed persistence, because a queue turns a burst into a backlog rather than a database outage.</div><div class="followup"><strong>Does a queue fix sustained overload?</strong> No; it only smooths a burst, and if consumers are permanently slower than producers the lag grows until you add capacity or apply backpressure.</div><div class="followup"><strong>Why must queue consumers be idempotent?</strong> Most brokers deliver at least once, so a consumer can commit an effect and crash before acknowledging; a producer-assigned event ID and a dedupe record make the redelivery harmless.</div><div class="followup"><strong>What do you watch on a queue pipeline?</strong> Consumer lag in events and in time, produce versus consume rate, partition skew, retry and dead-letter counts, and database write latency.</div><div class="followup"><strong>What makes a good shard key?</strong> It spreads writes evenly and keeps data that is read together on one shard, such as hash(entity_id) rather than a timestamp.</div><div class="followup"><strong>Why is a timestamp a poor range shard key?</strong> Every new write has the latest timestamp and lands on the newest shard, leaving older shards idle and the hot shard saturated.</div><div class="followup"><strong>How do you handle one record with enormous write traffic?</strong> Split it: keep several counters, update one at random, and sum them on read, because sharding spreads data but cannot split a single row.</div><div class="followup"><strong>What breaks when you add shards later?</strong> Modulo hashing moves almost every key when N changes; consistent hashing limits movement to about 1/N, but you still need dual reads or writes during migration.</div><div class="followup"><strong>Which writes can be asynchronous?</strong> Only those where delay or small loss is acceptable, such as views, analytics, and replaceable location pings; payments, orders, and chat messages must be durable before acknowledgement.</div><div class="followup"><strong>How do you get exactly-once processing?</strong> You do not get exactly-once delivery end to end; you get effectively-once effects from at-least-once delivery plus idempotent or deduplicated consumers.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Trying to fix write throughput by adding read replicas or caches.</li><li>Keeping many unused indexes on a write-heavy table and wondering why inserts are slow.</li><li>Claiming a queue solves sustained overload rather than only smoothing a burst.</li><li>Building consumers that are not idempotent, then discovering duplicates after a restart.</li><li>Choosing a timestamp or auto-increment column as a range shard key.</li><li>Acknowledging a write after placing it in a volatile buffer and calling it durable.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="scale-read-traffic.html"><span>← Previous</span><strong>Scale Read Traffic</strong></a><a class="next" href="caching-consistency.html"><span>Next →</span><strong>Caching and Cache Consistency</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

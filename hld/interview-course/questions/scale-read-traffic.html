@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scale Read Traffic — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 08 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Scaling</span></div>
+    <h1>Scale Read Traffic</h1>
+    <p class="dek">Almost every product question turns into a read-scaling question: one write is read thousands of times, so interviewers want to see whether you can keep those reads away from the database without breaking freshness.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">5 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Serve most reads from the edge, memory, or a replica, keep only a small fraction reaching the database, and state the staleness budget for every layer you add.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Serve product detail, category listing, and search-result pages by ID through one read API.</li><li>Serve anonymous responses that are identical for every user from the CDN and shared caches.</li><li>Return the requesting user's own recent write immediately, even while replicas lag.</li><li>Invalidate or refresh every cached copy when a product changes.</li><li>Expose hit ratio, replica lag, and per-route latency so a bad layer can be bypassed.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>p99 under 100 ms at the edge and under 200 ms at origin for a cache hit.</li><li>Sustain 50k reads/s at peak with a roughly 100:1 read-to-write ratio.</li><li>99.95% read availability; a cache outage degrades latency, not correctness.</li><li>Staleness budgets: public catalog 60 s, stock 5 s, the user's own write 0 s.</li><li>Scale horizontally with no downtime, no single hot node, and no shared mutable state in the app tier.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 50k reads/s at peak and 500 writes/s at peak, a 100:1 read-to-write ratio.</li><li>10M products at about 2 KB each is about 20 GB raw; the hot 5% is about 1 GB, which fits in memory.</li><li>At a 95% cache hit ratio, 2,500 reads/s reach the database; at 90%, 5,000 reads/s do.</li><li>Four replicas at about 10k simple reads/s each give about 40k reads/s, enough for the miss path with failover headroom.</li><li>If the CDN serves 60% of public traffic, origin sees about 20k reads/s before local and Redis caches.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Product</span><span class="fields">product_id, title, description, price_cents, stock, category_id, version, updated_at</span></div><div class="entity"><span class="name">Category</span><span class="fields">category_id, name, parent_id, sort_rank, product_count</span></div><div class="entity"><span class="name">CacheEntry</span><span class="fields">key, value, version, ttl_seconds, cached_at, size_bytes</span></div><div class="entity"><span class="name">ReadReplica</span><span class="fields">replica_id, region, lag_ms, status, connections</span></div><div class="entity"><span class="name">ListingPage</span><span class="fields">category_id, cursor, product_ids, generated_at, version</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/v1/products/{id}</code></td><td>Read one product; cache-first, replica on miss, 404 for unknown IDs.</td></tr><tr><td><code>GET</code></td><td><code>/v1/categories/{id}/products?cursor=&limit=</code></td><td>Cursor-paginated listing served from a precomputed page or a covering index.</td></tr><tr><td><code>GET</code></td><td><code>/v1/products/{id}/availability</code></td><td>Short-TTL stock read with its own tighter freshness budget.</td></tr><tr><td><code>PUT</code></td><td><code>/v1/products/{id}</code></td><td>Write path; commits the change and returns the new version for cache invalidation.</td></tr><tr><td><code>GET</code></td><td><code>/internal/read-health</code></td><td>Per-route hit ratio, origin QPS, replica lag, and cache error rate for routing decisions.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Primary lookup</td><td>Covering index on (product_id) with the list and price columns included</td><td>One index lookup returns the whole card without touching the table or issuing a second query.</td></tr><tr><td>Listing query</td><td>Composite index on (category_id, sort_rank, product_id)</td><td>Filter first, sort second, and paginate by the last key instead of using a growing OFFSET.</td></tr><tr><td>Denormalized read model</td><td>product_summary table with category name, rating count, and thumbnail URL</td><td>Turns a multi-table page load into one row read; the write path pays the extra upkeep.</td></tr><tr><td>Cache key</td><td>product:{id}:v{version} with a 60 s TTL and 10% jitter</td><td>A version in the key prevents an old value from overwriting a newer one during a race.</td></tr><tr><td>Replica routing</td><td>Reads go to replicas; own-write reads pin to the primary for 2 s or until the version is seen</td><td>Preserves read-your-writes without sending all traffic back to the primary.</td></tr><tr><td>Hot-key handling</td><td>Local in-process cache for the hottest 1% with a 1–2 s TTL, plus suffixed Redis copies</td><td>One popular key otherwise saturates a single cache node no matter how many nodes you add.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> CDN[🌍 CDN edge]
+  CDN -->|miss| GW[🛡️ API gateway]
+  GW --> APP[⚙️ Read service]
+  APP --> L1[⚡ Local cache]
+  L1 -->|miss| RDS[⚡ Redis cluster]
+  RDS -->|miss| RT[🔀 Read router]
+  RT --> R1[🗄️ Read replica 1]
+  RT --> R2[🗄️ Read replica 2]
+  APP -.->|fresh read| P[🗄️ Primary]
+  APP --> Q[📬 Invalidation bus]
+  Q -.->|invalidate| APP
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef bus fill:#ffe8ec,stroke:#b42342,color:#17211f;
+  class C client;
+  class CDN,GW edge;
+  class APP,L1,RDS,RT svc;
+  class R1,R2,P store;
+  class Q bus;</div><div class="diagram-caption">Reads fall through the cheapest layer first: CDN, then local memory, then Redis, then a replica, with the primary reserved for fresh own-write reads.</div></div>
+        <ul><li>Fix the query before adding infrastructure: a missing index or an N+1 pattern can consume the same capacity a cache would have saved.</li><li>Every layer has a stated staleness budget and an update mechanism; a layer with no invalidation plan is a bug waiting to surface.</li><li>Use cache-aside with delete-on-write and a TTL backstop; the cache is derived data and losing it must not lose correctness.</li><li>Read replicas are asynchronous by default, so route own-write reads to the primary briefly instead of pretending lag does not exist.</li><li>Precompute expensive pages and counters at write time when reads dominate; a feed or listing should not run the same join per request.</li><li>Design the full-miss path: timeouts, circuit breakers, request coalescing, and load shedding, because the cache will be cold or down at some point.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>CDN caching</td><td>Answers requests before they reach origin and cuts latency for distant users</td><td>Stale content and coarse purges; personal data can leak if responses are not marked correctly</td></tr><tr><td>Read replicas</td><td>Adds read capacity and failover targets without changing the write path</td><td>Scales sub-linearly because every replica applies every write and costs storage and operations</td></tr><tr><td>Asynchronous replication</td><td>Keeps write latency low and writes available when a replica is slow</td><td>Replication lag breaks naive read-your-writes and needs per-endpoint handling</td></tr><tr><td>Local in-process cache</td><td>Fastest possible hit with no network hop</td><td>One copy per instance, duplicated memory, and short TTLs to bound divergence</td></tr><tr><td>Redis cache-aside</td><td>Removes most database reads and shares one view across app servers</td><td>Adds a network hop, invalidation logic, and a second copy that can be stale</td></tr><tr><td>Denormalized read model</td><td>One-row page loads and predictable read latency</td><td>Write amplification and a second place that must be kept in sync</td></tr><tr><td>Long TTL</td><td>Higher hit ratio and less database load</td><td>Wider staleness window and slower propagation of corrections</td></tr><tr><td>Pin own reads to the primary</td><td>Correct read-your-writes without special client logic</td><td>Puts a slice of read traffic back on the primary and reduces read scaling</td></tr></tbody></table></div>
+        <ul><li>Add the composite and covering indexes that the top read queries need, and verify them with the query plan.</li><li>Cache public pages at the CDN with s-maxage plus stale-while-revalidate; mark anything user-specific private or no-store.</li><li>Keep a small local cache for the hottest keys to avoid a network hop on the majority of requests.</li><li>Use single-flight or a short lock on a miss so one request rebuilds a key while the rest wait briefly.</li><li>Add TTL jitter and refresh popular entries in the background so expirations do not arrive in a wave.</li><li>Negative-cache unknown IDs for about 30 s to stop repeated misses from reaching the database.</li><li>Precompute category listings, rating counts, and other aggregates instead of recalculating them on every read.</li><li>Monitor and rebalance hot shards; split or salt a key rather than adding cache nodes that cannot help one key.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>How do you know reads are the real bottleneck?</strong> Measure the read-to-write ratio, peak reads per second, database CPU and I/O, query latency percentiles, and hit ratio; reads are the problem when the database saturates on read queries while writes are modest.</div><div class="followup"><strong>What would you fix before adding a cache or replicas?</strong> Indexes, query shape, and result-set size — a full scan or an N+1 pattern multiplies load without adding a single new component.</div><div class="followup"><strong>Why is replica scaling not linear?</strong> Every replica must apply every write and costs storage and operations, so read capacity grows with replica count but efficiency does not.</div><div class="followup"><strong>How do you preserve read-your-writes with lagging replicas?</strong> Route that user's reads to the primary for a short window after a write, or return a version watermark and wait until a replica has reached it.</div><div class="followup"><strong>A 95% hit ratio still overloads the database — why?</strong> Because the absolute miss rate is what reaches the database: at 50k reads/s, 5% is 2,500 queries/s, so size the database for misses, not total traffic.</div><div class="followup"><strong>TTL or delete-on-write?</strong> Use both: delete after the database commit so the next read reloads fresh data, and keep a TTL so a missed delete expires eventually.</div><div class="followup"><strong>How do you stop a cache stampede?</strong> Coalesce misses with a per-key lock or single-flight, refresh popular keys before expiry, and add jitter so keys do not expire together.</div><div class="followup"><strong>How do you handle one viral product?</strong> Replicate the key under suffixed names that hash to different cache nodes and keep a very short-TTL local copy so most reads never reach the cluster.</div><div class="followup"><strong>When is a CDN appropriate for API responses?</strong> When the response is identical for every user and a short staleness window is acceptable, such as a public product page or article.</div><div class="followup"><strong>What happens when the cache is down?</strong> The database sees the full read load, so use timeouts, a circuit breaker, load shedding, and possibly stale data, and size the database for a survivable miss rate.</div><div class="followup"><strong>How would you serve multiple regions?</strong> Terminate reads at the nearest edge or replica, keep writes in a primary region, and replicate asynchronously while respecting data-residency rules.</div><div class="followup"><strong>What would you monitor?</strong> Hit ratio per route, origin and CDN QPS, p99 latency, replica lag, eviction rate, cache errors, and per-key skew for hot keys.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Adding a cache before checking for a missing index or an N+1 query pattern.</li><li>Routing every read to a replica and assuming the result is strongly consistent.</li><li>Caching a personalised response at the CDN because the page looked public.</li><li>Adding a cache with no invalidation strategy, then treating stale reads as a mystery.</li><li>Claiming replica throughput scales linearly with replica count.</li><li>Treating the cache as the source of truth and losing the ability to rebuild it from the database.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="design-payment-system.html"><span>← Previous</span><strong>Design a Payment System</strong></a><a class="next" href="scale-write-traffic.html"><span>Next →</span><strong>Scale Write Traffic</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Distributed Transactions / SAGA — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 18 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · Reliability</span></div>
+    <h1>Distributed Transactions / SAGA</h1>
+    <p class="dek">Interviewers use it to see whether you can reason honestly about partial failure across services, instead of assuming a database transaction exists where it does not.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Keep the work in one local transaction if you can; use 2PC only for short internal writes; otherwise run a saga of local transactions with idempotent compensations, an outbox for reliable events, and explicit recovery for stuck workflows.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Place an order that creates the order, reserves stock, charges payment, and books shipment.</li><li>On any step failure, leave no charge without an order and no stock held forever.</li><li>Tolerate client retries and duplicate message delivery without duplicating effects.</li><li>Expose the workflow's current state and history to users and support.</li><li>Allow cancellation and a manual repair path for irrecoverable cases.</li><li>Publish a business event reliably whenever state changes.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>No distributed lock is held across a user-facing request or a third-party call.</li><li>Every step and every compensation is idempotent and safe to retry.</li><li>Intermediate state is either invisible to unrelated readers or explicitly marked as pending.</li><li>A stuck workflow is detected within minutes by a deadline, not discovered later by support.</li><li>The consistency guarantee is stated precisely: atomic, eventually consistent, or consistent within a window.</li><li>Money and inventory movements are auditable and reconcilable.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 5k orders per second at peak and four participating services, so about 20k local transactions per second across the system.</li><li>2PC would hold participant locks for tens of milliseconds to seconds; at 5k orders per second that is thousands of concurrent locks and a hard throughput ceiling.</li><li>A saga of four steps at roughly 100 to 300 ms per step gives a p99 end-to-end around 1 to 2 seconds when everything is healthy.</li><li>Assume 0.1 percent of sagas need compensation, which is still about 5 per second at peak and must not page anyone.</li><li>An outbox at 5k rows per second needs continuous purge; keeping it under about a million rows keeps relay lag and index cost small.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Order</span><span class="fields">order_id, user_id, amount, status, saga_id, created_at</span></div><div class="entity"><span class="name">SagaInstance</span><span class="fields">saga_id, type, current_step, status, started_at, deadline, attempts</span></div><div class="entity"><span class="name">SagaStep</span><span class="fields">saga_id, step_no, name, status, idempotency_key, result, updated_at</span></div><div class="entity"><span class="name">Reservation</span><span class="fields">reservation_id, sku, quantity, order_id, state, expires_at</span></div><div class="entity"><span class="name">Payment</span><span class="fields">payment_id, order_id, amount, state, provider_ref, updated_at</span></div><div class="entity"><span class="name">OutboxEvent</span><span class="fields">event_id, aggregate_id, type, payload, created_at, published_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/orders</code></td><td>Starts the workflow with an Idempotency-Key and returns 202 with the order id and saga id.</td></tr><tr><td><code>GET</code></td><td><code>/orders/{id}</code></td><td>Returns order status including intermediate states such as awaiting_payment or compensating.</td></tr><tr><td><code>POST</code></td><td><code>/orders/{id}/cancel</code></td><td>Requests cancellation, which triggers compensation of completed steps rather than a rollback.</td></tr><tr><td><code>POST</code></td><td><code>/internal/reservations</code></td><td>Try phase: holds stock for an order without committing it, with an expiry.</td></tr><tr><td><code>POST</code></td><td><code>/internal/reservations/{id}/confirm</code></td><td>Confirm phase: turns the hold into a permanent allocation, idempotently.</td></tr><tr><td><code>GET</code></td><td><code>/internal/sagas/{id}</code></td><td>Ops view of step state, attempts, and last error, used by dashboards and manual repair.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Where saga state lives</td><td>A saga_instance row plus one row per step in the database, not in orchestrator memory</td><td>A crash or deploy must resume the workflow from the current step instead of restarting or forgetting it.</td></tr><tr><td>Duplicate protection</td><td>Unique idempotency key per (saga_id, step) recorded in the same transaction as the effect</td><td>At-least-once delivery and retries are guaranteed, so the second attempt must be a no-op rather than a second charge.</td></tr><tr><td>Inventory model</td><td>A reservation row with state held, confirmed, or released and an expires_at</td><td>A hold with a timeout prevents abandoned sagas from locking stock indefinitely, and the state machine makes confirm and release safe to repeat.</td></tr><tr><td>Event publication</td><td>Transactional outbox written in the same local transaction as the state change, relayed afterwards</td><td>A dual write can commit the order and lose the event, so the outbox makes publication reliable at the cost of at-least-once delivery.</td></tr><tr><td>Intermediate visibility</td><td>A pending status or a separate pending table acting as a semantic lock</td><td>Other readers must not treat a reserved or authorised but unconfirmed record as final.</td></tr><tr><td>Audit trail</td><td>Append-only ledger rows for payment and inventory movements, partitioned by time</td><td>Compensations are business operations, so an immutable history is what makes reconciliation and support possible.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> API[⚙️ Order API]
+  API --> O[🗄️ Order DB + outbox]
+  API --> OR[🎭 Saga orchestrator]
+  OR --> S[📦 Inventory service]
+  OR --> P[💳 Payment service]
+  OR --> SH[🚚 Shipping service]
+  O --> R[📬 Outbox relay]
+  R --> B[📢 Event bus]
+  B --> S
+  B --> P
+  B --> SH
+  OR --> RC[🧯 Reconciliation + DLQ]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#6d3fc4,color:#17211f;
+  classDef queue fill:#ffe8ec,stroke:#b42342,color:#17211f;
+  classDef warn fill:#fff2d6,stroke:#b26a08,color:#17211f;
+  class C client;
+  class API,S,P,SH svc;
+  class O store;
+  class R,B queue;
+  class OR,RC warn;</div><div class="diagram-caption">The orchestrator drives local transactions in each service, the outbox and relay publish events reliably, and a reconciliation path catches sagas and compensations that cannot complete.</div></div>
+        <ul><li>First question: can the data live in one service? A single local transaction is always simpler than any distributed protocol, so check before designing one.</li><li>2PC gives atomicity but holds locks across the network and blocks when the coordinator dies, so it fits only short, internal, few-participant writes.</li><li>A saga trades atomicity for availability; the steps are real commits, so other readers can see intermediate state and compensations must exist for every reversible step.</li><li>Ordering matters: put irreversible actions such as shipping or sending last, after all fallible checks have passed.</li><li>The outbox is what makes the saga reliable; without it, a crash between commit and publish loses the event that drives the next step.</li><li>The most common real failure is not an error but a workflow that never finishes, so every step needs a timeout, a deadline, and a dead-letter or manual path.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Single local transaction</td><td>Real atomicity and isolation with the least code</td><td>Only possible when the data can live in one service and one database</td></tr><tr><td>Two-phase commit</td><td>Atomic commit across participants without writing compensation logic</td><td>Locks held across the network, low throughput, and blocking if the coordinator fails</td></tr><tr><td>Saga with compensations</td><td>Availability and progress across long workflows and third parties</td><td>Eventual consistency, visible intermediate states, and extra compensation code paths</td></tr><tr><td>Orchestration</td><td>One place shows the flow, with explicit and testable failure logic</td><td>A central dependency that can accumulate business logic</td></tr><tr><td>Choreography</td><td>Teams decouple and there is no central bottleneck</td><td>The end-to-end flow is implicit and hard to trace or change</td></tr><tr><td>Try-confirm-cancel reservations</td><td>Scarce resources are protected from late failure</td><td>Holds reduce availability and need expiry handling</td></tr><tr><td>Transactional outbox</td><td>Events are never lost between commit and publish</td><td>An extra table, a relay, cleanup, and at-least-once delivery</td></tr><tr><td>Semantic lock or pending status</td><td>Prevents dirty reads of in-flight state</td><td>Lower concurrency and a state every reader must understand</td></tr></tbody></table></div>
+        <ul><li>Co-locate the steps in one service or database where the business allows it, removing the distributed transaction entirely.</li><li>Persist saga state and step status so recovery resumes at the current step instead of replaying from the start.</li><li>Give every step and compensation a stable idempotency key stored with its effect.</li><li>Use try-confirm-cancel reservations for scarce inventory so a late failure does not oversell.</li><li>Use an outbox with a relay or change data capture instead of writing the database and the broker separately.</li><li>Add a semantic lock or pending status so other transactions skip in-flight records.</li><li>Partition by order id to keep one entity's events ordered, and route poison messages to a DLQ with context.</li><li>Run reconciliation for the gap between orders created, charged, and fulfilled, and alert on the gap rather than on individual errors.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why can't you use one database transaction across services?</strong> Atomicity and isolation are enforced by one database's transaction manager, and separate services have separate databases, connections, and failure domains, while external providers cannot participate at all.</div><div class="followup"><strong>What is two-phase commit and when would you use it?</strong> A coordinator asks every participant to prepare and lock, then commits only if all vote yes; it fits short, internal, few-participant writes with a hard atomicity requirement.</div><div class="followup"><strong>What is a saga?</strong> A sequence of local transactions where each completed step has a compensating action, so a later failure triggers business-level undo in reverse order and the system settles into eventual consistency.</div><div class="followup"><strong>Orchestration or choreography?</strong> Orchestration for complex flows with timeouts and many compensations because the logic is in one testable place; choreography for simple, loosely coupled reactions where teams want independence.</div><div class="followup"><strong>What makes a good compensating transaction?</strong> It reverses the business effect rather than a row, is idempotent, can be retried, and is ordered so irreversible actions happen last.</div><div class="followup"><strong>What if a compensation also fails?</strong> Retry it, then park the saga in a dead-letter or manual review queue with full context and alert, rather than leaving silent inconsistency.</div><div class="followup"><strong>What are saga isolation anomalies?</strong> Dirty reads of uncommitted saga state, lost updates, and fuzzy reads, countered with semantic locks, pending states, and version checks.</div><div class="followup"><strong>What is a semantic lock?</strong> A pending flag or status that marks a record as part of an in-flight saga so other operations wait, reject, or handle it specially.</div><div class="followup"><strong>Why do you need an outbox?</strong> Because the database commit and the event publish are separate operations, so writing the event in the same transaction makes publication reliable.</div><div class="followup"><strong>How do you avoid a double refund?</strong> Give the compensation a stable idempotency key recorded with its effect, or move the payment through a one-way state transition that can only happen once.</div><div class="followup"><strong>How do you detect a stuck saga?</strong> Every step gets a timeout and the saga gets a deadline, and a job alerts on instances past that deadline without a terminal state.</div><div class="followup"><strong>What do you monitor?</strong> Saga completion rate and duration, stuck count, compensation rate, outbox and DLQ lag, and the gap between orders created, charged, and fulfilled.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Proposing 2PC for a workflow that calls an external payment provider or spans regions.</li><li>Describing a saga as a rollback, when compensations are separate business operations with their own failure modes.</li><li>Forgetting that saga steps are real commits and other readers can see or act on intermediate state.</li><li>Assuming compensations always succeed, with no dead-letter queue or manual reconciliation path.</li><li>Publishing events after the commit without an outbox, then losing the event when the process crashes.</li><li>Making a step non-idempotent so a retry charges the card twice, or leaving the irreversible step early in the sequence.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="realtime-protocols.html"><span>← Previous</span><strong>WebSockets vs SSE vs Polling</strong></a><a class="next" href="multi-region.html"><span>Next →</span><strong>Run Across Multiple Regions</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

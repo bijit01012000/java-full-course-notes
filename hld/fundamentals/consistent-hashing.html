@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consistent Hashing — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 06 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Consistent Hashing</h1>
+    <p class="dek">Core Concepts · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/consistent-hashing">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The routing question</a>
+<a href="#s2">Modulo hashing</a>
+<a href="#s3">What breaks when servers change</a>
+<a href="#s4">The hash ring</a>
+<a href="#s5">Looking up a key</a>
+<a href="#s6">Adding a server</a>
+<a href="#s7">Removing a server</a>
+<a href="#s8">How many keys move</a>
+<a href="#s9">The problem of uneven ranges</a>
+<a href="#s10">Virtual nodes</a>
+<a href="#s11">Implementing the ring</a>
+<a href="#s12">Replication on the ring</a>
+<a href="#s13">When to use consistent hashing</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Consistent hashing maps keys and servers onto the same ring so that adding or removing one server moves only a small slice of the keys instead of reshuffling the whole cluster.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Hash ring</dt><dd>A fixed circular hash space (for example <code>0</code> to <code>2^32 - 1</code>) on which both servers and keys are placed; after the last position it wraps back to zero.</dd></div><div class="term"><dt>Modulo hashing</dt><dd>Assigning a key with <code>hash(key) % N</code>, where N is the live server count. Simple, but every change to N remaps most keys.</dd></div><div class="term"><dt>Virtual node (vnode)</dt><dd>One of several ring positions created by hashing identifiers like <code>S1-0</code>, <code>S1-1</code>; each position points back to the same physical server.</dd></div><div class="term"><dt>Key space</dt><dd>The range of hash values a function can produce. A larger space makes collisions rare and gives room for many vnodes.</dd></div><div class="term"><dt>Clockwise lookup</dt><dd>The rule that a key belongs to the first server position at or after the key's hash, wrapping to the smallest position when the ring ends.</dd></div><div class="term"><dt>Rebalancing</dt><dd>Moving ownership after membership changes. Consistent hashing limits <em>which</em> keys change owner; it does not physically move data.</dd></div><div class="term"><dt>Hot spot</dt><dd>A server or ring range receiving disproportionate traffic because ranges are uneven or the key distribution is skewed.</dd></div><div class="term"><dt>Replication factor</dt><dd>The number of copies kept for a key, chosen by walking clockwise to distinct physical servers.</dd></div><div class="term"><dt>Rendezvous hashing</dt><dd>An alternative that scores every server for a key and picks the highest score, avoiding a ring structure entirely.</dd></div><div class="term"><dt>Fixed partitions</dt><dd>Hashing keys into a constant number of logical partitions and keeping a separate partition-to-server assignment table.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The routing question</h2>
+<p class="lede">A distributed cache or storage tier has to answer one question for every request: <strong>which server owns this key?</strong> If the answer changes for no reason, cached data is stranded and requests pay a database round trip.</p>
+<ul><li>Suppose user profiles are cached across five servers, <code>S0</code> through <code>S4</code>.</li><li>Sending a request to a <strong>random</strong> server is wasteful: the profile may already be cached elsewhere, so the hit rate collapses.</li><li>The key must map deterministically, so every request for <code>user:42</code> reaches the same server while membership is stable.</li><li>The real challenge is <strong>membership change</strong>: a server is added for capacity or lost to a failure.</li><li>A good scheme keeps most keys where they are and moves only what must move.</li><li>This is a placement problem, not a load-balancing problem: ownership must be stable per key, not merely spread evenly.</li></ul>
+
+<div class="flow"><span class="flow-step">Client asks for a key</span><span class="flow-arrow">→</span><span class="flow-step">Hash the key</span><span class="flow-arrow">→</span><span class="flow-step">Find the owning server</span><span class="flow-arrow">→</span><span class="flow-step">Read or write the key there</span></div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Modulo hashing</h2>
+<p class="lede">The simplest scheme hashes the key and takes the remainder modulo the number of servers, which yields a server index from <code>0</code> to <code>N - 1</code>.</p>
+<ul><li>Formula: <code>server = hash(key) % N</code>, where N is the current server count.</li><li>With five servers, a key hashing to 42 maps to <code>42 % 5 = 2</code>, so it goes to <code>S2</code>.</li><li>A different key hashing to 17 also maps to <code>S2</code>; collisions in the index are expected and harmless.</li><li>With a well-distributed hash, each server owns roughly <code>1 / N</code> of the keys.</li><li>While N is constant, the mapping is stable and lookup is O(1).</li><li>The design is fine as long as the server set never changes — which is not a realistic assumption.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Key</th><th>Hash</th><th>Calculation</th><th>Server</th></tr></thead><tbody><tr><td>user:42</td><td>42</td><td>42 mod 5 = 2</td><td>S2</td></tr>
+<tr><td>user:17</td><td>17</td><td>17 mod 5 = 2</td><td>S2</td></tr>
+<tr><td>user:18</td><td>18</td><td>18 mod 5 = 3</td><td>S3</td></tr>
+<tr><td>user:37</td><td>37</td><td>37 mod 5 = 2</td><td>S2</td></tr>
+<tr><td>user:91</td><td>91</td><td>91 mod 5 = 1</td><td>S1</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What breaks when servers change</h2>
+<p class="lede">Add one server and the divisor changes from 5 to 6. Every key's index is recomputed against a different modulus, so ownership changes almost everywhere.</p>
+<ul><li>Adding <code>S5</code> makes the formula <code>hash(key) % 6</code>; key 42 moves from <code>S2</code> to <code>S0</code>, key 17 moves from <code>S2</code> to <code>S5</code>.</li><li>Most keys move even though only one server joined; in the source example four of five sampled keys changed owners.</li><li>Cached entries still sit on the old servers, so requests hitting new owners <strong>miss</strong> and refetch from the database.</li><li>Removing a server is the same story in reverse: dropping from five to four changes the modulus to 4 and reshuffles again.</li><li>A cache miss storm after a resize can overwhelm the database that the cache was protecting.</li><li>The cost is proportional to the fraction of keys remapped, so the goal is to make that fraction small.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Key</th><th>With 5 servers</th><th>With 6 servers</th><th>Moved?</th></tr></thead><tbody><tr><td>42</td><td>S2</td><td>S0</td><td>Yes</td></tr>
+<tr><td>17</td><td>S2</td><td>S5</td><td>Yes</td></tr>
+<tr><td>18</td><td>S3</td><td>S0</td><td>Yes</td></tr>
+<tr><td>37</td><td>S2</td><td>S1</td><td>Yes</td></tr>
+<tr><td>91</td><td>S1</td><td>S1</td><td>No</td></tr></tbody></table></div>
+
+<div class="note">Modulo hashing is only stable while N is constant. Any scale event or failure invalidates the whole mapping.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The hash ring</h2>
+<p class="lede">Consistent hashing fixes the hash space instead of fixing the server count. Both servers and keys are placed in the same space, and the space wraps into a ring.</p>
+<ul><li>Use a large fixed range such as <code>0</code> to <code>2^32 - 1</code>; positions after the maximum wrap back to zero.</li><li>Hash each <strong>server identifier</strong> to place that server on the ring, for example <code>S0</code> at 100 and <code>S4</code> at 900.</li><li>Each server owns the arc between the previous server position and its own position.</li><li>The server set is data in the ring, not a divisor in a formula, so membership changes do not force a global recompute.</li><li>The ring is a logical structure: in code it is a sorted array of positions, not an actual circle.</li><li>Because the space is fixed, the hash of a key never changes; only the nearest server position can change.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Server</th><th>Ring position</th><th>Owns keys in range</th></tr></thead><tbody><tr><td>S0</td><td>100</td><td>901–999, then 0–100</td></tr>
+<tr><td>S1</td><td>300</td><td>101–300</td></tr>
+<tr><td>S2</td><td>500</td><td>301–500</td></tr>
+<tr><td>S3</td><td>700</td><td>501–700</td></tr>
+<tr><td>S4</td><td>900</td><td>701–900</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Looking up a key</h2>
+<p class="lede">A lookup hashes the key, lands on a point in the ring, and walks clockwise to the first server position. That server is the owner.</p>
+<ul><li>Key at position 250 walks clockwise to <code>S1</code> at 300, so <code>S1</code> owns it.</li><li>Key at 620 walks to <code>S3</code> at 700.</li><li>Key at 950 passes the end of the ring, wraps to 0, and reaches <code>S0</code> at 100.</li><li>A key that lands exactly on a server position belongs to that server; use <code>&gt;=</code> in the search, not <code>&gt;</code>.</li><li>Ownership intervals are half-open: a server owns keys strictly after the previous position up to and including its own.</li><li>This rule is all that is needed to route, which is why the ring can be replicated as a small sorted list of positions.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Key position</th><th>First server clockwise</th><th>Owner</th></tr></thead><tbody><tr><td>250</td><td>S1 at 300</td><td>S1</td></tr>
+<tr><td>620</td><td>S3 at 700</td><td>S3</td></tr>
+<tr><td>950</td><td>wraps to S0 at 100</td><td>S0</td></tr>
+<tr><td>700</td><td>lands on S3</td><td>S3</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Adding a server</h2>
+<p class="lede">A new server is hashed onto the ring and takes over only the arc between its predecessor and itself.</p>
+<ul><li><code>S5</code> joins at position 400, between <code>S1</code> at 300 and <code>S2</code> at 500.</li><li>Before the join, <code>S2</code> owned 301–500; after the join it owns only 401–500.</li><li><code>S5</code> takes 301–400, so key 350 moves from <code>S2</code> to <code>S5</code>.</li><li>Key 450 still goes to <code>S2</code>; keys elsewhere on the ring do not move at all.</li><li>The moved keys are exactly the ones the new server now owns, which is why the churn is bounded.</li><li>For a cache this is a partial miss; for persistent storage it is a real data transfer that must be executed by some other component.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Key position</th><th>Owner before S5</th><th>Owner after S5</th><th>Moved?</th></tr></thead><tbody><tr><td>250</td><td>S1</td><td>S1</td><td>No</td></tr>
+<tr><td>350</td><td>S2</td><td>S5</td><td>Yes</td></tr>
+<tr><td>450</td><td>S2</td><td>S2</td><td>No</td></tr>
+<tr><td>620</td><td>S3</td><td>S3</td><td>No</td></tr>
+<tr><td>950</td><td>S0</td><td>S0</td><td>No</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Hash new server id</span><span class="flow-arrow">→</span><span class="flow-step">Insert its position</span><span class="flow-arrow">→</span><span class="flow-step">Find predecessor and successor</span><span class="flow-arrow">→</span><span class="flow-step">Transfer only the arc now owned</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Removing a server</h2>
+<ul><li>When <code>S4</code> at 900 leaves, its arc 701–900 has no owner until the ring is re-read.</li><li>Those keys continue clockwise, wrap past 999, and land on <code>S0</code> at 100.</li><li>Key 850 moves from <code>S4</code> to <code>S0</code>; key 620 stays on <code>S3</code>; key 250 stays on <code>S1</code>.</li><li>Removal and failure use the same mechanism, which is why consistent hashing tolerates node loss without a full remap.</li><li>The successor inherits the whole failed arc, so one neighbor can absorb a large load spike — the motivation for virtual nodes.</li><li>Until the successor actually has the data, reads for the inherited keys miss or fail; repair is a separate concern.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Key position</th><th>Owner before</th><th>Owner after S4 leaves</th><th>Moved?</th></tr></thead><tbody><tr><td>250</td><td>S1</td><td>S1</td><td>No</td></tr>
+<tr><td>620</td><td>S3</td><td>S3</td><td>No</td></tr>
+<tr><td>850</td><td>S4</td><td>S0</td><td>Yes</td></tr>
+<tr><td>950</td><td>S0</td><td>S0</td><td>No</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>How many keys move</h2>
+<ul><li>With balanced positions, adding one server to N servers moves roughly <code>1 / (N + 1)</code> of the keys.</li><li>Growing from five servers to six therefore moves about one sixth of the keys, not most of them.</li><li>The exact fraction depends on where the new server lands: in the example <code>S5</code> took 100 of 1,000 positions, so about 10% moved.</li><li>Removing one server from N moves roughly <code>1 / N</code> of the keys, again only its own arc.</li><li>This is the core win over modulo hashing, where a divisor change remaps the majority of keys.</li><li>Consistent hashing changes <strong>ownership only</strong>. Copying or deleting the data is a separate process you still have to build.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Event</th><th>Keys that change owner</th><th>Modulo hashing equivalent</th></tr></thead><tbody><tr><td>Add 1 of N+1 servers</td><td>About 1 / (N + 1)</td><td>Most keys</td></tr>
+<tr><td>Remove 1 of N servers</td><td>About 1 / N</td><td>Most keys</td></tr>
+<tr><td>Change only a server's IP</td><td>None, if the id is stable</td><td>None</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>The problem of uneven ranges</h2>
+<p class="lede">Evenly spaced positions in a diagram are a teaching device. Hashing real server names produces gaps of very different sizes.</p>
+<ul><li>One server may own a tiny arc while another owns nearly half the ring.</li><li>In the source example <code>S2</code> owns almost half the positions while <code>S1</code> owns about a twentieth, so <code>S2</code> handles roughly ten times the traffic.</li><li>A server with a large arc needs more memory and serves more requests, so it saturates first and wastes the rest of the cluster.</li><li>With one position per server, a failure hands that entire arc to a single clockwise neighbor.</li><li>If <code>S2</code> fails, <code>S3</code> can jump from a small arc to most of the ring and collapse under the inherited traffic.</li><li>The fix is not a better hash function; it is giving each physical server many small positions.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Server</th><th>Position</th><th>Arc size</th><th>Load signal</th></tr></thead><tbody><tr><td>S0</td><td>80</td><td>100 positions</td><td>Balanced</td></tr>
+<tr><td>S1</td><td>130</td><td>50 positions</td><td>Underloaded</td></tr>
+<tr><td>S2</td><td>620</td><td>490 positions</td><td>Hot spot</td></tr>
+<tr><td>S3</td><td>700</td><td>80 positions</td><td>Balanced</td></tr>
+<tr><td>S4</td><td>980</td><td>280 positions</td><td>Overloaded</td></tr></tbody></table></div>
+
+<div class="note">Variance is not a bug in the hash; it is the expected result of sampling a few random points from a large space.</div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Virtual nodes</h2>
+<p class="lede">A virtual node is an extra ring position for the same physical server, created by hashing a derived identifier such as <code>S2-0</code>, <code>S2-1</code>, or <code>S2-2</code>.</p>
+<ul><li>Hash many identifiers per server so each physical machine appears at dozens of points around the ring.</li><li>Lookup is unchanged: walk clockwise to the first position and route to the physical server behind it.</li><li>A key still has exactly one primary owner; vnodes split that server's ownership into smaller arcs, they do not duplicate data.</li><li>Many small arcs average out, so each server's total share converges toward an equal fraction.</li><li>A failed server's arcs are inherited by <strong>several</strong> different successors, spreading the recovery load.</li><li>A larger machine can be given more vnodes, so capacity weighting becomes a configuration choice.</li><li>Tens to a few hundred vnodes per server is a common starting range; measure the real distribution rather than trusting the theory.</li><li>More vnodes mean more metadata and more positions to update on every membership change.</li></ul>
+<h3>Why virtual nodes help</h3>
+<ul><li><strong>Balance:</strong> many small ranges even out the large and small gaps produced by hashing a few names.</li><li><strong>Failure handling:</strong> a lost server's ranges are distributed across multiple neighbors instead of one.</li><li><strong>Capacity weighting:</strong> a stronger server can be assigned more vnodes to take a larger share.</li><li><strong>Cost:</strong> more metadata and more routing-table work whenever membership changes.</li><li>Vnodes improve balance <em>statistically</em>; they do not guarantee equal load for a skewed key distribution.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>One position per server</th><th>Many vnodes per server</th></tr></thead><tbody><tr><td>Balance</td><td>Ranges vary widely</td><td>Many small ranges average out</td></tr>
+<tr><td>Failure impact</td><td>Whole range lands on one neighbor</td><td>Ranges spread across several neighbors</td></tr>
+<tr><td>Capacity weighting</td><td>Not practical</td><td>Bigger servers get more vnodes</td></tr>
+<tr><td>Cost</td><td>Tiny routing table</td><td>More metadata, more membership churn work</td></tr></tbody></table></div>
+
+<div class="table-wrap"><table><thead><tr><th>Physical server</th><th>Virtual nodes</th><th>Ring positions</th></tr></thead><tbody><tr><td>S1</td><td>S1-0, S1-1, S1-2</td><td>10, 70, 120</td></tr>
+<tr><td>S2</td><td>S2-0, S2-1, S2-2</td><td>50, 80, 160</td></tr>
+<tr><td>S3</td><td>S3-0, S3-1, S3-2</td><td>30, 90, 140</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Implementing the ring</h2>
+<ul><li>Represent the ring as a <strong>sorted array</strong> of vnode positions plus a map from position to physical server.</li><li>Hash the key, then binary search for the first position <code>&gt;=</code> the hash.</li><li>If no position is at or after the hash, wrap around and take the first entry.</li><li>If the ring is empty, there is no owner, so return an error instead of guessing.</li><li>Handle vnode hash collisions deterministically — for example, keep the vnode whose server id sorts first — so all clients agree.</li><li>Lookup costs <code>O(log V)</code> where V is the number of vnodes; adding or removing a server costs <code>O(R log V)</code> for R vnodes.</li><li>Use a fast, stable, well-distributed non-cryptographic hash such as MurmurHash, xxHash, or CityHash; cryptographic hashes are slower for no placement benefit.</li><li>Every client must share the same server list and hash function, so publish ring updates from one place — a configuration or coordination service — and version the membership.</li></ul>
+
+
+<pre class="code"><code>import bisect, hashlib
+
+class Ring:
+    def __init__(self, servers, vnodes=100):
+        self.positions = []
+        self.owner = {}
+        for server in servers:
+            for i in range(vnodes):
+                p = self._hash(f&quot;{server}-{i}&quot;)
+                self.positions.append(p)
+                self.owner[p] = server
+        self.positions.sort()
+
+    @staticmethod
+    def _hash(key):
+        return int(hashlib.md5(key.encode()).hexdigest()[:8], 16)
+
+    def get(self, key):
+        if not self.positions:
+            raise RuntimeError(&quot;empty ring&quot;)
+        h = self._hash(key)
+        i = bisect.bisect_left(self.positions, h)
+        if i == len(self.positions):
+            i = 0
+        return self.owner[self.positions[i]]</code></pre>
+<div class="note">Binary search over a sorted array is enough for most clusters. Very large rings may use a tree or a fixed-partition table instead.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Replication on the ring</h2>
+<p class="lede">The ring decides a primary owner. For durability or availability you keep additional copies by continuing clockwise to <strong>distinct physical servers</strong>.</p>
+<ul><li>Start at the key's position and take the first vnode as the primary copy.</li><li>Walk clockwise and take the next vnode only if it belongs to a different physical server.</li><li>For key 75 with primary <code>S2-1</code> at 80, replica one is <code>S3-1</code> at 90 and replica two is <code>S1-2</code> at 120.</li><li>If the next vnode belongs to an already-used server, skip it; a second copy on the same machine does not survive that machine failing.</li><li>Continue until you have the desired replication factor; a small cluster may run out of distinct servers.</li><li>Spread replicas across racks or availability zones so one power or network failure cannot take all copies.</li><li>The ring only chooses <em>where</em> copies live. Writing, acknowledging, and repairing replicas are separate mechanisms.</li><li>Replica placement also affects read locality: a nearby replica can serve a read when consistency rules permit.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Walk order</th><th>Vnode</th><th>Physical server</th><th>Action</th></tr></thead><tbody><tr><td>First</td><td>S2-1 at 80</td><td>S2</td><td>Primary</td></tr>
+<tr><td>Second</td><td>S3-1 at 90</td><td>S3</td><td>Replica 1</td></tr>
+<tr><td>Third</td><td>S1-2 at 120</td><td>S1</td><td>Replica 2</td></tr>
+<tr><td>Fourth</td><td>S2-2 at 160</td><td>S2</td><td>Skip, already used</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Hash key</span><span class="flow-arrow">→</span><span class="flow-step">Find primary clockwise</span><span class="flow-arrow">→</span><span class="flow-step">Keep walking for distinct servers</span><span class="flow-arrow">→</span><span class="flow-step">Stop at replication factor</span><span class="flow-arrow">→</span><span class="flow-step">Place copies across failure domains</span></div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use consistent hashing</h2>
+<ul><li>Good fit: caches, storage shards, and stateful routing where a key should usually reach the same server.</li><li>Poor fit: stateless services where any healthy server can handle any request — a normal load balancer is simpler.</li><li>Rendezvous (highest-random-weight) hashing scores every server per key and picks the winner; no ring to maintain, but every lookup considers all servers.</li><li>Fixed partitions hash keys into a constant number of logical partitions and keep a table mapping partitions to servers; the partition count never changes, so modulo still works.</li><li>Fixed partitions are common in systems that move whole partitions, such as logs, queues, and some databases.</li><li>Whatever the scheme, the operational requirements are the same: one shared membership view, a stable hash, and a plan for moving or rebuilding data.</li><li>Choose consistent hashing when membership changes are frequent and per-key locality matters.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Technique</th><th>How it picks an owner</th><th>Good fit</th></tr></thead><tbody><tr><td>Consistent hashing ring</td><td>First server clockwise from the key</td><td>Caches, storage shards, stateful routing</td></tr>
+<tr><td>Rendezvous hashing</td><td>Score every server, pick the highest</td><td>Small to medium server sets, no ring to maintain</td></tr>
+<tr><td>Fixed partitions</td><td>Key maps to a partition; a table maps partitions to servers</td><td>Logs, queues, databases that move whole partitions</td></tr>
+<tr><td>Plain load balancing</td><td>Any healthy server</td><td>Stateless services where any server can serve</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Is ownership per key required?</span><span class="flow-arrow">→</span><span class="flow-step">Yes: is membership stable?</span><span class="flow-arrow">→</span><span class="flow-step">Stable: modulo or fixed partitions</span><span class="flow-arrow">→</span><span class="flow-step">Changing: consistent or rendezvous hashing</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Consistent hashing</strong> limits key movement on membership change, but adds a ring structure, vnode metadata, and a shared membership view to maintain.</li><li><strong>Modulo hashing</strong> is trivial to implement and O(1) to look up, but a single server change remaps most keys and can cause a cache-miss storm.</li><li><strong>More virtual nodes</strong> improve balance and spread failure load, but increase routing metadata and the cost of every membership change.</li><li><strong>One vnode per server</strong> keeps the ring tiny, but produces uneven arcs and concentrates a failed server's load on one neighbor.</li><li><strong>Capacity-weighted vnodes</strong> let stronger machines take more keys, but couple placement to a hand-tuned configuration that must be maintained.</li><li><strong>Replicating clockwise</strong> improves availability, but consumes storage and write bandwidth and requires a repair process for missed writes.</li><li><strong>Fixed partitions</strong> avoid rehashing entirely and make data movement explicit, but the partition count is a long-term commitment and hot partitions remain possible.</li><li><strong>Rendezvous hashing</strong> removes ring maintenance and handles membership changes gracefully, but costs O(N) per lookup and is awkward for very large server sets.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does consistent hashing solve?</summary><div class="answer"><p>It keeps the mapping from key to server stable when servers join or leave. With modulo hashing, changing the server count changes the divisor and remaps most keys; consistent hashing moves only the arcs affected by the membership change.</p></div></details>
+<details><summary>2. Walk me through a lookup on the ring.</summary><div class="answer"><p>Hash the key into the fixed hash space, then scan clockwise to the first server position. If the key's hash is beyond the largest position, wrap to the smallest. That server is the owner, and the same key always maps there while membership is unchanged.</p></div></details>
+<details><summary>3. Why does adding one server to five move about one sixth of the keys?</summary><div class="answer"><p>A new server inserts one more position into the ring and takes over the arc between its predecessor and itself. With balanced positions that arc is about <code>1 / (N + 1)</code> of the space, so roughly that fraction of keys changes owner.</p></div></details>
+<details><summary>4. Does consistent hashing move the data for you?</summary><div class="answer"><p>No. It only decides <em>ownership</em>. For a cache, the new owner simply misses and reloads. For persistent storage you need a separate transfer or repair process, plus a rule for reads during the transition.</p></div></details>
+<details><summary>5. What happens if a server fails without virtual nodes?</summary><div class="answer"><p>Its entire arc moves to the next server clockwise. That neighbor can suddenly receive a large multiple of its previous traffic and may fail too, which is why production rings use many vnodes per server.</p></div></details>
+<details><summary>6. What are virtual nodes and why do they help?</summary><div class="answer"><p>A vnode is an extra ring position for the same physical server, produced by hashing identifiers like <code>S2-1</code>. Many small arcs average out uneven gaps, spread a failed server's load across several neighbors, and allow capacity weighting.</p></div></details>
+<details><summary>7. Do virtual nodes guarantee even load?</summary><div class="answer"><p>No. They improve balance statistically and reduce variance as the vnode count grows. A skewed key distribution, hot keys, or heterogeneous request costs can still overload one server, so you measure the actual distribution.</p></div></details>
+<details><summary>8. How would you implement the ring efficiently?</summary><div class="answer"><p>Keep a sorted array of vnode positions and a map from position to server. Hash the key, binary search for the first position <code>&gt;=</code> the hash, and wrap to index zero if none exists. Lookup is <code>O(log V)</code>.</p></div></details>
+<details><summary>9. What breaks if two clients have different ring views?</summary><div class="answer"><p>The same key can route to two different owners. Reads may miss data that was just written, and caches diverge. Publish ring updates from one authority and version the membership so clients converge.</p></div></details>
+<details><summary>10. How do you place replicas on a consistent hash ring?</summary><div class="answer"><p>Take the primary owner, then walk clockwise and pick the next vnodes that belong to <em>distinct</em> physical servers until the replication factor is met. Spread them across racks or zones where possible.</p></div></details>
+<details><summary>11. Consistent hashing vs rendezvous hashing?</summary><div class="answer"><p>Consistent hashing maintains a ring and finds a neighbour in <code>O(log V)</code>. Rendezvous hashing scores every server for the key and picks the maximum, costing <code>O(N)</code> but requiring no ring state. Rendezvous is attractive for smaller, frequently changing server sets.</p></div></details>
+<details><summary>12. When would you use fixed partitions instead?</summary><div class="answer"><p>When you want to move whole units of data — logs, queue partitions, database shards. The partition count is fixed, so modulo hashing on the partition id is stable, and a separate assignment table maps partitions to servers.</p></div></details>
+<details><summary>13. When is consistent hashing the wrong choice?</summary><div class="answer"><p>For stateless services where any server can handle any request. A plain load balancer spreads traffic with far less machinery, and there is no per-key locality to preserve.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Claiming consistent hashing moves data — it only changes ownership; the transfer or rebuild is a separate process.</li><li>Forgetting that modulo hashing on a changing server count remaps most keys, then being surprised by a cache-miss storm.</li><li>Using one ring position per server in production and creating hot spots and single-neighbour failure overload.</li><li>Assuming virtual nodes guarantee perfectly even load rather than reducing variance.</li><li>Placing replicas on the next vnode without checking that it belongs to a different physical server.</li><li>Letting clients compute membership independently so different nodes disagree about the owner of a key.</li><li>Hashing unstable server identifiers such as ephemeral IPs, which silently reshuffles the ring on every restart.</li><li>Treating the ring as a data-movement mechanism and forgetting reads that arrive before the data has been transferred.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="cap-theorem.html"><span>← Previous</span><strong>CAP Theorem</strong></a><a class="next" href="latency-vs-throughput.html"><span>Next →</span><strong>Latency vs Throughput</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/consistent-hashing">AlgoMaster — Consistent Hashing</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

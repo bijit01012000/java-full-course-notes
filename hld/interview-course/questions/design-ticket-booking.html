@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design Ticket Booking — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 06 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Product design</span></div>
+    <h1>Design Ticket Booking</h1>
+    <p class="dek">It is the canonical concurrency question: the interviewer wants to see you protect a scarce unit of inventory from double booking without holding database locks during payment.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Model every seat as a row, claim it with one conditional update inside a short transaction, hold it with a database-enforced expiry, and confirm the booking only after an idempotent payment.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Users can browse events, view a seat map or availability, and select one or more seats.</li><li>A selected seat is held for a short window, for example 5-10 minutes, while the user pays.</li><li>A successful payment confirms the booking; an expired or cancelled hold releases the seats.</li><li>Users can cancel a confirmed booking and receive a refund according to policy.</li><li>Retries of hold, booking, and payment requests must be idempotent.</li><li>A flash sale must admit users through a waiting room rather than letting everyone hit the inventory database.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>One seat has at most one active owner at any instant; a second confirmed booking for the same seat is a data-integrity incident.</li><li>The claim path is strongly consistent and must read from the primary, never a stale replica.</li><li>Browsing can tolerate a few seconds of staleness, but the checkout decision cannot.</li><li>Hold, booking, and payment transitions must survive crashes and ambiguous timeouts.</li><li>Support a popular event with tens of thousands of seats and hundreds of thousands of waiting users.</li><li>Every state change is auditable: who held, who paid, when it expired, and who released it.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume a popular event has 50k seats and 200k users waiting at sale start, with a burst of 20k claim attempts per second.</li><li>A 5-minute hold means a user who abandons checkout strands seats for 5 minutes unless a sweeper releases them promptly.</li><li>One row per seat for a 50k-seat event is small; the bottleneck is contention on the same rows, not storage.</li><li>At 20k attempts per second, most requests must be rejected by the waiting room before they reach the primary; the database can only serialize a much smaller claim rate.</li><li>A 10 percent conversion from waiting users to buyers still means 20k bookings and roughly 40k ledger or payment records for one event.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Event</span><span class="fields">event_id, venue_id, title, starts_at, sale_start_at, seat_count, status, max_seats_per_user</span></div><div class="entity"><span class="name">Seat</span><span class="fields">event_id, seat_id, section, row_label, seat_number, price_tier, status (available/held/booked/blocked), hold_id, booking_id, version, updated_at</span></div><div class="entity"><span class="name">Hold</span><span class="fields">hold_id, event_id, user_id, seat_ids, status (active/converted/expired/released), expires_at, idempotency_key, created_at</span></div><div class="entity"><span class="name">Booking</span><span class="fields">booking_id, hold_id, user_id, event_id, seat_ids, total_amount, currency, status (pending_payment/confirmed/cancelled/refunded), idempotency_key, created_at</span></div><div class="entity"><span class="name">Payment</span><span class="fields">payment_id, booking_id, provider, provider_reference, amount, currency, status, idempotency_key, updated_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/v1/events/{event_id}/seats</code></td><td>Return a seat map with availability from a short-lived read model; explicitly labelled as indicative, not the claim authority.</td></tr><tr><td><code>POST</code></td><td><code>/v1/holds</code></td><td>Atomically claim one or more seats for a user, returning a hold id and expiry; requires an idempotency key.</td></tr><tr><td><code>DELETE</code></td><td><code>/v1/holds/{hold_id}</code></td><td>Release an active hold early when the user abandons checkout.</td></tr><tr><td><code>POST</code></td><td><code>/v1/bookings</code></td><td>Create a booking from a valid hold and start payment; returns pending or confirmed depending on the payment flow.</td></tr><tr><td><code>GET</code></td><td><code>/v1/bookings/{booking_id}</code></td><td>Return the booking and payment state so the client can poll after an ambiguous timeout.</td></tr><tr><td><code>POST</code></td><td><code>/v1/webhooks/payments/{provider}</code></td><td>Receive signed payment outcomes, deduplicate by provider event id, and drive the booking state machine.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Inventory model and atomic claim</td><td>One row per seat per event keyed by (event_id, seat_id); claim every requested seat in one transaction with a conditional update from available to held and a check that the affected row count equals the number of seats.</td><td>A counter cannot identify an owner, and the conditional update makes the database the single point of serialization so only one claim can win; checking the row count keeps a partial multi-seat claim from committing.</td></tr><tr><td>Hold expiry</td><td>Store expires_at in the database and enforce it in the confirm query; a background sweeper releases expired holds.</td><td>A client-side timer cannot be trusted after a crash, and a lock held for the whole payment window would block every other buyer.</td></tr><tr><td>Booking idempotency</td><td>Unique idempotency_key on the booking request and a unique hold_id on the booking, so one hold produces at most one booking.</td><td>A timeout followed by a retry is the normal mobile case; both constraints make the second request return the original result instead of double-selling.</td></tr><tr><td>Payment boundary</td><td>Create a pending booking, call the payment provider outside the database transaction, then confirm the booking with a conditional state update.</td><td>Holding a database transaction open across a network call destroys throughput; a pending state plus an idempotent confirm handles the ambiguous outcome.</td></tr><tr><td>Seat map read model</td><td>A Redis or CDN-backed seat map refreshed from inventory change events, with a short TTL and a clear 'availability may change' label.</td><td>Millions of browsers should not query the primary for a picture of the venue; the authoritative check still happens on claim.</td></tr><tr><td>Sharding</td><td>Shard inventory, holds, and bookings by event_id so all seats and their claims for one event live on one shard and can be changed transactionally.</td><td>Splitting one event's seats across shards destroys the single-transaction guarantee, while different events scale independently.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  U[📱 User] --> E[🛡️ Edge and Waiting Room]
+  E --> SM[⚡ Seat Map Cache]
+  E --> B[⚙️ Booking Service]
+  B --> DB[(🗄️ Booking DB: inventory, holds, bookings)]
+  B --> PAY[💳 Payment Service]
+  PAY --> PSP[🌐 Payment Provider]
+  PSP -.->|signed webhook| B
+  SW[🧹 Expiry Sweeper] --> DB
+  B --> Q[📬 Confirmation Queue]
+  Q --> W[👷 Confirmation Worker]
+  W --> N[📧 Ticket Notifier]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef svc fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef store fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  class U client;
+  class E edge;
+  class B,PAY,SW,W svc;
+  class SM,DB,PSP,Q,N store;</div><div class="diagram-caption">The waiting room and seat-map cache absorb browsing traffic; only the booking service touches the event's inventory shard, claiming seats and writing the hold in one transaction and confirming after an idempotent payment.</div></div>
+        <ul><li>State the invariant first: one seat has at most one active owner. Everything else in the design exists to enforce or recover that invariant.</li><li>A pre-check read is advisory. The claim must be a conditional write such as status = 'available' to 'held' with a row-count check, because two users can read 'available' at the same time.</li><li>Claim all requested seats in one transaction. If any seat update affects zero rows, roll back the whole claim and tell the user which seat was taken; a partial hold is worse than a clean rejection.</li><li>Sort seat ids before updating them so two concurrent multi-seat claims acquire rows in the same order; inconsistent lock ordering is a common source of deadlocks on this table.</li><li>Keep the claim transaction short: update seat rows and insert the hold, then commit. Never call the payment provider while the transaction or a row lock is open.</li><li>Confirm with a conditional update that checks hold ownership, hold status, and expires_at in the same statement. If the hold expired while payment was in flight, do not confirm; refund or void the payment instead.</li><li>Model booking states explicitly: pending_payment, confirmed, cancelled, refunded. Every transition is conditional on the current state, so a duplicate webhook cannot move a cancelled booking back to confirmed.</li><li>Run a sweeper on an indexed expires_at column, using SKIP LOCKED or small batches so it does not contend with live claims. It must release seats only when the hold is still active.</li><li>Admission control is part of correctness at scale: a waiting-room token bounds how many users can attempt a claim, so the primary sees a rate it can actually serialize.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Conditional update instead of SELECT FOR UPDATE</td><td>No long-held row locks, a clear conflict signal from the affected row count, and good throughput when contention is spread across seats.</td><td>Under extreme contention on one seat, many attempts fail and retry, so retries must be bounded and jittered.</td></tr><tr><td>Pessimistic row locks</td><td>Simple to reason about and prevents any other writer from slipping between the check and the update.</td><td>Locks are held for the transaction duration, and a slow query or a lock ordering mistake causes waits and deadlocks.</td></tr><tr><td>Database holds with TTL</td><td>Durable, auditable, and enforceable in the same transaction as the claim; a crash cannot leave a seat held forever.</td><td>Every hold is a write and a sweeper burden, and the database must handle the hold lifecycle in addition to the sale.</td></tr><tr><td>Redis hold locks</td><td>Very fast claims and automatic TTL expiry, which absorbs a flash crowd without touching the primary.</td><td>A lock is not the inventory record; a lease can expire while the holder still acts, so correctness needs fencing or a database confirmation.</td></tr><tr><td>Waiting room</td><td>Bounds concurrency to what the inventory shard can serve and gives users a fair, predictable queue instead of random errors.</td><td>Extra infrastructure and a worse experience for users who must wait; tokens must be signed and rate-limited to prevent bypass.</td></tr><tr><td>Cached seat map</td><td>Fast browsing for a huge audience and far less read load on the primary.</td><td>The map can show a seat as free that was just taken, so the UI must treat the claim response as the source of truth.</td></tr><tr><td>Async payment confirmation</td><td>Checkout does not hold a database transaction or an HTTP connection across a slow provider call.</td><td>The user sees a pending state, and the system must handle payment success after hold expiry and webhook duplication.</td></tr><tr><td>Deliberate overbooking</td><td>Selling more than capacity can protect revenue against cancellations and no-shows, and it is a normal airline or hotel policy.</td><td>It must be an explicit business rule with a compensation plan, never an accident caused by a race, and it needs inventory headroom the venue can actually honor.</td></tr></tbody></table></div>
+        <ul><li>Cache the seat map and venue metadata, and invalidate by event on hold, release, or booking events; never use the cache for the final claim.</li><li>Shard by event_id and route all requests for one event to the same inventory shard, so claims stay transactional and unrelated events do not interfere.</li><li>Use short holds with a clear countdown, and release aggressively when the user navigates away; abandoned holds are the main source of recoverable inventory.</li><li>Batch the expiry sweep and run it frequently, so stranded seats return to sale within seconds rather than minutes.</li><li>Precompute price tiers and fees per seat so checkout does not recalculate a complex pricing model under lock.</li><li>Use a virtual waiting room with a signed, time-limited token and a bounded admission rate; reject obviously impossible requests before they reach the database.</li><li>Keep payment confirmation asynchronous via webhook, and let the client poll a booking status endpoint instead of holding an HTTP request open.</li><li>Add per-user purchase limits and a bot check at admission, so one script cannot claim the whole front row.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>How do you stop two users booking the same seat?</strong> Make the claim a conditional update from available to held with a check on the affected row count, so the database decides a single winner.</div><div class="followup"><strong>What if the hold expires while the user is paying?</strong> The confirm statement requires expires_at in the future, so confirmation fails and the payment is voided or refunded rather than overselling the seat.</div><div class="followup"><strong>What if payment succeeds after the hold expired?</strong> Do not confirm the seat; record the payment, attempt to reacquire the same seat, and otherwise refund automatically and notify the user.</div><div class="followup"><strong>How do you make retries safe?</strong> Require an idempotency key on hold and booking requests, enforce uniqueness, and return the original hold or booking when the same key arrives again.</div><div class="followup"><strong>Why not use only a Redis distributed lock?</strong> A lease can expire while the holder is still working, so a Redis lock alone cannot guarantee one owner; the database row and its conditional update remain the authority.</div><div class="followup"><strong>How do you scale a hot event?</strong> Shard by event, admit through a waiting room at a rate the shard can serialize, reject impossible requests early, and keep browsing on a cache.</div><div class="followup"><strong>How stale can the seat map be?</strong> A few seconds is fine for browsing, but the claim always reads the primary and the UI must treat 'seat taken' as a normal response.</div><div class="followup"><strong>How do cancellations release inventory?</strong> A conditional transition from confirmed to cancelled frees the seat and records the refund; if the refund fails, a compensation retries it rather than silently reselling.</div><div class="followup"><strong>What if the payment webhook arrives twice?</strong> Deduplicate by provider event id and make the booking transition conditional on the current state, so the second delivery is a no-op.</div><div class="followup"><strong>What if the service crashes after charging but before confirming?</strong> The booking stays pending, a reconciliation job compares provider payments with bookings, and the confirm step is retried idempotently.</div><div class="followup"><strong>How do you claim four adjacent seats atomically?</strong> Update all four rows in one transaction with the same hold_id and commit only if all four updates report success.</div><div class="followup"><strong>How does the waiting room actually work?</strong> Users receive a signed, time-limited token at a controlled rate, and the booking endpoint rejects requests without a currently valid token.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Checking availability with a SELECT and then updating in a separate statement, which leaves a race where both users believe they won.</li><li>Holding a database transaction or row lock open while the user completes payment, which blocks other buyers and exhausts the connection pool.</li><li>Using a single remaining-seat counter for assigned seating, which cannot enforce that a specific seat has one owner.</li><li>Relying on a client-side timer or a Redis TTL alone to expire holds, so a crashed client can strand inventory or a stale lock can be bypassed.</li><li>Trusting a read replica or a cached seat map for the final claim, which turns a stale read into a double booking.</li><li>Treating a payment timeout as a failure and retrying the charge without an idempotency key, which produces a duplicate charge.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="design-notification-service.html"><span>← Previous</span><strong>Design a Notification Service</strong></a><a class="next" href="design-payment-system.html"><span>Next →</span><strong>Design a Payment System</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Serverless Architecture — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 42 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Serverless Architecture</h1>
+    <p class="dek">Architectural Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/serverless-architecture">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with managing servers</a>
+<a href="#s2">What serverless actually means</a>
+<a href="#s3">Execution model and lifecycle</a>
+<a href="#s4">Triggers and event sources</a>
+<a href="#s5">Scaling and concurrency</a>
+<a href="#s6">Cold starts</a>
+<a href="#s7">Limits and statelessness</a>
+<a href="#s8">BaaS building blocks</a>
+<a href="#s9">The cost model</a>
+<a href="#s10">Reliability: retries, duplicates, and dead letters</a>
+<a href="#s11">Observability, testing, and local development</a>
+<a href="#s12">Vendor lock-in and portability</a>
+<a href="#s13">When to use it, and when not to</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Serverless hands server provisioning, patching, and capacity planning to a cloud provider: you deploy code and managed services, and the platform runs, scales, and bills them per use — while retries, cold starts, limits, and lock-in stay your problem.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>FaaS</dt><dd>Function as a Service: an event-triggered function that the platform runs on demand, scales automatically, and bills per invocation and duration.</dd></div><div class="term"><dt>BaaS</dt><dd>Backend as a Service: managed building blocks such as databases, auth, storage, and queues that remove server operations.</dd></div><div class="term"><dt>Cold start</dt><dd>The extra latency when a function needs a new execution environment: scheduling, pulling the image, starting the runtime, and initializing code.</dd></div><div class="term"><dt>Event source</dt><dd>The trigger that invokes a function — an HTTP request, queue message, object upload, schedule, or database change.</dd></div><div class="term"><dt>Execution timeout</dt><dd>A hard platform limit on how long one invocation may run; work that exceeds it is terminated.</dd></div><div class="term"><dt>Concurrency limit</dt><dd>The cap on simultaneous executions, either per function or per account/region, above which invocations are throttled or queued.</dd></div><div class="term"><dt>Idempotency</dt><dd>Designing a handler so repeated delivery of the same event produces the same result exactly once in effect.</dd></div><div class="term"><dt>Provisioned concurrency</dt><dd>Pre-initialized execution environments kept warm so requests skip the cold-start path, at extra cost.</dd></div><div class="term"><dt>Ephemeral storage</dt><dd>Temporary local disk or in-memory state that exists only for one execution environment and cannot be relied on across invocations.</dd></div><div class="term"><dt>Vendor lock-in</dt><dd>The cost of moving away when your code, triggers, and permissions are tightly coupled to one provider's runtime and services.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with managing servers</h2>
+<p class="lede">Running your own services means provisioning machines, planning capacity, patching operating systems, and paying for hardware that sits idle.</p>
+<ul><li>Capacity planning is guesswork: provision for peak and waste money at night, or provision for average and fail at peak.</li><li>Someone must patch the OS, runtime, and dependencies, and restart things when they break.</li><li>Idle servers still cost money and still need monitoring, backups, and security updates.</li><li>Scaling a traditional fleet requires load balancers, health checks, and autoscaling rules you must tune.</li><li>Much of this work does not improve the product; it merely keeps the product runnable.</li><li>Serverless moves that undifferentiated work to the provider — but not the system design.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What serverless actually means</h2>
+<ul><li>There are still servers; you just do not provision, patch, or see them. The abstraction is over capacity and operations.</li><li>The core is <strong>FaaS</strong>: small functions invoked by events, scaled by the platform, billed per use.</li><li>The surrounding part is <strong>BaaS</strong>: managed databases, object storage, queues, auth, and gateways.</li><li>A serverless system is usually an assembly of managed services glued together by events, not a single deployable.</li><li>You give up long-lived processes, local state, and fine-grained runtime control in exchange for elastic capacity.</li><li>You still own event design, retries, idempotency, data modeling, timeouts, and cost.</li><li>Serverless is a spectrum: functions plus managed services at one end, containers with a serverless control plane at the other.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Traditional servers</th><th>Serverless</th></tr></thead><tbody><tr><td>Capacity</td><td>You provision</td><td>Platform provisions</td></tr>
+<tr><td>Idle cost</td><td>Paid anyway</td><td>Generally none</td></tr>
+<tr><td>Scaling</td><td>You configure</td><td>Automatic, per event</td></tr>
+<tr><td>Runtime control</td><td>Full</td><td>Limited to supported runtimes</td></tr>
+<tr><td>State</td><td>Long-lived process</td><td>Ephemeral per invocation</td></tr>
+<tr><td>Failure model</td><td>Process and host</td><td>Invocation and event</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Execution model and lifecycle</h2>
+<ul><li>An event arrives from a trigger and the platform routes it to an execution environment.</li><li>If no warm environment exists, the platform creates one — this is the <strong>cold start</strong> path.</li><li>The handler runs with a configured memory size, which usually also determines CPU share.</li><li>The platform may reuse the same environment for later invocations, which is why a global variable can act as a cache — but it is never guaranteed.</li><li>When the invocation ends, the environment is frozen or destroyed; local disk and memory do not survive reliably.</li><li>Concurrency is handled by running many isolated environments, not by threads inside one process.</li><li>Billing typically combines a per-request charge with a duration charge based on allocated memory.</li></ul>
+
+<div class="flow"><span class="flow-step">Event arrives</span><span class="flow-arrow">→</span><span class="flow-step">Find or create environment</span><span class="flow-arrow">→</span><span class="flow-step">Initialize runtime and code</span><span class="flow-arrow">→</span><span class="flow-step">Invoke handler</span><span class="flow-arrow">→</span><span class="flow-step">Return or timeout</span><span class="flow-arrow">→</span><span class="flow-step">Freeze or destroy</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Triggers and event sources</h2>
+<ul><li>HTTP triggers: an API gateway or HTTP endpoint maps a request to a function invocation.</li><li>Queue and stream triggers: messages invoke the function, often in batches, with retries on failure.</li><li>Object storage events: an upload fires a function to resize an image, scan a file, or index content.</li><li>Scheduled triggers: cron-like timers for cleanup, reports, and periodic syncs.</li><li>Database and change-stream triggers: react to inserts and updates without polling.</li><li>Event shape, batch size, and retry behavior are defined by the trigger — not by your code.</li><li>The same function can have several triggers, but mixing very different event shapes usually hurts clarity.</li></ul>
+
+
+<div class="note">A queue trigger and an HTTP trigger have completely different failure semantics: HTTP returns an error to the caller, while a queue retries and may eventually dead-letter.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Scaling and concurrency</h2>
+<ul><li>The platform scales out per event: one invocation per event, or one per batch, up to account and regional limits.</li><li>Scaling is effectively unbounded from the developer's view, which means downstream systems become the real limit.</li><li>A sudden burst can open hundreds of connections to a database or third-party API and overwhelm it.</li><li>Use reserved or provisioned concurrency to cap or guarantee capacity for critical functions.</li><li>Throttling behavior differs by trigger: HTTP returns errors, queues buffer, streams may retry the same batch.</li><li>Warm environments are reused when traffic is steady, so cold starts mostly affect scale-out and idle-then-burst patterns.</li><li>Fan-out designs need backpressure and concurrency limits, or one popular event becomes an accidental load test.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Concern</th><th>What to do</th></tr></thead><tbody><tr><td>Database connections</td><td>Use a pooler or a proxy, and cap function concurrency</td></tr>
+<tr><td>Bursty traffic</td><td>Buffer with a queue instead of direct invocation</td></tr>
+<tr><td>Critical latency</td><td>Provision concurrency for the hot path</td></tr>
+<tr><td>Runaway fan-out</td><td>Limit batch size and add backpressure</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Cold starts</h2>
+<ul><li>A cold start includes scheduling a sandbox, pulling the deployment package or image, starting the runtime, and running initialization code.</li><li>The cost depends on package size, runtime, memory, VPC attachment, and how much work happens at module load.</li><li>Cold starts hurt interactive, latency-sensitive endpoints more than asynchronous background jobs.</li><li>Mitigations: keep packages small, lazy-load heavy dependencies, choose a fast-starting runtime, and initialize clients outside the handler.</li><li>Provisioned or reserved concurrency keeps environments warm at the cost of paying for idle capacity.</li><li>Scheduled pings can reduce cold starts but are unreliable and do not guarantee warmth at scale.</li><li>Measure the actual cold-start latency in your runtime instead of assuming a number.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Limits and statelessness</h2>
+<ul><li>Every invocation has a <strong>maximum duration</strong>; long batch jobs must be split into chunks or moved to another compute service.</li><li>Memory is capped and usually priced in steps; CPU scales with it.</li><li>Request and response payloads have size limits, so large files must go through object storage and be referenced by key.</li><li>Local disk is small, temporary, and tied to one environment — never treat it as durable.</li><li>In-memory state may survive a warm invocation but is not shared across concurrent environments and can vanish at any time.</li><li>State belongs in a database, cache, or object store, with the event carrying only identifiers and small payloads.</li><li>Network connections should be reused within an environment but assumed to be recreated often.</li></ul>
+
+
+<div class="note">The stateless rule is not stylistic: concurrent environments cannot see each other's memory, so any coordination must go through an external store.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>BaaS building blocks</h2>
+<ul><li>Managed databases provide storage without patching, but connection limits and cold latency still shape the design.</li><li>Object storage is the default home for files, images, and artifacts; functions stream references, not bytes.</li><li>Managed queues and pub/sub provide the buffering that makes bursty serverless systems reliable.</li><li>Managed auth and identity services remove a large amount of security-sensitive code.</li><li>Managed caches reduce database load but add another network hop and another bill.</li><li>Glue services — API gateways, schedulers, workflow engines — replace code that would otherwise be a service.</li><li>Each managed service has its own limits, quotas, and failure modes; the architecture is the sum of them.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>The cost model</h2>
+<ul><li>You generally pay per invocation plus execution duration weighted by memory, with a free tier in many providers.</li><li>Idle costs almost nothing, which is a huge win for spiky, low-volume, or per-tenant workloads.</li><li>At sustained high utilization, per-request pricing can become more expensive than a reserved server or container.</li><li>Cost is driven by invocation count, duration, memory, and the managed services around the function.</li><li>Waste hides in retries, polling, chatty calls between functions, and over-allocated memory.</li><li>Observability and data transfer can quietly dominate the bill.</li><li>Model cost at both average and peak load, not just at the demo scale.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Workload shape</th><th>Serverless fit</th></tr></thead><tbody><tr><td>Sporadic traffic</td><td>Strong: pay only when used</td></tr>
+<tr><td>Steady high throughput</td><td>Weak: reserved capacity may be cheaper</td></tr>
+<tr><td>Long-running jobs</td><td>Weak: duration limits and duration billing</td></tr>
+<tr><td>Event-driven glue</td><td>Strong: native triggers and managed services</td></tr>
+<tr><td>Latency-critical API</td><td>Mixed: cold starts and concurrency limits</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Reliability: retries, duplicates, and dead letters</h2>
+<ul><li>Asynchronous triggers usually retry on failure, so the same event may invoke your function more than once.</li><li><strong>Idempotency</strong> is mandatory: use a natural key, a deduplication table, or conditional writes so repeats are harmless.</li><li>Set a maximum retry count and route exhausted events to a <strong>dead-letter queue</strong> for inspection.</li><li>Distinguish retryable errors (timeouts, throttling) from permanent ones (validation failures) and fail fast on the latter.</li><li>Batch triggers need per-record failure handling, or one poison message blocks the whole batch.</li><li>Timeouts interact with retries: a function killed at the limit may leave partial side effects.</li><li>Wrap multi-step workflows in an orchestrator or saga so progress is recorded and resumable.</li></ul>
+
+<div class="flow"><span class="flow-step">Event delivered</span><span class="flow-arrow">→</span><span class="flow-step">Handler checks idempotency key</span><span class="flow-arrow">→</span><span class="flow-step">Work and commit</span><span class="flow-arrow">→</span><span class="flow-step">Ack</span><span class="flow-arrow">→</span><span class="flow-step">Retry or dead-letter on failure</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Observability, testing, and local development</h2>
+<ul><li>Each invocation is a short-lived, isolated unit, so traditional host metrics are not enough.</li><li>Emit structured logs with a request or trace ID, and propagate context through events and downstream calls.</li><li>Use distributed tracing to see the path across gateway, function, queue, and database.</li><li>Track invocations, errors, duration percentiles, throttles, cold starts, and concurrent executions.</li><li>Local emulation never matches the cloud exactly; test against a real environment for triggers, IAM, and limits.</li><li>Unit-test the handler as a pure function of event and context, and integration-test the trigger wiring.</li><li>Load-test the downstream systems, because serverless will happily scale the caller faster than they can absorb.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Vendor lock-in and portability</h2>
+<ul><li>Handlers often depend on provider-specific event shapes, SDKs, identity, and managed services.</li><li>Triggers, IAM policies, and deployment configuration are usually provider-specific even when the code is portable.</li><li>Deep integration with managed queues, databases, and auth gives the most leverage and the most lock-in.</li><li>Portability improves with thin handlers, explicit interfaces, and standard protocols such as HTTP and SQL.</li><li>Containers and Kubernetes reduce lock-in at the cost of more operational work.</li><li>A realistic strategy is deliberate coupling for commodity glue and isolation for core business logic.</li><li>Estimate migration cost before adopting exotic provider features in critical paths.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use it, and when not to</h2>
+<ul><li>Good fit: spiky or unpredictable traffic, event-driven glue, scheduled jobs, webhooks, image and file processing, and per-tenant isolation.</li><li>Good fit: small teams that want to ship without owning infrastructure or capacity planning.</li><li>Poor fit: sustained high-throughput services where per-request pricing dominates.</li><li>Poor fit: long-running compute, heavy stateful sessions, or workloads needing custom kernels and networking.</li><li>Poor fit: latency-critical paths that cannot tolerate cold starts or concurrency throttling.</li><li>Many real systems are hybrid: serverless at the edge and for events, containers for steady-state core services.</li><li>Decide with the workload shape and the team's operational capacity, not with fashion.</li></ul>
+
+<div class="flow"><span class="flow-step">Characterize traffic shape</span><span class="flow-arrow">→</span><span class="flow-step">Check latency budget</span><span class="flow-arrow">→</span><span class="flow-step">Check duration and payload limits</span><span class="flow-arrow">→</span><span class="flow-step">Estimate cost at peak</span><span class="flow-arrow">→</span><span class="flow-step">Choose functions, containers, or hybrid</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>No server management</strong> removes patching and capacity planning but transfers control of the runtime and network to the provider.</li><li><strong>Automatic scaling</strong> absorbs spikes but can overwhelm downstream databases and third-party APIs.</li><li><strong>Pay per use</strong> is cheap when idle but can exceed reserved capacity at sustained high throughput.</li><li><strong>Cold starts</strong> are avoided with provisioned concurrency, which reintroduces the cost of idle capacity.</li><li><strong>Statelessness</strong> makes scaling trivial but pushes every piece of state into another service and another network hop.</li><li><strong>Managed services</strong> reduce operational work but add per-service limits, quotas, and billing surprises.</li><li><strong>Deep provider integration</strong> accelerates delivery but increases lock-in and migration cost.</li><li><strong>Fine-grained functions</strong> isolate failures and permissions but multiply invocations, latency, and observability complexity.</li><li><strong>Execution limits</strong> protect the platform but force long jobs into chunking, orchestration, or different compute.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What does serverless mean if servers still exist?</summary><div class="answer"><p>It means the provider owns provisioning, patching, scaling, and availability of the servers. You deploy code and managed services and are billed per use. The abstraction is over capacity and operations, not over hardware.</p></div></details>
+<details><summary>2. What is the difference between FaaS and BaaS?</summary><div class="answer"><p>FaaS runs your event-triggered code on demand, scaling per invocation. BaaS is the managed backing set — databases, storage, queues, auth. Real serverless systems combine both; functions alone are not an architecture.</p></div></details>
+<details><summary>3. Walk through a function invocation.</summary><div class="answer"><p>An event arrives from a trigger, the platform finds a warm environment or creates one, initializes the runtime and code, invokes the handler with the event and context, then returns the result and freezes or destroys the environment. Cold-start cost sits in environment creation and initialization.</p></div></details>
+<details><summary>4. What causes cold starts and how do you reduce them?</summary><div class="answer"><p>New environments must be scheduled, have code or images pulled, the runtime started, and module-level code initialized. Reduce them with smaller packages, lazy loading, fast runtimes, initialized clients outside the handler, and provisioned concurrency for latency-critical paths.</p></div></details>
+<details><summary>5. Why must serverless functions be stateless?</summary><div class="answer"><p>Concurrent invocations run in separate isolated environments, so in-memory state is not shared or durable. Warm reuse is best-effort. State must live in a database, cache, or object store, with the event carrying identifiers.</p></div></details>
+<details><summary>6. How does automatic scaling become a problem?</summary><div class="answer"><p>The platform will open concurrency as fast as events arrive, so a burst can exhaust database connections or third-party rate limits. Buffer with queues, cap concurrency, use connection poolers, and add backpressure so downstream systems set the real limit.</p></div></details>
+<details><summary>7. How do you handle retries and duplicate events?</summary><div class="answer"><p>Assume at-least-once delivery: make handlers idempotent with a deduplication key or conditional write, cap retries, and send exhausted events to a dead-letter queue. Separate permanent failures from transient ones so poison messages do not loop forever.</p></div></details>
+<details><summary>8. When is serverless more expensive than servers?</summary><div class="answer"><p>At sustained high utilization, because you pay per invocation and per unit of duration on top of managed-service charges. Reserved containers or servers amortize constant load better. Retries, polling, and over-allocated memory also inflate the serverless bill.</p></div></details>
+<details><summary>9. What are the main execution limits?</summary><div class="answer"><p>Maximum duration, memory, payload size, temporary disk, and concurrency quotas. These force long jobs into chunks or other compute, large files into object storage, and bursts into queues instead of direct invocation.</p></div></details>
+<details><summary>10. How do you observe a serverless system?</summary><div class="answer"><p>Structured logs with trace IDs, distributed tracing across gateway, function, queue, and database, and metrics for invocations, errors, duration percentiles, throttles, cold starts, and concurrency. Host-level metrics do not exist in the same way because environments are ephemeral.</p></div></details>
+<details><summary>11. Is serverless always cheaper?</summary><div class="answer"><p>No. It is cheapest for spiky, low-average, event-driven workloads. For steady high throughput, the per-request and per-duration charges can exceed reserved capacity, and the surrounding managed services can dominate the bill.</p></div></details>
+<details><summary>12. How do you deal with vendor lock-in?</summary><div class="answer"><p>Keep handlers thin, isolate business logic behind interfaces, prefer standard protocols, and accept deliberate coupling only for commodity glue. Containers reduce lock-in but add operational work. Estimate migration cost before using unique provider features on critical paths.</p></div></details>
+<details><summary>13. How do you test serverless applications?</summary><div class="answer"><p>Unit-test handlers as functions of event and context, contract-test trigger payloads, and integration-test in a real cloud account for IAM, triggers, and limits. Load-test downstream dependencies, since local emulation cannot reproduce scale-out behavior.</p></div></details>
+<details><summary>14. When would you choose containers over serverless?</summary><div class="answer"><p>For steady high throughput, long-running processes, custom runtimes or networking, predictable latency, and when per-request pricing loses to reserved capacity. Containers trade operational work for control and cost efficiency at scale.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Calling any managed service serverless without checking whether you still provision capacity.</li><li>Assuming function instances are reused, so in-memory caches or state appear to work in testing.</li><li>Ignoring concurrency limits until scale-out exhausts the database connection pool.</li><li>Writing non-idempotent handlers on at-least-once triggers.</li><li>Using the request/response path for work that exceeds the execution timeout.</li><li>Passing large files or payloads through function arguments instead of object storage references.</li><li>Forgetting that retries and polling inflate both cost and downstream load.</li><li>Estimating cost only at low traffic and being surprised by the bill at peak.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="microservices-architecture.html"><span>← Previous</span><strong>Microservices Architecture</strong></a><a class="next" href="event-driven-architecture.html"><span>Next →</span><strong>Event-Driven Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/serverless-architecture">AlgoMaster — Serverless Architecture</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

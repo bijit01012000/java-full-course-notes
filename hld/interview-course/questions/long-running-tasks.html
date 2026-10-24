@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Long-Running Tasks and Scheduling — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 29 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p2">P2 · Operations</span></div>
+    <h1>Long-Running Tasks and Scheduling</h1>
+    <p class="dek">Interviewers use it to check whether you can separate accepting work from doing it, and whether the design survives crashes, deploys, duplicate delivery, and missed schedules.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Accept the work synchronously into a durable job record, return 202 with a job ID, and let leased workers plus a scheduler execute it idempotently with retries, progress, and dead-lettering.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Submit an asynchronous job and receive a job ID immediately.</li><li>Report status, coarse progress, attempt count, and a result link.</li><li>Cancel a queued or running job on a best-effort basis.</li><li>Retry transient failures and dead-letter jobs that exhaust attempts.</li><li>Run one-off delayed jobs and recurring schedules.</li><li>Notify the client on completion by polling, webhook, or push.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Return 202 within about 200 ms p99; never perform the work inline.</li><li>An accepted job must survive a crash or deploy, so persist before enqueue.</li><li>At-least-once execution; every step must be safe to run twice.</li><li>Scheduler lag under about 30 s for minute-level schedules.</li><li>Isolate job classes so a slow export cannot starve quick work.</li><li>No silent loss: every failure ends in a retry, a dead letter, or a visible failed state.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 10M jobs per day: about 116/s average and roughly 600/s at a 5x peak.</li><li>About 90% finish under 30 s; the remaining 10% need chunking and checkpoints.</li><li>A job record is roughly 1 KB with a payload reference, around 900 GB for 90 days of hot retention.</li><li>At 10k due schedules per minute, claim in batches of 100 to 500 to keep polling cheap.</li><li>Worker capacity is set by downstream connection and provider limits, not by queue depth alone.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Job</span><span class="fields">job_id, type, owner_id, payload_ref, status, attempts, progress_pct, stage, run_at, lease_owner, lease_expires_at, result_ref, created_at, updated_at</span></div><div class="entity"><span class="name">Schedule</span><span class="fields">schedule_id, name, cron_or_interval, timezone, next_run_at, catch_up_policy, overlap_policy, enabled, last_run_at</span></div><div class="entity"><span class="name">JobAttempt</span><span class="fields">job_id, attempt_no, worker_id, started_at, ended_at, error_class, error_detail</span></div><div class="entity"><span class="name">WorkerLease</span><span class="fields">worker_id, pool, lease_epoch, expires_at, last_heartbeat_at</span></div><div class="entity"><span class="name">DeadLetter</span><span class="fields">job_id, failed_at, reason, attempts, payload_ref, replayed_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/jobs</code></td><td>Validate the request, persist a queued job, enqueue its ID, and return 202 with a status URL.</td></tr><tr><td><code>GET</code></td><td><code>/jobs/{jobId}</code></td><td>Return status, stage, progress, attempts, and the result link from the stored record.</td></tr><tr><td><code>GET</code></td><td><code>/jobs/{jobId}/events</code></td><td>Stream progress over SSE for a UI, with polling as the fallback.</td></tr><tr><td><code>POST</code></td><td><code>/jobs/{jobId}/cancel</code></td><td>Set a cancel flag that the worker checks between chunks.</td></tr><tr><td><code>POST</code></td><td><code>/jobs/{jobId}/retry</code></td><td>Requeue a failed or dead-lettered job as a new attempt.</td></tr><tr><td><code>POST</code></td><td><code>/schedules</code></td><td>Create a delayed or recurring schedule with timezone, overlap, and catch-up policy.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Job state</td><td>One job row with a status enum and a version column; transitions are conditional updates</td><td>A late worker cannot overwrite a cancelled job or a completion that already won.</td></tr><tr><td>Persistence before enqueue</td><td>Write the job row and an outbox row in one transaction; a relay publishes the job ID</td><td>A crash between accepting and publishing cannot lose work the client was told about.</td></tr><tr><td>Due-time lookup</td><td>Index on status and run_at, claim due rows with a conditional update using SKIP LOCKED</td><td>Polling stays cheap and two schedulers cannot dispatch the same occurrence.</td></tr><tr><td>Lease and heartbeat</td><td>lease_owner plus lease_expires_at renewed every 10 to 15 s; a sweeper requeues expired leases</td><td>Recovers orphaned jobs quickly without one huge visibility timeout per job.</td></tr><tr><td>Progress writes</td><td>Coarse stage plus percent, written at most once per second</td><td>Per-item updates would add more write cost and lock contention than the work itself.</td></tr><tr><td>Scheduled occurrences</td><td>Store the schedule and next_run_at, not a precomputed list; key each run as jobId plus scheduledTime</td><td>Restarts recompute the next occurrence and a duplicate dispatch becomes a no-op.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> A[🛡️ API]
+  A -->|202 + job id| C
+  A --> J[(🗄️ Job store)]
+  J --> S[⏰ Scheduler]
+  S -->|claim due job| Q[📬 Queue]
+  Q --> W[👷 Worker pool]
+  W -->|heartbeat renews lease| J
+  W -->|large output| O[📦 Object storage]
+  W -->|retries exhausted| D[☠️ Dead-letter queue]
+  J --> N[🔔 Notifier]
+  N -->|webhook or SSE| C
+  D --> R[🛠️ Replay tool]
+  R --> Q
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef service fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef queue fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef danger fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class C client;
+  class A,S,W,N,R service;
+  class J,O store;
+  class Q queue;
+  class D danger;</div><div class="diagram-caption">The API accepts and persists work, the scheduler claims due jobs, leased workers execute with heartbeats, and exhausted jobs go to a dead-letter queue for replay.</div></div>
+        <ul><li>Only validation, authorization, quota, and the durable write are synchronous; everything else is a job.</li><li>The stored job record is the source of truth; the queue message carries only the job ID.</li><li>The scheduler decides and workers do. The scheduler claims due rows atomically and dispatches without running the work.</li><li>Workers are stateless and disposable, so any worker can run any job in its pool.</li><li>Use separate queues and pools for short interactive work, long exports, and scheduled jobs.</li><li>Large payloads live in object storage; the job row keeps a reference, not a megabyte blob.</li><li>A parent job fans out deterministic chunks, children are idempotent, and the parent counts completions before declaring success.</li><li>Cancellation is a flag checked between chunks; a side effect that already committed is compensated, not pretended away.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Async job instead of inline work</td><td>No client or proxy timeout risk, and bursts are absorbed</td><td>The user gets eventual completion and needs a status API</td></tr><tr><td>Long lease with heartbeat</td><td>Slow jobs are not executed twice while still running</td><td>Recovery waits for lease expiry when a worker actually dies</td></tr><tr><td>Coarse progress milestones</td><td>Cheap writes and an honest UI</td><td>The percentage is less precise and updates less often</td></tr><tr><td>Small chunks with fan-out</td><td>Cheap retries, smooth progress, bounded leases</td><td>More job rows and per-chunk coordination overhead</td></tr><tr><td>Per-job atomic claim</td><td>Scales without a global leader bottleneck</td><td>More complex conditional queries and index contention</td></tr><tr><td>Skip missed runs</td><td>Protects capacity after an outage</td><td>Silently loses occurrences that carried unique work</td></tr><tr><td>Replay every missed run</td><td>Preserves billing or per-interval semantics</td><td>Can flood downstream systems during recovery</td></tr><tr><td>Polling the status endpoint</td><td>Simple, cache-friendly, and works everywhere</td><td>Wasted requests and slower notice than a push</td></tr></tbody></table></div>
+        <ul><li>Claim bounded batches with a conditional update rather than scanning the whole due-time index.</li><li>Add jitter to recurring schedules so a midnight cron does not create a periodic spike.</li><li>Checkpoint chunked jobs so a retry resumes near the failure point instead of restarting.</li><li>Scale workers on oldest job age and queue depth, capped by downstream connection and rate limits.</li><li>Cache the status response for a few seconds because progress changes slowly.</li><li>Archive terminal jobs to object storage after 30 to 90 days to keep the hot table small.</li><li>Route retries to a separate queue so poison jobs do not delay fresh work.</li><li>Cap dispatch rate during catch-up so recovery does not overload downstream systems.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why not run the task inside the HTTP request?</strong> Clients, proxies, and load balancers time out, the connection holds capacity for the whole job, and a crash or deploy loses the work with no way to report progress.</div><div class="followup"><strong>What does the API return for accepted work?</strong> 202 Accepted with a job ID and status URL, returned only after the job record is durable.</div><div class="followup"><strong>How do you avoid losing an accepted job?</strong> Persist the job row before publishing, or write the row and an outbox entry in one transaction so a relay can republish after a crash.</div><div class="followup"><strong>What happens if a worker crashes mid-job?</strong> Heartbeats stop, the lease expires, and another worker claims the job; that is why steps must be idempotent and long jobs must checkpoint.</div><div class="followup"><strong>How do you prevent duplicate side effects?</strong> Use a per-job idempotency key, a conditional transition so only the first completion wins, and provider-side idempotency keys for external calls.</div><div class="followup"><strong>How do you handle a job that takes hours?</strong> Split it into deterministic chunk jobs with a coordinator, checkpoint each chunk, and keep each lease longer than one chunk rather than the whole job.</div><div class="followup"><strong>What do you do about a run missed while the system was down?</strong> Apply an explicit per-schedule policy: skip for cleanup, run once now for reports, or replay every missed occurrence for billing, with a bounded replay rate.</div><div class="followup"><strong>What if a recurring job takes longer than its interval?</strong> Decide whether to block the next run, queue it, or allow overlap, and enforce a maximum runtime so a stuck run cannot block the schedule forever.</div><div class="followup"><strong>How do you cancel a running job?</strong> Set a cancel flag that the worker checks at safe points between chunks; committed side effects are compensated because cancellation is best effort.</div><div class="followup"><strong>How does the client learn the job is done?</strong> Poll the status endpoint, receive a signed webhook, or subscribe over SSE or WebSocket; the status record remains authoritative.</div><div class="followup"><strong>How do you scale workers?</strong> Scale on oldest job age and queue depth per queue, within downstream limits, and keep separate pools so long work cannot starve short work.</div><div class="followup"><strong>What would you monitor?</strong> Scheduler lag, oldest job age, throughput, failure and retry rates, lease expiries, dead-letter growth, and duration percentiles per job type.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Doing the work inline and raising the load balancer timeout instead of decoupling it.</li><li>Returning 200 with an empty result while the job is still queued.</li><li>Enqueueing before the job record is durable, so a crash loses accepted work.</li><li>Setting the lease or visibility timeout shorter than the job, causing two workers to run it at once.</li><li>Running cron on every app server, or on one server with no failover and no visibility into missed runs.</li><li>Scheduling in local time with no rule for daylight-saving gaps and duplicated hours.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="event-driven-architecture.html"><span>← Previous</span><strong>Event-Driven Architecture</strong></a><a class="next" href="location-based-search.html"><span>Next →</span><strong>Location-Based Search</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

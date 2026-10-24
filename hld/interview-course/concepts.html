@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Core Building Blocks — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+
+<svg class="svg-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker-teal" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker-blue" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker-rose" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Core Concepts</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Core Building Blocks</h1>
+    <p class="dek">The concepts that turn interview requirements into components — and the trade-offs you must say out loud.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">9 diagrams</span>
+      <span class="pill">Interview-oriented</span>
+      <span class="pill">Light + dark theme</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/concepts">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#concepts">How concepts show up</a>
+      <a href="#scaling">Scaling</a>
+      <a href="#load-balancing">Load balancing</a>
+      <a href="#availability">Availability</a>
+      <a href="#caching">Caching</a>
+      <a href="#indexing">Indexing</a>
+      <a href="#replication">Replication</a>
+      <a href="#sharding">Sharding</a>
+      <a href="#consistent-hashing">Consistent hashing</a>
+      <a href="#object-storage">Object storage &amp; CDNs</a>
+      <a href="#async">Asynchronous processing</a>
+      <a href="#url-shortener">URL shortener</a>
+      <a href="#takeaways">Key takeaways</a>
+      <div class="extra">
+        <a href="#tradeoffs">Trade-offs</a>
+        <a href="#checklist">Interview checklist</a>
+        <a href="#traps">Traps</a>
+        <a href="index.html">← Course index</a>
+      </div>
+    </nav>
+
+    <main>
+      <div class="one-liner">
+        <span class="label">The interview lens</span>
+        The interviewer rarely asks “explain sharding.” They give you a requirement — 100k reads/sec, one server down, data too large for one machine — and you choose the concept, explain the mechanism, and defend the trade-off.
+      </div>
+
+      <dl class="key-terms">
+        <div class="term"><dt>Vertical scaling</dt><dd>Make one machine bigger. Simple, but capped and still one failure domain.</dd></div>
+        <div class="term"><dt>Horizontal scaling</dt><dd>Add more machines. Works best with stateless app servers and a load balancer.</dd></div>
+        <div class="term"><dt>L4 vs L7</dt><dd>L4 routes by IP/port; L7 understands HTTP paths, headers, and cookies.</dd></div>
+        <div class="term"><dt>Availability nines</dt><dd>99.9% ≈ 8.8 h/year; 99.99% ≈ 53 min/year.</dd></div>
+        <div class="term"><dt>Cache-aside</dt><dd>App checks cache; on a miss it reads the DB and populates the cache.</dd></div>
+        <div class="term"><dt>Index</dt><dd>A separate structure, usually a B-tree, that avoids scanning every row.</dd></div>
+        <div class="term"><dt>Replication</dt><dd>Copies of the same data for read scale and failover.</dd></div>
+        <div class="term"><dt>Sharding</dt><dd>Partitioning different data across machines by a shard key.</dd></div>
+        <div class="term"><dt>Consistent hashing</dt><dd>A ring that minimizes key movement when nodes join or leave.</dd></div>
+        <div class="term"><dt>Pre-signed URL</dt><dd>A temporary URL that lets a client upload directly to object storage.</dd></div>
+      </dl>
+
+      <section class="section-block" id="concepts">
+        <h2><span class="n">01</span>How these concepts show up in interviews</h2>
+        <p class="lede">Interviewers usually state a requirement or constraint, not a concept name. Your job is to translate the pressure into a component and a trade-off.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Requirement signal</th><th>Concept to consider</th></tr></thead>
+          <tbody>
+            <tr><td>“100,000 reads per second”</td><td>Caching, read replicas, CDN</td></tr>
+            <tr><td>“One server is running out of CPU”</td><td>Vertical or horizontal scaling</td></tr>
+            <tr><td>“A server failure must not take us down”</td><td>Load balancer, redundancy, availability zones</td></tr>
+            <tr><td>“Queries are slow as the table grows”</td><td>Indexing, query optimization</td></tr>
+            <tr><td>“Data is too large for one database”</td><td>Sharding</td></tr>
+            <tr><td>“Images must load fast worldwide”</td><td>Object storage + CDN</td></tr>
+            <tr><td>“The user should not wait for transcoding”</td><td>Queue + background workers</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li><strong>Explain the problem first:</strong> what pressure the system is under.</li>
+          <li><strong>Name the mechanism:</strong> how the component actually solves it.</li>
+          <li><strong>State the trade-off:</strong> what gets worse, what becomes more complex.</li>
+          <li><strong>Say when not to use it:</strong> this is what separates a senior answer from a vocabulary list.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “I don’t add components because they’re common. I add them when a requirement creates a bottleneck they solve.”</div>
+      </section>
+
+      <section class="section-block" id="scaling">
+        <h2><span class="n">02</span>Scaling</h2>
+        <p class="lede">As traffic grows, one machine eventually runs out of CPU, memory, or storage. There are two directions: scale up or scale out.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 900 260" role="img" aria-label="Vertical scaling versus horizontal scaling">
+            <rect x="0" y="0" width="900" height="260" fill="none"/>
+            <text class="svg-label" x="220" y="26">VERTICAL · SCALE UP</text>
+            <text class="svg-label" x="680" y="26">HORIZONTAL · SCALE OUT</text>
+            <rect class="svg-box blue" x="35" y="120" width="95" height="55" rx="8"/>
+            <text class="svg-text small" x="82" y="147">Small</text>
+            <rect class="svg-box warm" x="170" y="100" width="115" height="75" rx="8"/>
+            <text class="svg-text small" x="227" y="137">Medium</text>
+            <rect class="svg-box strong" x="325" y="75" width="130" height="100" rx="8"/>
+            <text class="svg-text small" x="390" y="125">Large</text>
+            <path class="svg-line" d="M130 147 L170 138"/>
+            <path class="svg-line" d="M285 137 L325 125"/>
+            <text class="svg-label" x="220" y="218">more CPU / RAM / disk on one machine</text>
+
+            <rect class="svg-box blue" x="490" y="105" width="64" height="85" rx="7"/>
+            <rect class="svg-box blue" x="570" y="105" width="64" height="85" rx="7"/>
+            <rect class="svg-box blue" x="650" y="105" width="64" height="85" rx="7"/>
+            <rect class="svg-box blue" x="730" y="105" width="64" height="85" rx="7"/>
+            <text class="svg-text tiny" x="522" y="147">SRV</text>
+            <text class="svg-text tiny" x="602" y="147">SRV</text>
+            <text class="svg-text tiny" x="682" y="147">SRV</text>
+            <text class="svg-text tiny" x="762" y="147">SRV</text>
+            <text class="svg-label" x="680" y="218">more machines · stateless app tier</text>
+          </svg>
+          <figcaption>Vertical scaling changes the machine; horizontal scaling changes the count. Horizontal works best when any app server can serve any request.</figcaption>
+        </figure>
+        <ul>
+          <li><strong>Vertical:</strong> simplest, no application changes; limited by hardware, cost, and a single failure domain.</li>
+          <li><strong>Horizontal:</strong> add stateless app servers behind a load balancer; move sessions and shared state to a database/cache.</li>
+          <li><strong>Stateless is the enabler:</strong> no local session or file; any instance can handle any request.</li>
+          <li><strong>Measure first:</strong> scaling the app tier does not help if the database is the bottleneck.</li>
+        </ul>
+        <div class="note trap"><strong>Trap:</strong> calling the app tier stateless while keeping sessions on individual servers. That forces sticky routing and makes failover messy.</div>
+      </section>
+
+      <section class="section-block" id="load-balancing">
+        <h2><span class="n">03</span>Load balancing</h2>
+        <p class="lede">With multiple application servers, a load balancer distributes requests, checks health, and removes failed instances from rotation.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 900 250" role="img" aria-label="Clients through a load balancer to three servers">
+            <rect x="0" y="0" width="900" height="250" fill="none"/>
+            <rect class="svg-box blue" x="30" y="95" width="145" height="62" rx="9"/>
+            <text class="svg-text" x="102" y="119">Clients</text>
+            <text class="svg-text tiny" x="102" y="138">many requests</text>
+            <rect class="svg-box warm" x="280" y="88" width="190" height="76" rx="10"/>
+            <text class="svg-text" x="375" y="112">Load balancer</text>
+            <text class="svg-text tiny" x="375" y="132">L4 / L7 · health checks</text>
+            <rect class="svg-box strong" x="610" y="40" width="170" height="52" rx="8"/>
+            <text class="svg-text small" x="695" y="66">Server 1</text>
+            <rect class="svg-box strong" x="610" y="112" width="170" height="52" rx="8"/>
+            <text class="svg-text small" x="695" y="138">Server 2</text>
+            <rect class="svg-box strong" x="610" y="184" width="170" height="52" rx="8"/>
+            <text class="svg-text small" x="695" y="210">Server 3</text>
+            <path class="svg-line" d="M175 126 L280 126"/>
+            <path class="svg-line teal" d="M470 112 C540 112 550 66 610 66"/>
+            <path class="svg-line teal" d="M470 126 L610 138"/>
+            <path class="svg-line teal" d="M470 140 C540 140 550 210 610 210"/>
+            <text class="svg-label" x="540" y="100">route</text>
+          </svg>
+          <figcaption>L4 routes flows by IP/port; L7 routes requests by path, header, or cookie. Health checks keep failed targets out of rotation.</figcaption>
+        </figure>
+        <ul>
+          <li><strong>L4:</strong> routes by IP and port; protocol-agnostic and efficient, but cannot inspect HTTP paths or headers.</li>
+          <li><strong>L7:</strong> understands HTTP; can route <code>/api</code> and <code>/images</code> differently, terminate TLS, and rewrite headers.</li>
+          <li><strong>Algorithms:</strong> round robin for similar servers/requests; least connections when connection lifetimes vary.</li>
+          <li><strong>Health checks:</strong> stop sending traffic to unhealthy instances; connection draining finishes in-flight work.</li>
+          <li><strong>The load balancer itself needs HA</strong>, or it becomes the new single point of failure.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “L4 routes flows; L7 routes requests. If the decision depends on a path or header, I need L7.”</div>
+      </section>
+
+      <section class="section-block" id="availability">
+        <h2><span class="n">04</span>Availability</h2>
+        <p class="lede">Availability is the percentage of time the service is operational. Higher nines cost more infrastructure and operational effort.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Availability</th><th>Downtime per year</th><th>What it implies</th></tr></thead>
+          <tbody>
+            <tr><td>99.9% — 3 nines</td><td>≈ 8.8 hours</td><td>Basic redundancy and monitoring</td></tr>
+            <tr><td>99.99% — 4 nines</td><td>≈ 53 minutes</td><td>Multi-AZ, automated failover, tested operations</td></tr>
+          </tbody>
+        </table></div>
+        <figure class="diagram">
+          <svg viewBox="0 0 900 320" role="img" aria-label="Application servers and databases across two availability zones">
+            <rect x="0" y="0" width="900" height="320" fill="none"/>
+            <rect class="svg-box warm" x="360" y="20" width="180" height="52" rx="8"/>
+            <text class="svg-text small" x="450" y="46">Load balancer</text>
+            <rect x="40" y="100" width="380" height="190" rx="12" fill="none" stroke="var(--line)" stroke-dasharray="5 4"/>
+            <text class="svg-label" x="230" y="122">AVAILABILITY ZONE A</text>
+            <rect x="480" y="100" width="380" height="190" rx="12" fill="none" stroke="var(--line)" stroke-dasharray="5 4"/>
+            <text class="svg-label" x="670" y="122">AVAILABILITY ZONE B</text>
+            <rect class="svg-box strong" x="70" y="145" width="140" height="55" rx="8"/>
+            <text class="svg-text small" x="140" y="172">App server</text>
+            <rect class="svg-box blue" x="245" y="145" width="145" height="55" rx="8"/>
+            <text class="svg-text small" x="317" y="172">Primary DB</text>
+            <rect class="svg-box strong" x="510" y="145" width="140" height="55" rx="8"/>
+            <text class="svg-text small" x="580" y="172">App server</text>
+            <rect class="svg-box blue" x="685" y="145" width="145" height="55" rx="8"/>
+            <text class="svg-text small" x="757" y="172">Replica DB</text>
+            <path class="svg-line" d="M420 72 C330 72 250 105 140 145"/>
+            <path class="svg-line" d="M480 72 C560 72 620 105 710 145"/>
+            <path class="svg-line teal dashed" d="M317 200 L317 245 L757 245 L757 200"/>
+            <text class="svg-label" x="537" y="260">replication</text>
+            <text class="svg-label" x="230" y="270">zone failure → traffic shifts to B</text>
+          </svg>
+          <figcaption>Redundancy across independent zones helps only if the surviving zone has enough capacity and failover is actually tested.</figcaption>
+        </figure>
+        <ul>
+          <li><strong>Redundancy:</strong> run multiple app servers; keep database replicas and a promotion path.</li>
+          <li><strong>Availability zones:</strong> physically separate locations within a region; one zone failure should not take down the service.</li>
+          <li><strong>Capacity after failure:</strong> if two zones normally share load, the remaining zone must handle the full load or degrade gracefully.</li>
+          <li><strong>SPOF exercise:</strong> ask “what happens if this component fails?” for every box and dependency.</li>
+        </ul>
+        <div class="note trap"><strong>Trap:</strong> redundancy that shares the same zone, network, or control plane does not protect against that shared failure.</div>
+      </section>
+
+      <section class="section-block" id="caching">
+        <h2><span class="n">05</span>Caching</h2>
+        <p class="lede">A cache stores frequently accessed data in a faster layer. It reduces latency and database load, but introduces freshness risk.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 900 300" role="img" aria-label="Cache-aside request flow">
+            <rect x="0" y="0" width="900" height="300" fill="none"/>
+            <rect class="svg-box blue" x="25" y="120" width="130" height="60" rx="8"/>
+            <text class="svg-text small" x="90" y="146">Application</text>
+            <polygon class="svg-box warm" points="300,105 405,150 300,195 195,150"/>
+            <text class="svg-text tiny" x="300" y="145">cache hit?</text>
+            <rect class="svg-box strong" x="560" y="45" width="170" height="55" rx="8"/>
+            <text class="svg-text small" x="645" y="72">Return cached data</text>
+            <rect class="svg-box blue" x="560" y="150" width="170" height="55" rx="8"/>
+            <text class="svg-text small" x="645" y="177">Read from DB</text>
+            <rect class="svg-box violet" x="560" y="245" width="170" height="45" rx="8"/>
+            <text class="svg-text small" x="645" y="268">Store in cache</text>
+            <path class="svg-line" d="M155 150 L195 150"/>
+            <path class="svg-line teal" d="M405 133 C470 133 500 72 560 72"/>
+            <text class="svg-label" x="490" y="108">yes</text>
+            <path class="svg-line" d="M405 168 C470 168 500 178 560 178"/>
+            <text class="svg-label" x="490" y="190">no</text>
+            <path class="svg-line blue" d="M645 205 L645 245"/>
+            <path class="svg-line teal dashed" d="M730 267 C770 267 770 72 730 72"/>
+          </svg>
+          <figcaption>Cache-aside: the application owns the read/write policy. The database remains the source of truth.</figcaption>
+        </figure>
+        <ul>
+          <li><strong>Cache-aside:</strong> app checks cache; on a hit returns; on a miss reads the database, stores a copy, and returns it.</li>
+          <li><strong>Good fit:</strong> read-heavy, not-too-volatile data such as profiles, product details, and popular posts.</li>
+          <li><strong>Invalidate on write:</strong> update the database and remove/refresh the cache entry.</li>
+          <li><strong>TTL:</strong> let entries expire automatically; simpler, but data can be stale for the TTL window.</li>
+          <li><strong>Cache layers:</strong> browser, CDN, application memory, shared cache such as Redis, and database buffer pool.</li>
+          <li><strong>Stampede risk:</strong> many simultaneous misses can hammer the database; coordinate or add jitter.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “Caching improves latency and database load, but every cache accepts staleness and an invalidation policy.”</div>
+      </section>
+
+      <section class="section-block" id="indexing">
+        <h2><span class="n">06</span>Indexing</h2>
+        <p class="lede">Without a suitable index, the database may scan every row. An index is a separate structure that lets it find matching rows efficiently.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th></th><th>Without index</th><th>With index</th></tr></thead>
+          <tbody>
+            <tr><td>Lookup</td><td>Scan row by row</td><td>B-tree lookup → matching row</td></tr>
+            <tr><td>Cost</td><td>Grows with table size</td><td>Grows logarithmically with index size</td></tr>
+            <tr><td>Range query</td><td>Scan and filter</td><td>Index range walk</td></tr>
+            <tr><td>Write cost</td><td>Lower</td><td>Higher: every write maintains the index</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li><strong>B-tree:</strong> keeps values sorted; supports equality, range, and ordered queries in a few steps.</li>
+          <li><strong>Composite index:</strong> column order matters; a <code>(user_id, created_at)</code> index helps queries that filter on the leftmost columns.</li>
+          <li><strong>Covering index:</strong> contains every column a query needs, so the database can avoid a table lookup.</li>
+          <li><strong>Trade-off:</strong> indexes cost storage and slow writes; do not index every column.</li>
+          <li><strong>Selectivity:</strong> an index on a low-cardinality column may not help; the optimizer may ignore it.</li>
+          <li><strong>In an interview:</strong> name the frequent queries first, then the indexes that support them.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “I index the access patterns I actually have. Every index makes reads cheaper and writes more expensive.”</div>
+      </section>
+
+      <section class="section-block" id="replication">
+        <h2><span class="n">07</span>Replication</h2>
+        <p class="lede">Replication keeps copies of the same data on multiple machines. It scales reads and provides a failover candidate, but introduces replication lag.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 900 270" role="img" aria-label="Leader-follower replication">
+            <rect x="0" y="0" width="900" height="270" fill="none"/>
+            <rect class="svg-box warm" x="25" y="95" width="130" height="55" rx="8"/>
+            <text class="svg-text small" x="90" y="122">Writes</text>
+            <rect class="svg-box strong" x="245" y="85" width="170" height="75" rx="9"/>
+            <text class="svg-text" x="330" y="112">Leader</text>
+            <text class="svg-text tiny" x="330" y="132">accepts writes</text>
+            <rect class="svg-box blue" x="590" y="35" width="190" height="55" rx="8"/>
+            <text class="svg-text small" x="685" y="62">Follower 1</text>
+            <rect class="svg-box blue" x="590" y="145" width="190" height="55" rx="8"/>
+            <text class="svg-text small" x="685" y="172">Follower 2</text>
+            <rect class="svg-box warm" x="25" y="190" width="130" height="55" rx="8"/>
+            <text class="svg-text small" x="90" y="217">Reads</text>
+            <path class="svg-line" d="M155 122 L245 122"/>
+            <path class="svg-line teal" d="M415 112 C500 112 520 62 590 62"/>
+            <path class="svg-line teal" d="M415 132 C500 132 520 172 590 172"/>
+            <text class="svg-label" x="505" y="112">replicate</text>
+            <path class="svg-line blue dashed" d="M155 217 C500 217 540 190 590 172"/>
+            <text class="svg-label" x="360" y="240">reads hit followers; they may be behind</text>
+          </svg>
+          <figcaption>Leader-follower replication: all writes go to the leader; followers serve reads and can be promoted on failure.</figcaption>
+        </figure>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Mode</th><th>Write latency</th><th>Risk</th></tr></thead>
+          <tbody>
+            <tr><td>Synchronous</td><td>Higher; leader waits for followers</td><td>Writes may stall or fail if too few followers are available</td></tr>
+            <tr><td>Asynchronous</td><td>Lower; leader does not wait</td><td>Replication lag; recent writes may be lost on failover</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li><strong>Read scaling:</strong> send read traffic to followers, writes to the leader.</li>
+          <li><strong>Failover:</strong> promote a follower if the leader fails; requires detection and a safe promotion process.</li>
+          <li><strong>Read-after-write:</strong> a user may write to the leader and immediately read a lagging follower; route that read to the leader or wait.</li>
+          <li><strong>Replication does not scale writes</strong> — every replica still receives every write.</li>
+        </ul>
+        <div class="note trap"><strong>Trap:</strong> promising strong consistency while reading from asynchronous replicas without explaining read-after-write handling.</div>
+      </section>
+
+      <section class="section-block" id="sharding">
+        <h2><span class="n">08</span>Sharding</h2>
+        <p class="lede">Sharding splits different data across machines. It scales storage and write capacity, but makes queries and transactions harder.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 900 240" role="img" aria-label="Shard router sending keys to three shards">
+            <rect x="0" y="0" width="900" height="240" fill="none"/>
+            <rect class="svg-box blue" x="25" y="85" width="130" height="60" rx="8"/>
+            <text class="svg-text small" x="90" y="112">Application</text>
+            <rect class="svg-box warm" x="230" y="82" width="170" height="66" rx="9"/>
+            <text class="svg-text" x="315" y="108">Shard router</text>
+            <text class="svg-text tiny" x="315" y="128">hash / range / directory</text>
+            <rect class="svg-box strong" x="540" y="30" width="170" height="52" rx="8"/>
+            <text class="svg-text small" x="625" y="56">Shard 1</text>
+            <rect class="svg-box strong" x="540" y="98" width="170" height="52" rx="8"/>
+            <text class="svg-text small" x="625" y="124">Shard 2</text>
+            <rect class="svg-box strong" x="540" y="166" width="170" height="52" rx="8"/>
+            <text class="svg-text small" x="625" y="192">Shard 3</text>
+            <path class="svg-line" d="M155 115 L230 115"/>
+            <path class="svg-line teal" d="M400 105 C470 105 490 56 540 56"/>
+            <path class="svg-line teal" d="M400 115 L540 124"/>
+            <path class="svg-line teal" d="M400 126 C470 126 490 192 540 192"/>
+            <text class="svg-label" x="475" y="92">route by key</text>
+          </svg>
+          <figcaption>Each shard owns a subset of the data. A query without the shard key may need to visit multiple shards.</figcaption>
+        </figure>
+        <ul>
+          <li><strong>Shard key:</strong> decides placement, balance, and which queries are single-shard.</li>
+          <li><strong>Good example:</strong> chat messages by conversation ID — one conversation stays on one shard.</li>
+          <li><strong>Bad example:</strong> users by country — one country can dominate a single shard.</li>
+          <li><strong>Cross-shard cost:</strong> joins, transactions, pagination, and aggregations need coordination.</li>
+          <li><strong>When to shard:</strong> only after indexes, caching, and read replicas are insufficient for storage or write throughput.</li>
+          <li><strong>Replication vs sharding:</strong> replication copies the same data; sharding partitions different data.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “Sharding is the write-scale and data-size tool, not the first read-scale tool.”</div>
+      </section>
+
+      <section class="section-block" id="consistent-hashing">
+        <h2><span class="n">09</span>Consistent hashing</h2>
+        <p class="lede">Consistent hashing minimizes data movement when shards join or leave the cluster.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 900 360" role="img" aria-label="Consistent hashing ring with shards and keys">
+            <rect x="0" y="0" width="900" height="360" fill="none"/>
+            <circle cx="450" cy="180" r="125" fill="none" stroke="var(--line-strong)" stroke-width="2" stroke-dasharray="5 5"/>
+            <circle class="svg-box strong" cx="342" cy="117" r="24"/>
+            <text class="svg-text small" x="342" y="117">A</text>
+            <circle class="svg-box strong" cx="558" cy="117" r="24"/>
+            <text class="svg-text small" x="558" y="117">B</text>
+            <circle class="svg-box strong" cx="450" cy="305" r="24"/>
+            <text class="svg-text small" x="450" y="305">C</text>
+            <circle cx="390" cy="200" r="5" fill="var(--amber)"/>
+            <circle cx="450" cy="95" r="5" fill="var(--amber)"/>
+            <circle cx="560" cy="230" r="5" fill="var(--amber)"/>
+            <circle cx="480" cy="280" r="5" fill="var(--amber)"/>
+            <text class="svg-text tiny" x="375" y="218">key 1</text>
+            <text class="svg-text tiny" x="466" y="82">key 2</text>
+            <text class="svg-text tiny" x="580" y="245">key 3</text>
+            <text class="svg-text tiny" x="530" y="290">key 4</text>
+            <text class="svg-label" x="450" y="340">keys move clockwise to the next shard; adding a shard moves roughly 1/N of the data</text>
+          </svg>
+          <figcaption>Without a ring, changing from 4 to 5 shards remaps most keys. With a ring, only the keys between the new shard and its predecessor move.</figcaption>
+        </figure>
+        <ul>
+          <li><strong>Modulo problem:</strong> <code>hash(key) % N</code> changes almost every mapping when N changes.</li>
+          <li><strong>Ring:</strong> hash keys and shards onto a circle; a key belongs to the next shard clockwise.</li>
+          <li><strong>Join/leave:</strong> adding a fifth shard moves roughly one-fifth of the keys, not all of them.</li>
+          <li><strong>Virtual nodes:</strong> give each physical shard several ring positions to smooth uneven ranges and hot spots.</li>
+          <li><strong>Replication:</strong> place copies on the next N distinct physical nodes clockwise.</li>
+          <li><strong>Used by:</strong> Cassandra, Dynamo-style stores, distributed caches, and systems with frequent membership changes.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “Consistent hashing is about minimizing movement when the cluster changes, not about magic distribution.”</div>
+      </section>
+
+      <section class="section-block" id="object-storage">
+        <h2><span class="n">10</span>Object storage and CDNs</h2>
+        <p class="lede">Large files belong in object storage, not database rows. Pre-signed URLs keep uploads off the app server; CDNs keep downloads close to users.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 900 280" role="img" aria-label="Pre-signed URL direct upload flow">
+            <rect x="0" y="0" width="900" height="280" fill="none"/>
+            <rect class="svg-box blue" x="20" y="85" width="145" height="60" rx="8"/>
+            <text class="svg-text small" x="92" y="112">Client</text>
+            <rect class="svg-box strong" x="300" y="85" width="165" height="60" rx="8"/>
+            <text class="svg-text small" x="382" y="112">App server</text>
+            <rect class="svg-box violet" x="620" y="85" width="185" height="60" rx="8"/>
+            <text class="svg-text small" x="712" y="112">Object storage</text>
+            <path class="svg-line" d="M165 105 L300 105"/>
+            <text class="svg-label" x="232" y="95">1 request URL</text>
+            <path class="svg-line teal dashed" d="M300 128 L165 128"/>
+            <text class="svg-label" x="232" y="145">2 pre-signed URL</text>
+            <path class="svg-line" d="M165 145 C360 175 500 120 620 120"/>
+            <text class="svg-label" x="430" y="166">3 upload file directly</text>
+            <path class="svg-line blue" d="M120 145 C120 210 240 220 380 145"/>
+            <text class="svg-label" x="250" y="232">4 confirm upload + metadata</text>
+          </svg>
+          <figcaption>Pre-signed URL: the app authorizes the upload, the client sends bytes directly to object storage, and the database stores only metadata.</figcaption>
+        </figure>
+        <ul>
+          <li><strong>Object storage:</strong> files as objects with a unique key; designed for large blobs, durability, and scale.</li>
+          <li><strong>Metadata:</strong> keep owner, size, content type, and object key in the database; keep bytes in object storage.</li>
+          <li><strong>Pre-signed URL:</strong> temporary permission to upload to a specific key; bytes never pass through the app server.</li>
+          <li><strong>CDN:</strong> caches static/popular content at edge locations closer to users, reducing latency and origin traffic.</li>
+          <li><strong>Cache control:</strong> use TTLs, versioned URLs, and purge for changes; personalized content is harder to cache.</li>
+          <li><strong>Trade-off:</strong> object storage is not a low-latency transactional store; CDNs can serve stale content.</li>
+        </ul>
+        <div class="flow">
+          <span class="flow-step">User requests image</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Nearby edge cache</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Hit: serve</span><span class="flow-arrow">/</span>
+          <span class="flow-step">Miss: origin fetch</span>
+        </div>
+        <div class="note"><strong>Interview line:</strong> “Object storage for bytes, database for metadata, pre-signed URL for direct upload, CDN for distance.”</div>
+      </section>
+
+      <section class="section-block" id="async">
+        <h2><span class="n">11</span>Asynchronous processing</h2>
+        <p class="lede">Not every task must finish before the user gets a response. Slow work can move to a queue and background workers.</p>
+        <div class="flow">
+          <span class="flow-step">Upload video</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Object storage</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Queue job</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Workers transcode</span><span class="flow-arrow">→</span>
+          <span class="flow-step">Update status</span>
+        </div>
+        <ul>
+          <li><strong>Decouple:</strong> the API responds after storing the upload and enqueuing the job; transcoding happens later.</li>
+          <li><strong>Scale workers independently:</strong> video processing can grow without scaling the API tier.</li>
+          <li><strong>Absorb spikes:</strong> the queue buffers work when producers are faster than workers.</li>
+          <li><strong>Eventual completion:</strong> the user sees “processing,” not an immediate result.</li>
+          <li><strong>Reliability:</strong> retries, idempotency, dead-letter queues, and queue-depth monitoring are part of the design.</li>
+          <li><strong>Limit:</strong> a queue is not infinite storage; if workers stay behind, latency and storage grow.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “Async is a latency decision and a failure decision. I use it when the user doesn’t need the result immediately and the work is safe to retry.”</div>
+      </section>
+
+      <section class="section-block" id="url-shortener">
+        <h2><span class="n">12</span>Putting it together: URL shortener</h2>
+        <p class="lede">A URL shortener is mostly a read problem: 10,000 new links/sec and 1,000,000 redirects/sec is roughly a 100:1 read/write ratio.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 900 330" role="img" aria-label="URL shortener architecture">
+            <rect x="0" y="0" width="900" height="330" fill="none"/>
+            <rect class="svg-box blue" x="20" y="120" width="120" height="60" rx="8"/>
+            <text class="svg-text small" x="80" y="147">Clients</text>
+            <rect class="svg-box warm" x="190" y="115" width="150" height="70" rx="9"/>
+            <text class="svg-text small" x="265" y="142">Load balancer</text>
+            <rect class="svg-box strong" x="390" y="110" width="170" height="80" rx="9"/>
+            <text class="svg-text small" x="475" y="138">Stateless app</text>
+            <text class="svg-text tiny" x="475" y="157">servers</text>
+            <rect class="svg-box violet" x="620" y="35" width="150" height="52" rx="8"/>
+            <text class="svg-text small" x="695" y="61">Cache</text>
+            <rect class="svg-box blue" x="620" y="120" width="150" height="60" rx="8"/>
+            <text class="svg-text small" x="695" y="146">KV store</text>
+            <text class="svg-text tiny" x="695" y="164">sharded + replicated</text>
+            <rect class="svg-box rose" x="620" y="230" width="150" height="52" rx="8"/>
+            <text class="svg-text small" x="695" y="256">Queue / stream</text>
+            <rect class="svg-box strong" x="800" y="230" width="80" height="52" rx="8"/>
+            <text class="svg-text tiny" x="840" y="256">Workers</text>
+            <path class="svg-line" d="M140 150 L190 150"/>
+            <path class="svg-line" d="M340 150 L390 150"/>
+            <path class="svg-line teal" d="M560 138 C590 138 600 70 620 70"/>
+            <path class="svg-line blue" d="M560 155 L620 150"/>
+            <path class="svg-line rose dashed" d="M560 175 C590 175 600 256 620 256"/>
+            <path class="svg-line rose" d="M770 256 L800 256"/>
+            <text class="svg-label" x="585" y="110">read</text>
+            <text class="svg-label" x="585" y="190">click event</text>
+          </svg>
+          <figcaption>Every component maps to a requirement: cache for read traffic, KV store for short-code lookups, sharding for growth, replication for availability, queue for analytics.</figcaption>
+        </figure>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Requirement</th><th>Decision</th></tr></thead>
+          <tbody>
+            <tr><td>High read traffic</td><td>Cache popular short codes</td></tr>
+            <tr><td>Simple key-based lookup</td><td>Key-value store</td></tr>
+            <tr><td>Growing traffic</td><td>Stateless app servers + load balancer</td></tr>
+            <tr><td>High availability</td><td>Replication + failover across AZs</td></tr>
+            <tr><td>Analytics need not block redirects</td><td>Queue/stream + background workers</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><strong>Interview line:</strong> “I start from the read/write ratio and the redirect latency budget, then add only the components those requirements justify.”</div>
+      </section>
+
+      <section class="section-block" id="takeaways">
+        <h2><span class="n">13</span>Key takeaways</h2>
+        <ul>
+          <li><strong>Requirements first:</strong> users, QPS, read/write mix, data size, latency, availability, consistency.</li>
+          <li><strong>Components earn their place:</strong> each one should solve a named bottleneck or risk.</li>
+          <li><strong>Explain the trade-off:</strong> what improves, what gets worse, what becomes operationally harder.</li>
+          <li><strong>Design for failure:</strong> identify single points of failure and what happens when they fail.</li>
+          <li><strong>Prefer the simpler design</strong> until the requirement clearly demands more.</li>
+          <li><strong>Use numbers</strong> for scale, but do not invent precise benchmarks you cannot defend.</li>
+        </ul>
+        <div class="note"><strong>The one sentence to remember:</strong> “I choose building blocks from requirements, and I defend them with trade-offs — not from a list of popular technologies.”</div>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul>
+          <li><strong>Vertical vs horizontal:</strong> simplicity and no distributed state vs capacity ceiling and single failure domain; horizontal adds coordination and operational cost.</li>
+          <li><strong>L4 vs L7:</strong> protocol-agnostic efficiency vs HTTP-aware routing, TLS termination, and header decisions.</li>
+          <li><strong>Synchronous vs asynchronous replication:</strong> durability and consistency vs write latency and availability when followers are slow.</li>
+          <li><strong>Cache invalidation vs TTL:</strong> fresher data and more write-path complexity vs simpler operations and bounded staleness.</li>
+          <li><strong>Index:</strong> faster reads and range scans vs storage and write amplification.</li>
+          <li><strong>Replication vs sharding:</strong> read scale and failover vs write/storage scale; sharding makes cross-shard queries expensive.</li>
+          <li><strong>Object storage + CDN:</strong> scalable, cheap delivery vs weaker transactional semantics and possible staleness.</li>
+          <li><strong>Async processing:</strong> responsiveness and spike absorption vs eventual completion, duplicates, and operational complexity.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="checklist">
+        <h2><span class="n">✓</span>Interview checklist</h2>
+        <ol>
+          <li>Restate the requirement and the constraint that creates pressure.</li>
+          <li>Name the concept only after you explain the problem it solves.</li>
+          <li>Describe the mechanism in one or two sentences.</li>
+          <li>State the trade-off and the failure mode.</li>
+          <li>Say what you would monitor or test.</li>
+          <li>Say when you would <em>not</em> use it.</li>
+        </ol>
+        <div class="note"><strong>Next:</strong> the interview-question page will rank questions by the probability they are asked to a 3–5 year experience candidate, and will skip the low-signal trivia.</div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps">
+          <ul>
+            <li>Naming a concept before the requirement that justifies it.</li>
+            <li>Sharding before indexes, caching, and read replicas.</li>
+            <li>Caching without an invalidation or TTL policy.</li>
+            <li>Calling a tier stateless while keeping sessions on individual servers.</li>
+            <li>Adding replicas and claiming strong consistency without handling lag.</li>
+            <li>Making the load balancer a single point of failure.</li>
+            <li>Assuming the remaining availability zone has enough capacity after a failure.</li>
+            <li>Adding a queue without idempotency, retries, and a dead-letter path.</li>
+            <li>Forgetting cross-shard queries, joins, and transactions.</li>
+            <li>Using a cache key that omits an input that changes the response.</li>
+          </ul>
+        </div>
+      </section>
+
+      <nav class="page-nav">
+        <a class="prev" href="diagramming-tips.html"><span>← Previous</span><strong>Diagramming Tips</strong></a>
+        <a class="next" href="../networking-concepts.html"><span>Next →</span><strong>Networking Concepts</strong></a>
+      </nav>
+
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/concepts">AlgoMaster — System Design Interviews: Core Building Blocks</a>. Notes are a structured revision summary; exact product-specific details should be verified against the lesson.</p>
+        <p><strong>Course:</strong> interview-oriented concepts · 13 sections · diagrams redrawn for offline review. <a href="index.html">All concept pages →</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

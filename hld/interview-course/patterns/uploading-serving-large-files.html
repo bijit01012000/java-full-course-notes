@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uploading and Serving Large Files — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 07 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Uploading and Serving Large Files</h1>
+    <p class="dek">Interview Patterns · Delivering Content</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/handling-large-files">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: files are far larger than API requests</a>
+<a href="#s2">Where this pattern shows up</a>
+<a href="#s3">Why large files are hard</a>
+<a href="#s4">The core move: keep bytes off the application tier</a>
+<a href="#s5">Presigned URLs in detail</a>
+<a href="#s6">Multipart and resumable uploads</a>
+<a href="#s7">Tracking upload state and integrity</a>
+<a href="#s8">Asynchronous post-processing</a>
+<a href="#s9">Serving downloads through a CDN</a>
+<a href="#s10">Range requests and partial delivery</a>
+<a href="#s11">Security and access control</a>
+<a href="#s12">Cost, lifecycle, and storage layout</a>
+<a href="#s13">Failure modes, monitoring, and interview framing</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Large files should not flow through the application tier: upload directly to <strong>object storage</strong> with short-lived credentials, transfer in resumable parts, and serve through a <strong>CDN</strong> with range support.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Object storage</dt><dd>A service that stores opaque blobs by key, scales horizontally, and serves them over HTTP, such as Amazon S3.</dd></div><div class="term"><dt>Presigned URL</dt><dd>A time-limited URL signed by the backend that lets a client upload or download directly from object storage.</dd></div><div class="term"><dt>Multipart upload</dt><dd>Splitting a large file into parts that are uploaded independently and assembled by the storage service.</dd></div><div class="term"><dt>Resumable upload</dt><dd>An upload that can continue from the last acknowledged offset after a network failure instead of restarting.</dd></div><div class="term"><dt>Checksum</dt><dd>A hash of the file or part used to detect corruption and verify that what was stored matches what was sent.</dd></div><div class="term"><dt>CDN</dt><dd>A geographically distributed cache that serves file bytes from a location near the viewer and shields origin storage.</dd></div><div class="term"><dt>Range request</dt><dd>An HTTP request for a byte range of a file, enabling seeking, partial downloads, and parallel fetching.</dd></div><div class="term"><dt>Signed URL</dt><dd>A URL carrying a time-limited signature that authorizes access to a private object without exposing credentials.</dd></div><div class="term"><dt>Transcode</dt><dd>Converting media into other formats, resolutions, or bitrates as part of post-upload processing.</dd></div><div class="term"><dt>Lifecycle policy</dt><dd>Rules that move, expire, or delete objects automatically based on age or storage class.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: files are far larger than API requests</h2>
+<p class="lede">A typical API request carries a few kilobytes of JSON. A video, backup, or design file can be hundreds of megabytes or several gigabytes.</p>
+<ul><li>Sending the file through the same application servers that handle API traffic ties up those servers for the entire transfer.</li><li>Upload duration is dominated by the client's network, so a slow or unstable connection can hold resources for minutes.</li><li>The larger the transfer, the more likely it is to fail partway and have to start over.</li><li>Download traffic has the same shape: serving bytes from application servers competes with request processing.</li><li>The file itself is usually immutable, which makes it a poor fit for a relational row or a normal request body.</li><li>The design goal is to move bytes on a path optimized for bytes and keep application logic on the metadata path.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Where this pattern shows up</h2>
+<ul><li><strong>Cloud drives</strong> (Dropbox, Google Drive): users upload and sync files that can be several gigabytes.</li><li><strong>Video platforms</strong> (YouTube): creators upload large source videos that must be processed and served to many viewers.</li><li><strong>Messaging</strong> (WhatsApp, Instagram): photos and videos sent over slow or unstable mobile networks.</li><li><strong>Object storage itself</strong> (Amazon S3): the whole service is built around storing and serving files of any size.</li><li><strong>Backups, logs, and data exports</strong>: large archives produced and downloaded on a schedule.</li><li><strong>Design and CAD tools</strong>: large binary documents that are opened, edited, and re-uploaded.</li><li>In each case the hard parts are transfer reliability, integrity, and delivery cost, not the business logic.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Problem</th><th>Why files get large</th><th>Dominant concern</th></tr></thead><tbody><tr><td>Design Dropbox or Google Drive</td><td>Files can be several gigabytes</td><td>Resumable sync and integrity</td></tr>
+<tr><td>Design YouTube</td><td>Source videos are large and must be processed</td><td>Upload, transcode, and delivery</td></tr>
+<tr><td>Design WhatsApp or Instagram</td><td>Media sent over weak mobile networks</td><td>Retries and bandwidth</td></tr>
+<tr><td>Object storage (S3)</td><td>Storing and serving files of any size</td><td>Durability, scale, and cost</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Why large files are hard</h2>
+<ul><li><strong>Memory:</strong> buffering a whole file in the application process can exhaust memory and trigger restarts under concurrency.</li><li><strong>Time:</strong> long requests exceed gateway and load-balancer timeouts, producing failures that look like client errors.</li><li><strong>Retries:</strong> a dropped connection near the end forces a full restart unless the transfer is chunked and resumable.</li><li><strong>Slow clients:</strong> a few slow uploads can occupy worker slots and connections that should serve many small requests.</li><li><strong>Proxies and limits:</strong> request-size limits, buffering proxies, and idle timeouts interfere with long transfers.</li><li><strong>Integrity:</strong> partial writes and truncated transfers must be detected, or corrupt files enter storage silently.</li><li><strong>Cost:</strong> bandwidth through application servers is more expensive and less cacheable than object storage plus a CDN.</li><li>These problems compound: a design that fixes memory but not retries still fails on mobile networks.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The core move: keep bytes off the application tier</h2>
+<p class="lede">The backend authorizes the transfer and records metadata; the client talks directly to storage for the bytes.</p>
+<ul><li>The client asks the API for permission to upload a file and describes its size, type, and name.</li><li>The API authenticates the user, checks quotas and permissions, and returns a <strong>presigned URL</strong> or temporary credentials.</li><li>The client sends the file bytes directly to object storage, bypassing application servers entirely.</li><li>Storage returns an identifier or ETag that the client reports back to the API.</li><li>The API verifies the object exists and matches expectations, then records the file in its metadata store.</li><li>Application servers now handle only small JSON requests, so their capacity is no longer tied to file size.</li><li>The same pattern in reverse serves downloads: the API authorizes, and the client fetches bytes from storage or a CDN.</li></ul>
+
+<div class="flow"><span class="flow-step">Client requests upload</span><span class="flow-arrow">→</span><span class="flow-step">API checks auth and quota</span><span class="flow-arrow">→</span><span class="flow-step">API returns presigned URL</span><span class="flow-arrow">→</span><span class="flow-step">Client uploads to object storage</span><span class="flow-arrow">→</span><span class="flow-step">Client reports completion</span><span class="flow-arrow">→</span><span class="flow-step">API verifies and saves metadata</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Presigned URLs in detail</h2>
+<ul><li>A presigned URL embeds the operation, object key, expiry, and a signature, so storage can authorize the request without calling the API.</li><li>Scope the signature tightly: a specific key, a specific method, a short expiry, and a maximum size where supported.</li><li>The key should be generated by the server, not chosen by the client, to prevent overwriting another user's object.</li><li>Include content-type and checksum constraints when the storage service supports them, so the client cannot substitute a different payload.</li><li>Never expose long-lived storage credentials to a browser or mobile app; short-lived scoped URLs are the substitute.</li><li>If the upload must be validated before it is visible, write to a quarantine prefix and promote after processing.</li><li>Presigned URLs also work for downloads, which keeps private objects private while allowing direct CDN or storage access.</li></ul>
+
+
+<div class="note">The URL is a bearer capability: anyone who obtains it before expiry can use it. Keep expiries short and avoid logging full URLs.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Multipart and resumable uploads</h2>
+<p class="lede">For large files, a single PUT is fragile. Split the file into parts that can be retried independently.</p>
+<ul><li>The client initiates a multipart upload and receives an upload id from storage.</li><li>It splits the file into fixed-size parts and uploads them, potentially in parallel to use available bandwidth.</li><li>Each part is acknowledged separately, so only failed parts are retried.</li><li>The client completes the upload with the list of part numbers and ETags, and storage assembles the object.</li><li>Resumability requires server-side or client-side <strong>upload state</strong>: which parts succeeded and where to continue.</li><li>Parts can be uploaded in any order, but assembly order is defined by part number, not arrival time.</li><li>Abandoned multipart uploads leave orphaned parts that cost money until aborted, so they need cleanup.</li><li>For very large files, parallelism must be bounded so the client does not saturate its own uplink or storage throughput.</li></ul>
+
+<div class="flow"><span class="flow-step">Initiate multipart upload</span><span class="flow-arrow">→</span><span class="flow-step">Receive upload id</span><span class="flow-arrow">→</span><span class="flow-step">Upload parts in parallel</span><span class="flow-arrow">→</span><span class="flow-step">Retry failed parts only</span><span class="flow-arrow">→</span><span class="flow-step">Complete with part list</span><span class="flow-arrow">→</span><span class="flow-step">Storage assembles object</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Tracking upload state and integrity</h2>
+<ul><li>Persist an upload session with file id, owner, expected size, parts completed, and expiry.</li><li>The client can query the session after a crash and resume from the last acknowledged part.</li><li>Use a <strong>checksum</strong> per part and for the whole file so corruption is detected before the object is accepted.</li><li>Compare the stored size and checksum against what the client declared; reject mismatches rather than trusting the client.</li><li>Mark the file as pending until verification and processing finish, so readers never see a partial object.</li><li>Upload sessions need a TTL and a cleanup job; otherwise abandoned uploads accumulate in storage and metadata.</li><li>Idempotency matters: a retried completion call should not create a second file record for the same object.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Asynchronous post-processing</h2>
+<p class="lede">Once bytes are stored, expensive work should happen in the background, not in the upload request.</p>
+<ul><li>The upload completion event enqueues a processing job and returns immediately to the client.</li><li>Processing may include virus scanning, format validation, thumbnails, metadata extraction, or <strong>transcoding</strong>.</li><li>Workers read from storage, write derived artifacts back to storage, and update the metadata record.</li><li>The file stays in a pending state until processing succeeds, and the client polls or subscribes for status.</li><li>Failures are retried with backoff and eventually moved to a dead-letter queue for inspection.</li><li>Processing is idempotent by object key and version, so a retry overwrites derived artifacts rather than duplicating them.</li><li>Heavy processing should be isolated from upload handling; otherwise a backlog delays user-visible completion.</li></ul>
+
+<div class="flow"><span class="flow-step">Upload completes</span><span class="flow-arrow">→</span><span class="flow-step">Emit event</span><span class="flow-arrow">→</span><span class="flow-step">Queue processing job</span><span class="flow-arrow">→</span><span class="flow-step">Scan and validate</span><span class="flow-arrow">→</span><span class="flow-step">Derive variants</span><span class="flow-arrow">→</span><span class="flow-step">Mark file ready</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Serving downloads through a CDN</h2>
+<ul><li>Serve file bytes from a <strong>CDN</strong> backed by object storage, not from application servers.</li><li>The CDN caches popular objects at edge locations, reducing latency and origin egress.</li><li>Use signed CDN URLs or signed cookies so only authorized users can fetch private objects.</li><li>Set cache-control deliberately: immutable content can be cached for a long time, while private content should not be cached publicly.</li><li>Use versioned or content-addressed keys so a changed file gets a new URL and caches never serve stale bytes.</li><li>The origin should be protected from cache misses and abusive clients by rate limits and request collapsing.</li><li>For very large audiences, most requests should be served from edge caches, with origin traffic a small fraction of total.</li></ul>
+
+<div class="flow"><span class="flow-step">Viewer requests file</span><span class="flow-arrow">→</span><span class="flow-step">CDN edge cache hit?</span><span class="flow-arrow">→</span><span class="flow-step">Yes: serve bytes</span><span class="flow-arrow">→</span><span class="flow-step">No: fetch from object storage</span><span class="flow-arrow">→</span><span class="flow-step">Cache at edge</span><span class="flow-arrow">→</span><span class="flow-step">Serve and bill egress</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Range requests and partial delivery</h2>
+<ul><li>HTTP <strong>range requests</strong> let a client fetch a byte range instead of the whole object.</li><li>This enables video seeking, resumable downloads, and parallel downloads of different ranges.</li><li>The server responds with a partial-content status and the requested range, and advertises range support.</li><li>CDNs and object storage support ranges natively, which is another reason not to proxy bytes through the app.</li><li>Range support must respect authorization: a signed URL should not let a client enumerate the whole object beyond its permission.</li><li>For media, ranges are the basis of segment-based streaming, where the player fetches small chunks rather than one huge file.</li><li>Incorrect range handling produces confusing player errors and broken resume behavior.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Security and access control</h2>
+<ul><li>Authorize every upload and download against the user's rights to that specific file, not just to the service.</li><li>Keep buckets private by default; public access should be an explicit, reviewed decision.</li><li>Validate content type and extension, and scan untrusted uploads before serving them to other users.</li><li>Prevent path traversal and key collisions by generating keys server-side from ids.</li><li>Short-lived signed URLs limit the damage of a leaked link but do not replace authorization checks at issuance.</li><li>Log access to sensitive files and support revocation, especially for shared links.</li><li>Encrypt at rest and in transit, and consider per-tenant keys where isolation is a requirement.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Cost, lifecycle, and storage layout</h2>
+<ul><li>Storage cost grows with every version and derived artifact, so define what must be retained.</li><li>Use <strong>lifecycle policies</strong> to move cold objects to cheaper tiers and expire temporary uploads.</li><li>Content-addressed keys deduplicate identical files and make caching and integrity checks natural.</li><li>Derived artifacts such as thumbnails and transcoded renditions can dwarf the original in count.</li><li>Egress is often the largest cost for media-heavy products, which is why CDN caching and range delivery matter.</li><li>Delete or abort incomplete multipart uploads; orphaned parts are invisible but billable.</li><li>Quotas and per-user limits prevent a single account from consuming unbounded storage.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Failure modes, monitoring, and interview framing</h2>
+<ul><li>Partial uploads must never become visible; gate visibility on verification and processing state.</li><li>Stalled transfers need timeouts and resumable sessions, not silent retries from zero.</li><li>Checksum mismatches should fail closed and be recorded, since they indicate corruption or tampering.</li><li>Processing backlogs delay availability, so track queue depth and time from upload to ready.</li><li>CDN misconfiguration can leak private objects or serve stale versions; test cache and signing behavior.</li><li>Monitor upload success rate by network type, p99 time to ready, origin egress ratio, and storage growth.</li><li>Interview flow: separate metadata from bytes, authorize with presigned URLs, use multipart and resume, process asynchronously, serve via CDN with ranges, then cover security and cost.</li></ul>
+
+<div class="flow"><span class="flow-step">Authorize</span><span class="flow-arrow">→</span><span class="flow-step">Upload in parts</span><span class="flow-arrow">→</span><span class="flow-step">Verify checksum</span><span class="flow-arrow">→</span><span class="flow-step">Process asynchronously</span><span class="flow-arrow">→</span><span class="flow-step">Publish</span><span class="flow-arrow">→</span><span class="flow-step">Serve via CDN</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Direct-to-storage uploads</strong> remove file size from application capacity, but add a two-step flow and require careful key and permission design.</li><li><strong>Presigned URLs</strong> avoid exposing credentials, but act as bearer tokens that anyone holding the link can use until expiry.</li><li><strong>Multipart uploads</strong> improve resilience and parallelism, but add session state, part bookkeeping, and orphan cleanup.</li><li><strong>Resumable sessions</strong> survive flaky networks, but require persistent upload state and idempotent completion.</li><li><strong>Asynchronous processing</strong> keeps uploads fast, but the file is temporarily unavailable and the pipeline needs retries and monitoring.</li><li><strong>CDN delivery</strong> cuts latency and origin load, but adds cost, cache invalidation concerns, and signing complexity.</li><li><strong>Range requests</strong> enable seeking and resume, but complicate authorization and byte-range correctness.</li><li><strong>Keeping originals plus derived variants</strong> improves flexibility, but multiplies storage and lifecycle management work.</li><li><strong>Private buckets with signed access</strong> are safer, but every consumer, including the CDN, must participate in signing.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why not upload large files through the application servers?</summary><div class="answer"><p>It ties up memory, worker slots, and connections for the duration of a slow transfer, hits gateway timeouts, and makes retries expensive. Moving bytes directly to object storage keeps application capacity independent of file size.</p></div></details>
+<details><summary>2. How does a presigned URL work?</summary><div class="answer"><p>The backend signs a URL that grants a specific operation on a specific object for a short time. The client uses it to talk to storage directly, so credentials never reach the client and the app tier never sees the bytes.</p></div></details>
+<details><summary>3. What do you scope in a presigned upload URL?</summary><div class="answer"><p>The object key, the allowed method, a short expiry, and where supported the content type and size. The server generates the key so a client cannot overwrite another user's object.</p></div></details>
+<details><summary>4. How do you make a large upload resumable?</summary><div class="answer"><p>Split the file into parts, track which parts succeeded in an upload session, and resume from the last acknowledged part. Only failed parts are retried, and completion is idempotent.</p></div></details>
+<details><summary>5. Why use multipart upload instead of one PUT?</summary><div class="answer"><p>A single request must restart from zero on failure and cannot use bandwidth in parallel. Multipart uploads retry only failed parts, can upload in parallel, and let storage assemble the object.</p></div></details>
+<details><summary>6. How do you verify file integrity?</summary><div class="answer"><p>Send a checksum per part and for the whole file, store it with the metadata, and compare after upload. Reject mismatches and never mark the file ready until verification passes.</p></div></details>
+<details><summary>7. What happens after the bytes are uploaded?</summary><div class="answer"><p>The completion event enqueues asynchronous work such as scanning, validation, thumbnails, and transcoding. The file stays pending until processing succeeds, and the client polls or subscribes for status.</p></div></details>
+<details><summary>8. How do you serve downloads at scale?</summary><div class="answer"><p>Authorize the user, then serve bytes from a CDN backed by object storage using signed URLs. Immutable, versioned keys maximize cache hits and avoid stale content.</p></div></details>
+<details><summary>9. What are range requests used for?</summary><div class="answer"><p>Fetching part of a file: video seeking, resumable downloads, and parallel downloads. They require correct partial-content responses and careful authorization.</p></div></details>
+<details><summary>10. How do you keep private files private?</summary><div class="answer"><p>Keep buckets private, authorize each request against the specific file, issue short-lived signed URLs, validate and scan untrusted content, and log access to sensitive objects.</p></div></details>
+<details><summary>11. How do you control storage cost?</summary><div class="answer"><p>Cap feed and version retention, use lifecycle policies to tier or expire objects, abort incomplete multipart uploads, deduplicate by content hash, and watch egress, which often dominates for media.</p></div></details>
+<details><summary>12. What would you monitor?</summary><div class="answer"><p>Upload success rate by network type, time from upload to ready, processing queue depth, checksum failures, CDN hit ratio, origin egress, and storage growth per tenant.</p></div></details>
+<details><summary>13. How do you avoid showing a partially uploaded file?</summary><div class="answer"><p>Keep the object in a pending or quarantine state, verify size and checksum, finish processing, and only then mark it ready and expose it to readers.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Proxying file bytes through the application tier and then wondering why memory and timeouts spike.</li><li>Letting the client choose the object key, which enables overwriting another user's file.</li><li>Issuing presigned URLs with long expiries or broad permissions.</li><li>Treating a single large PUT as reliable on mobile networks.</li><li>Forgetting to track upload state, so every failure restarts from byte zero.</li><li>Marking a file ready before checksum verification and processing complete.</li><li>Leaving abandoned multipart uploads to accumulate invisible storage cost.</li><li>Caching private objects publicly or using unversioned keys that serve stale bytes.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="fanning-out-updates.html"><span>← Previous</span><strong>Fanning Out Updates</strong></a><a class="next" href="streaming-video-audio.html"><span>Next →</span><strong>Streaming Video and Audio</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/handling-large-files">AlgoMaster — Uploading and Serving Large Files</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

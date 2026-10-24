@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Batch vs Stream Processing — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 35 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Batch vs Stream Processing</h1>
+    <p class="dek">Big Data Processing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/batch-vs-stream-processing">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Two teams, same data, different latency</a>
+<a href="#s2">Batch processing: bounded data</a>
+<a href="#s3">Inside a batch job</a>
+<a href="#s4">Why batch works, and where it stops</a>
+<a href="#s5">Stream processing: unbounded data</a>
+<a href="#s6">The streaming pipeline</a>
+<a href="#s7">Windowing</a>
+<a href="#s8">Event time, processing time, and late data</a>
+<a href="#s9">Watermarks and late-event strategies</a>
+<a href="#s10">State, checkpoints, and recovery</a>
+<a href="#s11">Processing guarantees and idempotency</a>
+<a href="#s12">Micro-batching</a>
+<a href="#s13">Side-by-side comparison</a>
+<a href="#s14">Lambda, Kappa, and how to choose</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Batch processing runs finite jobs over bounded data for throughput and exact reprocessing; stream processing runs forever over unbounded events for low latency, at the cost of windows, watermarks, state, and delivery guarantees.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Bounded data</dt><dd>A dataset with a clear beginning and end, such as one day of orders or a table snapshot; batch jobs process it as a finite input.</dd></div><div class="term"><dt>Unbounded data</dt><dd>A continuous flow of events with no final record, such as clicks, transactions, or sensor readings; stream processors handle it as it arrives.</dd></div><div class="term"><dt>Batch processing</dt><dd>Collecting data over a period and processing it together in a scheduled job that finishes when the input is consumed.</dd></div><div class="term"><dt>Stream processing</dt><dd>Processing each event shortly after it is produced, in a job that runs continuously.</dd></div><div class="term"><dt>Windowing</dt><dd>Splitting an endless stream into finite groups — tumbling, sliding, or session — so aggregations can produce a result.</dd></div><div class="term"><dt>Event time</dt><dd>The timestamp when an event actually happened, which determines the correct analytical window.</dd></div><div class="term"><dt>Processing time</dt><dd>The timestamp when the processor handles an event; simpler and fresher, but it misplaces delayed events.</dd></div><div class="term"><dt>Watermark</dt><dd>An estimate of how far event time has progressed, used to decide when a window is complete enough to emit.</dd></div><div class="term"><dt>Checkpoint</dt><dd>A durable snapshot of processor state plus the corresponding stream position, used to recover without losing or double-counting events.</dd></div><div class="term"><dt>Lambda / Kappa</dt><dd>Two ways to combine fast and historical results: Lambda runs separate batch and speed layers, while Kappa replays one streaming pipeline over a retained log.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Two teams, same data, different latency</h2>
+<p class="lede">An e-commerce platform records an event for every order. Finance and fraud both use those events, but they need answers on very different clocks.</p>
+<ul><li>Finance wants yesterday's revenue by product category; an hour of processing overnight is acceptable.</li><li>Fraud wants to flag a suspicious order before payment is approved; an hour later, the payment has cleared and the order may have shipped.</li><li>The data is the same; the requirement that differs is <strong>how fresh the result must be</strong>.</li><li>Latency requirements drive the architecture more than data volume does.</li><li>Neither approach is universally better; each fits a different class of question.</li><li>Most large systems end up using both rather than choosing one forever.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Batch processing: bounded data</h2>
+<ul><li>Batch processing collects data over a period and processes it together as one job.</li><li>It works on <strong>bounded data</strong>: the input has a known beginning and end, such as one day of orders.</li><li>A nightly job reads the previous day's orders, groups them by category, and writes totals to a reporting table.</li><li>When the input is consumed, the job finishes; the next run handles the next period.</li><li>Because the full dataset is available, the job can sort, join large tables, scan repeatedly, and compute exact totals.</li><li>It can also validate output before publishing, which is hard when results are emitted continuously.</li><li>Common tools include Apache Spark, SQL engines such as Hive, Trino, and Presto, dbt, and managed data warehouses.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Inside a batch job</h2>
+<ul><li>Collection happens beforehand: the application writes events to object storage or a warehouse table throughout the day.</li><li>A scheduler starts the job at a fixed time, or an orchestrator starts it when upstream data is ready.</li><li>The job reads the input and splits it across machines, each processing a portion in parallel.</li><li>Partial results are combined — shuffled and reduced — into the final aggregate.</li><li>The output is written to a reporting table or another destination, and the job ends.</li><li>The startup cost of the cluster is spread across the whole dataset, which is why throughput is high.</li><li>A common safe-write pattern is to replace an entire output partition rather than append rows, so a rerun cannot duplicate data.</li></ul>
+
+<div class="flow"><span class="flow-step">Collect events into storage</span><span class="flow-arrow">→</span><span class="flow-step">Scheduler starts the job</span><span class="flow-arrow">→</span><span class="flow-step">Read and split the input</span><span class="flow-arrow">→</span><span class="flow-step">Process partitions in parallel</span><span class="flow-arrow">→</span><span class="flow-step">Combine partial results</span><span class="flow-arrow">→</span><span class="flow-step">Write output and finish</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Why batch works, and where it stops</h2>
+<ul><li><strong>High throughput:</strong> sequential reads and distributed processing use resources efficiently over large inputs.</li><li><strong>Simplicity:</strong> a fixed input is easier to write, test, and reason about than an endless stream.</li><li><strong>Easy recovery:</strong> if a job fails, fix it and rerun on the same input; deterministic output makes this safe.</li><li><strong>Reprocessing:</strong> a bug in last month's revenue can be fixed by rerunning last month's job.</li><li><strong>Bursty resources:</strong> the cluster can start for the job and shut down afterward.</li><li>The limitation is latency: results are only as fresh as the last completed run.</li><li>Running the job more often helps, but each run pays scheduling, startup, read, and write overhead; tiny frequent jobs are inefficient.</li><li>Once the requirement is seconds, traditional batch stops being practical and streaming takes over.</li></ul>
+
+
+<div class="note">Batch freshness equals the job interval plus the job duration. A daily job can be nearly a day behind.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Stream processing: unbounded data</h2>
+<ul><li>Stream processing handles events continuously, shortly after they are produced.</li><li>It works on <strong>unbounded data</strong>: there is no final record, and new events can arrive indefinitely.</li><li>The job runs continuously rather than finishing after a fixed dataset.</li><li>Fraud checks can run as each order arrives, before payment is approved.</li><li>Latency is typically milliseconds to seconds, which is the main reason to accept the extra complexity.</li><li>State is often required for counts, windows, joins, deduplication, and pattern detection.</li><li>Recovery is harder than batch: the processor must restore state and resume from the right stream position.</li><li>Common workloads include fraud detection, monitoring and alerting, live dashboards, recommendations, tracking, and change data capture.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>The streaming pipeline</h2>
+<ul><li><strong>Producers</strong> create events: application servers, mobile apps, and IoT devices.</li><li>A durable <strong>event log or broker</strong> such as Kafka receives and retains events in partitions.</li><li>Consumers read at their own pace; a restart or lag does not destroy the events.</li><li>A <strong>stream processor</strong> continuously reads, filters, enriches, aggregates, and detects conditions.</li><li>Results go to another topic, a database, a cache, or a notification service.</li><li>Flink suits low-latency stateful pipelines that depend on event time.</li><li>Kafka Streams suits services already close to Kafka, especially Kafka-to-Kafka transformations.</li><li>Spark Structured Streaming suits teams already using Spark that want to share logic between batch and streaming.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Windowing</h2>
+<p class="lede">An endless stream has no point at which every event has arrived, so an aggregation must be given finite boundaries. A window is that boundary.</p>
+<ul><li>In batch, the input boundary is implicit; in streaming, the query must state how to split the stream.</li><li>The window choice changes the meaning of the result: a five-minute error rate and an hourly error count answer different questions.</li><li>Derive the window from the requirement, not from what is convenient to implement.</li><li>Small windows give fresher results but more output volume and more partial state.</li><li>Large windows are cheaper per event but delay every result.</li><li>Session windows need a timeout and per-key state, so they are usually the most expensive.</li><li>Windows are the foundation for joins and alerts that compare recent behavior to a baseline.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Window</th><th>Shape</th><th>Example use</th></tr></thead><tbody><tr><td>Tumbling</td><td>Fixed, non-overlapping intervals; each event belongs to one</td><td>Orders per minute</td></tr>
+<tr><td>Sliding</td><td>Overlapping intervals evaluated on a schedule; an event can appear in many</td><td>Five-minute order count, updated every 10 seconds</td></tr>
+<tr><td>Session</td><td>Grouped by activity with a gap; no fixed length</td><td>A user session ending after 30 minutes idle</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Event time, processing time, and late data</h2>
+<ul><li><strong>Event time</strong> is when the event actually happened; <strong>processing time</strong> is when the processor handles it.</li><li>Ingestion time, when the event entered the platform, is a third option some systems track.</li><li>Usually they are close, but network delay can separate them significantly.</li><li>A phone in a tunnel can produce an order at 12:01 that reaches the processor at 12:06.</li><li>Processing time would count it in the 12:06 window; event time puts it in the 12:01 window.</li><li>Analytics and billing usually want event time, because the event belongs to the period when it happened.</li><li>Operational alerts may accept processing time, because freshness matters more than exact placement.</li><li>The cost of event time is <strong>late-arriving data</strong>: the target window may already have emitted its result.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Clock</th><th>Meaning</th><th>Best for</th></tr></thead><tbody><tr><td>Event time</td><td>When the event occurred</td><td>Billing, analytics, correctness</td></tr>
+<tr><td>Processing time</td><td>When the processor handled it</td><td>Fresh operational alerts</td></tr>
+<tr><td>Ingestion time</td><td>When it entered the platform</td><td>Approximation when event timestamps are unreliable</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Watermarks and late-event strategies</h2>
+<ul><li>A <strong>watermark</strong> estimates how far event time has progressed; it says most events before that point have arrived.</li><li>When the watermark passes a window's end, the processor can emit that window's result.</li><li>A watermark is an estimate, not a guarantee; some events can still arrive after it.</li><li>Aggressive watermarks emit faster but leave more events late; conservative watermarks wait longer for more complete results.</li><li>Late events can be dropped when the window state is gone — cheap and simple, but the published result stays wrong.</li><li>They can update the result if the engine keeps state for an <strong>allowed lateness</strong> period; downstream must accept corrections.</li><li>A more conservative watermark can wait longer and include the event the first time, at the cost of latency for every window.</li><li>The event can be sent to a side output and handled by a separate correction path, keeping the main pipeline simple.</li></ul>
+
+
+<div class="note">Dropping late data is a correctness decision, not just an implementation detail. Decide it with the consumer of the result.</div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>State, checkpoints, and recovery</h2>
+<ul><li>Stateless work such as filtering needs only the current event; most interesting streaming work needs memory of the past.</li><li>Running counters, active windows, and recent transaction histories are all <strong>state</strong>.</li><li>A fraud rule that detects a card used in three countries within ten minutes must remember that card's recent events.</li><li>Streaming jobs run for months, so a crash cannot mean starting the count from zero.</li><li>Engines periodically snapshot state to durable storage; each <strong>checkpoint</strong> also records the matching stream position, such as a Kafka offset.</li><li>After a failure, the processor restores the latest checkpoint and resumes from the recorded position.</li><li>State and position must be saved together; mismatching them causes skipped or double-counted events.</li><li>State must be partitioned to scale and expired so it does not grow forever — a ten-minute rule needs ten minutes of history.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Processing guarantees and idempotency</h2>
+<ul><li>Events read after the last checkpoint are read again after recovery, which creates duplicates unless handled.</li><li>At-least-once plus idempotent writes is the usual practical design.</li><li>Exactly-once usually covers state inside the engine and sometimes supported sinks; it cannot make every external API exactly-once.</li><li>A job that calls a payment gateway or sends email still needs idempotency keys, deduplication, or compensation.</li><li>Ask what a downstream system can observe if the job crashes after processing but before writing output.</li><li>Transactional sinks or two-phase writes help, but they narrow the set of supported destinations.</li><li>Guarantees should be stated per input and output, not as a blanket property of the platform.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Guarantee</th><th>Behavior</th><th>Risk</th></tr></thead><tbody><tr><td>At-most-once</td><td>Each event processed zero or one time</td><td>Events can be lost</td></tr>
+<tr><td>At-least-once</td><td>No event is lost; some are processed more than once</td><td>Duplicates</td></tr>
+<tr><td>Exactly-once</td><td>Each event affects the result once for a defined set of inputs and outputs</td><td>Narrow scope, coordination cost</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Micro-batching</h2>
+<ul><li>Micro-batching collects events for a short interval, such as one second, and processes each group as a small batch.</li><li>It sits between traditional batch and continuous event-by-event processing.</li><li>Spark Structured Streaming uses this model by default.</li><li>It can reuse batch-style execution and recovery, so the engine is simpler to build and operate.</li><li>Many transformations look the same as their batch equivalents, which helps code reuse.</li><li>The cost is added latency: every event waits for its batch to be processed.</li><li>Engines such as Flink support continuous processing for lower latency.</li><li>Dashboards refreshing every few seconds or tables updating every minute are good fits for micro-batching.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Side-by-side comparison</h2>
+<ul><li>Modern engines blur the API line: Spark Structured Streaming shares the DataFrame model, and Flink handles bounded and unbounded inputs.</li><li>Sharing an API does not remove the design questions; a streaming job still needs windows, watermarks, state, and duplicate handling.</li><li>A batch job still needs scheduling, partitioning, and backfill decisions.</li><li>Resource shape differs: batch is bursty and can be cheaper when the latency requirement allows it.</li><li>Choose based on the requirement, not on which engine the team finds more interesting.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Dimension</th><th>Batch</th><th>Stream</th></tr></thead><tbody><tr><td>Data</td><td>Bounded</td><td>Unbounded</td></tr>
+<tr><td>Job lifetime</td><td>Scheduled, then finishes</td><td>Continuous</td></tr>
+<tr><td>Latency</td><td>Minutes to hours</td><td>Milliseconds to seconds</td></tr>
+<tr><td>Optimized for</td><td>Throughput</td><td>Low latency</td></tr>
+<tr><td>Resources</td><td>Start, run, shut down</td><td>Always running</td></tr>
+<tr><td>Reprocessing</td><td>Rerun on the same input</td><td>Replay the log; harder to do safely</td></tr>
+<tr><td>Debugging</td><td>Easier from a fixed input</td><td>Harder: time, state, and ordering matter</td></tr>
+<tr><td>Main difficulty</td><td>Stale results</td><td>Windows, late events, state, failures</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Lambda, Kappa, and how to choose</h2>
+<p class="lede">Large systems often need fast reactions and accurate history at the same time. Lambda and Kappa are two ways to provide both.</p>
+<ul><li><strong>Lambda</strong> runs a batch layer for accurate historical results, a speed layer for recent low-latency results, and a serving layer that combines them.</li><li>In Lambda, the next batch run replaces what the speed layer computed for that period.</li><li>Lambda's drawback is maintaining similar logic in two systems and keeping their outputs consistent.</li><li><strong>Kappa</strong> uses one streaming pipeline for both live and historical processing.</li><li>Reprocessing in Kappa means replaying stored events through a new version of the pipeline.</li><li>Kappa requires the log to retain events long enough to cover the history you may need to rebuild.</li><li>Replaying a large history can be expensive even though there is only one implementation.</li><li>Start with the simplest option that meets the latency requirement: batch for hours, streaming for seconds, micro-batching for a few seconds to minutes.</li></ul>
+
+<div class="flow"><span class="flow-step">What latency is required?</span><span class="flow-arrow">→</span><span class="flow-step">How complex is the computation?</span><span class="flow-arrow">→</span><span class="flow-step">How much operational complexity can we staff?</span><span class="flow-arrow">→</span><span class="flow-step">Choose batch, stream, micro-batch, or both</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Batch</strong> gives high throughput and easy reprocessing but results are only as fresh as the last job.</li><li><strong>Streaming</strong> gives low latency but adds windows, watermarks, state, recovery, and duplicate handling.</li><li><strong>Event time</strong> produces correct period assignment but waits for watermarks and must handle late data.</li><li><strong>Processing time</strong> is simpler and fresher but places delayed events in the wrong window.</li><li><strong>Aggressive watermarks</strong> emit quickly but drop or correct more late events; conservative watermarks are accurate but slower.</li><li><strong>Longer state retention</strong> enables corrections and richer rules but increases memory, checkpoint size, and recovery time.</li><li><strong>Micro-batching</strong> reuses batch execution and recovery but adds latency compared with continuous processing.</li><li><strong>Lambda</strong> gives fast and accurate results but duplicates logic; <strong>Kappa</strong> removes duplication but relies on long log retention and replay cost.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the core difference between batch and stream processing?</summary><div class="answer"><p>Batch processes bounded data in scheduled jobs that finish; stream processing handles unbounded events continuously as they arrive. The practical difference is latency, and the cost is the extra machinery streaming needs for windows, state, and late data.</p></div></details>
+<details><summary>2. What does bounded versus unbounded data mean?</summary><div class="answer"><p>Bounded data has a known beginning and end, such as one day of orders. Unbounded data is a continuous flow with no final record, such as clicks or sensor readings. The input shape determines whether a job can finish.</p></div></details>
+<details><summary>3. Why is batch processing easier to operate?</summary><div class="answer"><p>The input is fixed, so logic is easier to test and output can be compared with input. A failed job can be fixed and rerun on the same data, often replacing an output partition so a rerun does not duplicate rows.</p></div></details>
+<details><summary>4. What is the main limitation of batch processing?</summary><div class="answer"><p>Latency: results are only as fresh as the last completed job. Running jobs more frequently helps, but each run has scheduling and startup overhead, so traditional batch becomes inefficient at very low latency.</p></div></details>
+<details><summary>5. Why does streaming need windowing?</summary><div class="answer"><p>A stream never ends, so there is no point at which all events have arrived. A window creates a finite set — tumbling, sliding, or session — over which an aggregation can produce a result.</p></div></details>
+<details><summary>6. Compare tumbling, sliding, and session windows.</summary><div class="answer"><p>Tumbling windows are fixed and non-overlapping. Sliding windows overlap and are evaluated on a schedule, so an event can appear in several results. Session windows group activity with a gap and have no fixed length.</p></div></details>
+<details><summary>7. What is the difference between event time and processing time?</summary><div class="answer"><p>Event time is when the event occurred; processing time is when the processor handled it. Event time gives correct period assignment for billing and analytics; processing time is simpler and may be fine for fresh operational alerts.</p></div></details>
+<details><summary>8. What is a watermark?</summary><div class="answer"><p>An estimate of how far event time has progressed. When it passes a window's end, the processor emits that window's result. It is a heuristic, not a guarantee, so some late events can still arrive.</p></div></details>
+<details><summary>9. How can you handle late events?</summary><div class="answer"><p>Drop them for simplicity, update the result during an allowed-lateness period, wait longer with a conservative watermark, or route them to a side output for later correction. Each choice trades latency, completeness, and complexity.</p></div></details>
+<details><summary>10. Why is state needed in stream processing?</summary><div class="answer"><p>Many computations depend on previous events: running counts, active windows, joins, deduplication, and pattern detection. The processor must remember recent history per key, which is state.</p></div></details>
+<details><summary>11. What is a checkpoint, and why must it include the offset?</summary><div class="answer"><p>A checkpoint is a durable snapshot of processor state. It must record the matching stream position, such as a Kafka offset, so recovery restores state and resumes at the same point. Otherwise events are skipped or counted twice.</p></div></details>
+<details><summary>12. Explain at-most-once, at-least-once, and exactly-once.</summary><div class="answer"><p>At-most-once can lose events. At-least-once loses none but may duplicate. Exactly-once means each event affects the result once for a defined set of inputs and outputs, which usually requires coordination and rarely covers arbitrary external APIs.</p></div></details>
+<details><summary>13. What is micro-batching, and when is it a good fit?</summary><div class="answer"><p>Collecting events for a short interval and processing each group as a small batch. It reuses batch execution and recovery, at the cost of some latency. It fits dashboards or tables that tolerate a delay of a second or a few seconds.</p></div></details>
+<details><summary>14. Compare Lambda and Kappa architectures.</summary><div class="answer"><p>Lambda keeps a batch layer for accurate history and a speed layer for low latency, so logic is duplicated. Kappa uses one streaming pipeline and replays a retained log to reprocess history, avoiding duplication but requiring long retention and paying replay cost.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Choosing streaming for a daily report where batch would be simpler and cheaper.</li><li>Using processing time for billing, then misplacing events delayed by the network.</li><li>Assuming a watermark guarantees no more late events will arrive.</li><li>Dropping late events without agreeing with the consumer that approximate results are acceptable.</li><li>Saving state and the stream offset separately, causing skipped or double-counted events after recovery.</li><li>Claiming exactly-once end to end when the job calls an external API with side effects.</li><li>Maintaining two implementations in Lambda and letting their results diverge.</li><li>Selecting an engine by preference instead of by the required latency and the team's operational capacity.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="service-mesh.html"><span>← Previous</span><strong>Service Mesh</strong></a><a class="next" href="etl-pipelines.html"><span>Next →</span><strong>ETL Pipelines</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/batch-vs-stream-processing">AlgoMaster — Batch vs Stream Processing</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

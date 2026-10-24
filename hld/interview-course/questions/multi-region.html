@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run Across Multiple Regions — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 19 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · Reliability</span></div>
+    <h1>Run Across Multiple Regions</h1>
+    <p class="dek">Multi-region is the usual follow-up to 'make it highly available', and it forces you to reason about latency, replication, and who owns writes. Interviewers listen for a topology chosen from RPO and RTO, not a reflex answer of active-active everywhere.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">7 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Route users to the nearest healthy region, keep one writer per data partition, replicate asynchronously with a measured RPO, and fail over only with a quorum, fencing, and a rehearsed runbook.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Route each request to the nearest healthy region using GeoDNS, anycast, or a global load balancer, and move traffic away from a failed region.</li><li>Serve reads from a local replica and route writes to the partition's home region.</li><li>Replicate user data, search indexes, and object assets across regions with a stated RPO and monitored lag.</li><li>Promote a standby region or transfer home-region ownership during a regional failure, then fail back.</li><li>Keep regulated data inside its jurisdiction while exposing only derived or aggregated data globally.</li><li>Expose per-region health, replication lag, and failover state to operators.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Regional read p95 stays inside the product latency budget; a cross-region write pays the WAN round trip, so keep it off the common path.</li><li>Target RPO under one minute and RTO under fifteen minutes for a warm standby, verified by drills rather than assumed.</li><li>Survive the loss of one region with N+1 capacity at peak, including shared dependencies such as identity, DNS, and config.</li><li>Use per-data consistency: strong for money and inventory, read-your-writes for profiles, eventual for feeds and counters.</li><li>Prevent split brain with a quorum, a leader lease, and fencing so an old primary cannot accept writes after a new epoch.</li><li>Keep PII in its home region, and treat encryption keys and audit logs as data with their own residency rules.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 20M DAU and 10 requests per user per day: about 200M requests/day, roughly 2.3k average RPS and 7k peak at 3x.</li><li>Assume 5% writes: about 115 average write RPS and 350 peak, so most traffic is a read-locality problem rather than a write-scaling problem.</li><li>At 2 KB per response, 200M responses/day is about 400 GB/day of egress before replication and backups.</li><li>Assume 500 GB of hot relational data per region plus 5 TB of object assets; replicate the write stream, not full scans.</li><li>Cross-region round trips are tens to low hundreds of milliseconds depending on distance; budget the RTT explicitly instead of hiding it in a timeout.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">User</span><span class="fields">user_id, home_region, residency, locale, token_version</span></div><div class="entity"><span class="name">Region</span><span class="fields">region_id, status, endpoints, capacity_headroom, dns_weight</span></div><div class="entity"><span class="name">DataPartition</span><span class="fields">partition_id, home_region, leader_epoch, replication_lag_ms, schema_version</span></div><div class="entity"><span class="name">LeaderLease</span><span class="fields">region_id, epoch, expires_at, holder</span></div><div class="entity"><span class="name">FailoverRunbook</span><span class="fields">runbook_id, from_region, to_region, state, last_drill_at, achieved_rto</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/v1/regions</code></td><td>List regions with health, capacity, and current active or standby role.</td></tr><tr><td><code>GET</code></td><td><code>/v1/users/{id}</code></td><td>Serve a profile from the local region, with an optional consistency hint for read-your-writes.</td></tr><tr><td><code>POST</code></td><td><code>/v1/orders</code></td><td>Accept a write in the user's home region and require an Idempotency-Key for retries.</td></tr><tr><td><code>GET</code></td><td><code>/internal/v1/replication/lag</code></td><td>Report per-partition lag and the last applied log position.</td></tr><tr><td><code>POST</code></td><td><code>/internal/v1/failover</code></td><td>Promote a standby after a quorum decision, with a new fencing epoch.</td></tr><tr><td><code>GET</code></td><td><code>/internal/v1/failover/{id}</code></td><td>Show runbook state, achieved RPO and RTO, and reconciliation progress.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Write topology</td><td>Shard-per-region with a home region per user; reads are served locally</td><td>One writer per key avoids concurrent-write conflicts, and most user data is read by users near that same region.</td></tr><tr><td>Cross-region replication</td><td>Asynchronous WAL or change-stream replication; synchronous only across availability zones inside a region</td><td>Synchronous replication across an ocean adds RTT to every write and blocks when the far side is unreachable; async keeps writes local at the cost of a non-zero RPO.</td></tr><tr><td>Conflict handling</td><td>Version vectors for multi-writer fields and business-rule merge for shared records; never blind last-write-wins</td><td>Last-write-wins silently loses updates and depends on synchronized clocks, while version vectors expose concurrency so the application can decide.</td></tr><tr><td>Traffic routing</td><td>GeoDNS or a global load balancer with latency-based and failover routing, with short TTLs on failover records</td><td>Routing is simple and cache-friendly, but resolver and client caching still delay some clients, so the application must tolerate a stale route.</td></tr><tr><td>Data residency</td><td>Partition by jurisdiction and replicate only derived or aggregated data globally</td><td>This keeps PII inside the allowed geography and limits the blast radius of a cross-border replication mistake.</td></tr><tr><td>Failover authority</td><td>An external coordinator with quorum; leases and epochs stored in a strongly consistent store</td><td>A region cannot safely promote itself, and the old leader must be unable to write once a new epoch begins.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  U[📱 Users] --> R[🌍 GeoDNS + Global LB]
+  R --> A[🇺🇸 Region A Active]
+  R --> B[🇪🇺 Region B Warm Standby]
+  A --> AA[⚙️ App Tier]
+  AA --> AD[(🗄️ Primary DB)]
+  AA --> AC[⚡ Regional Cache]
+  AD -->|async WAL| BD[(🗄️ Replica DB)]
+  B --> BA[⚙️ Warm App Tier]
+  BA --> BD
+  C[🧭 Failover Controller] -->|lease + epoch| AD
+  C -->|promote| BD
+  M[📊 Lag and Health Monitor] --> C
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef service fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef data fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef ops fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class U client;
+  class R edge;
+  class A,B,AA,BA service;
+  class AD,BD,AC data;
+  class C,M ops;</div><div class="diagram-caption">Reads are served by the local region, writes land in the partition's home region, and the failover controller promotes a standby only after acquiring a new lease and fencing the old writer.</div></div>
+        <ul><li>Multi-AZ comes first: it handles most facility and hardware failures for far less complexity than a second region.</li><li>Keep request paths regional; a write that fans out to three regions multiplies latency and failure modes.</li><li>Keep the standby warm with capacity, connection pools, and caches, because an autoscaling group cannot absorb a full region instantly.</li><li>Shared dependencies such as identity, DNS, config, and third-party providers need their own regional story or the extra region does not help.</li><li>Deploy region by region and keep schema and API changes backward compatible, since a worldwide rollout is never atomic.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Active-passive warm standby</td><td>Simple single-writer data model and lower cost than running every region at full production capacity.</td><td>Idle capacity, minutes of downtime during promotion, and a non-zero RPO.</td></tr><tr><td>Active-active</td><td>Local writes and instant traffic shifting when a region fails.</td><td>Conflict resolution for every writable dataset and much harder testing and operations.</td></tr><tr><td>Asynchronous replication</td><td>Fast local writes that do not depend on far-region health.</td><td>A non-zero RPO and stale reads from regions that have not caught up.</td></tr><tr><td>Home-region ownership</td><td>Conflict-free writes and simple per-user ordering.</td><td>A migration and ownership-transfer problem when that region fails.</td></tr><tr><td>Short DNS TTLs</td><td>Faster traffic failover after a regional failure.</td><td>More DNS query volume, and clients that ignore TTL still stall regardless.</td></tr><tr><td>N+1 regional headroom</td><td>The surviving regions can carry peak traffic after losing one region.</td><td>Expensive capacity that sits idle most of the time.</td></tr><tr><td>Global strong consistency</td><td>Simple correctness reasoning for every read and write.</td><td>Cross-region coordination on the hot path and poor availability during a partition.</td></tr></tbody></table></div>
+        <ul><li>Serve reads from a local replica and use a per-user version token only when read-your-writes is required.</li><li>Keep caches regional; a global cache adds a cross-region hop and a harder invalidation problem.</li><li>Replicate the change stream in batches and compress it; avoid application-level dual writes that can diverge.</li><li>Pre-warm standby caches, runtimes, and connection pools before shifting traffic.</li><li>Use request coalescing and load shedding in the surviving region so failover traffic does not cause a second outage.</li><li>Send only critical writes across regions and leave non-critical replication asynchronous.</li><li>Track p99 latency by region and replication lag as first-class SLIs, not just aggregate availability.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why would you run a system in multiple regions?</strong> To cut latency for distant users, survive a full regional outage, meet a short RTO, or satisfy data residency; name the requirement before choosing the topology.</div><div class="followup"><strong>What is the difference between multi-AZ and multi-region?</strong> Multi-AZ survives data-center failures inside one region, while multi-region survives losing the region but adds WAN latency and a data-consistency problem.</div><div class="followup"><strong>Active-active versus active-passive?</strong> Active-active serves writes everywhere and needs conflict handling, while active-passive keeps one writer and a standby that is promoted on failure.</div><div class="followup"><strong>How do you route users to a region?</strong> Use GeoDNS, anycast, or a global load balancer with latency and failover routing, keep failover TTLs short, and accept that some clients cache longer.</div><div class="followup"><strong>What are RPO and RTO?</strong> RPO is the write window you can afford to lose and RTO is how long recovery may take; both drive the replication mode and must be measured in drills.</div><div class="followup"><strong>How do you keep data consistent across regions?</strong> Choose per data type: strong for money and inventory, read-your-writes for profiles, and eventual consistency for feeds and counters.</div><div class="followup"><strong>How do you resolve write conflicts?</strong> Avoid them with home-region ownership, otherwise detect concurrency with version vectors and merge by business rule instead of blind last-write-wins.</div><div class="followup"><strong>How do you prevent split brain during failover?</strong> Require quorum to promote, fence the old primary with a lease epoch, and reject writes from a leader that cannot prove it still holds the lease.</div><div class="followup"><strong>Why is failback harder than failover?</strong> Both regions may have accepted writes, so data must be reconciled, caches and indexes rebuilt, replication reversed, and traffic shifted gradually.</div><div class="followup"><strong>How much spare capacity does a region need?</strong> Size the surviving regions for peak plus the failed region's load, which usually means N+1 capacity that sits idle in normal operation.</div><div class="followup"><strong>When is a single region enough?</strong> When multi-AZ plus tested backups meets the availability target and users are not latency-sensitive across continents, and saying so is a strong answer.</div><div class="followup"><strong>What would you monitor in production?</strong> Per-region latency and errors, replication lag, routing health, failover readiness, and headroom for region loss, with observability that survives a region outage.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Adding a second region without deciding how writes behave when both regions are reachable.</li><li>Calling the design active-active while every write still goes to one region.</li><li>Using last-write-wins on valuable data and calling the lost update resolved.</li><li>Sizing the standby for normal load instead of the load it must carry after a failure.</li><li>Promoting a lagging replica without stating the data loss or fencing the old primary.</li><li>Ignoring global dependencies such as identity, DNS, config, and third-party APIs, or assuming DNS failover is instant despite client caching.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="distributed-transactions.html"><span>← Previous</span><strong>Distributed Transactions / SAGA</strong></a><a class="next" href="consistent-hashing.html"><span>Next →</span><strong>Consistent Hashing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

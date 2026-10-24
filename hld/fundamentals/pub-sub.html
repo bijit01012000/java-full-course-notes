@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pub/Sub — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 28 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Pub/Sub</h1>
+    <p class="dek">Asynchronous Communications · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/pub-sub">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The coupling problem</a>
+<a href="#s2">The core model</a>
+<a href="#s3">Pub/sub versus message queues</a>
+<a href="#s4">The life of a message</a>
+<a href="#s5">Fan-out and combining pub/sub with queues</a>
+<a href="#s6">Push versus pull delivery</a>
+<a href="#s7">Ephemeral, durable, and replayable pub/sub</a>
+<a href="#s8">Delivery guarantees, duplicates, and idempotency</a>
+<a href="#s9">Message ordering</a>
+<a href="#s10">Scaling subscribers</a>
+<a href="#s11">Publishing reliably: the outbox pattern</a>
+<a href="#s12">Designing events and evolving schemas</a>
+<a href="#s13">When to use pub/sub — and what it costs</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Pub/sub lets a publisher announce that something happened once, while any number of independent subscribers receive their own copy — decoupling the producer from everyone who cares.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Topic</dt><dd>A named channel for one kind of event, such as <code>OrderPlaced</code> or <code>PaymentCompleted</code>.</dd></div><div class="term"><dt>Subscription</dt><dd>The link between one subscriber and a topic; it tracks that subscriber's own progress through the stream.</dd></div><div class="term"><dt>Fan-out</dt><dd>Delivering one published message to every subscription on the topic, which is the defining behavior of pub/sub.</dd></div><div class="term"><dt>Consumer group</dt><dd>A set of workers that share one subscription's work; every group sees every event, but each event goes to only one worker inside a group.</dd></div><div class="term"><dt>Offset</dt><dd>A consumer group's recorded position in a partitioned log, which can be advanced or rewound.</dd></div><div class="term"><dt>Consumer lag</dt><dd>How far a consumer group is behind the latest message in its partitions; a rising lag means processing cannot keep up.</dd></div><div class="term"><dt>Ephemeral pub/sub</dt><dd>A model that delivers only to subscribers connected at publish time, with no backlog and no replay.</dd></div><div class="term"><dt>Replay</dt><dd>Reprocessing previously delivered events by rewinding a consumer's position in a retained log.</dd></div><div class="term"><dt>Transactional outbox</dt><dd>Writing the business row and the event row in one database transaction, then publishing from the outbox so the two cannot diverge.</dd></div><div class="term"><dt>Idempotent consumer</dt><dd>A subscriber that can safely process the same event twice without changing the outcome.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The coupling problem</h2>
+<p class="lede">When an order is placed, inventory, email, analytics, and fraud all need to react. Calling each one directly from the order service works only while the list is short and everyone is healthy.</p>
+<ul><li>The order service must know every downstream service and be redeployed whenever a new team wants to react to orders.</li><li>A slow email provider lengthens the customer's checkout request even though email has nothing to do with placing the order.</li><li>If analytics is down, the order service must invent a policy: fail the order, retry, buffer, or silently drop the event.</li><li>Direct calls create a chain of synchronous dependencies, so one degraded service can stall or fail the whole flow.</li><li>What the order service actually wants to say is "an order was placed" — not "run these four RPCs in this order".</li><li>Publishing that fact to a broker inverts the dependency: the producer announces, and consumers decide what to do.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The core model</h2>
+<ul><li><strong>Publishers</strong> produce messages; <strong>subscribers</strong> consume them; a <strong>broker</strong> sits between and organizes messages into topics.</li><li>A publisher sends to a topic and does not know which services subscribe, how many there are, or where they run.</li><li>A subscriber registers interest in a topic, and the broker delivers a copy of every message on that topic to each subscription.</li><li>One <code>OrderPlaced</code> publish becomes four independent deliveries to inventory, email, analytics, and fraud.</li><li>A new recommendation service can subscribe next month with no change and no redeploy of the order service.</li><li>The broker owns delivery state — which subscribers have acknowledged what — so producers and consumers never coordinate directly.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Pub/sub versus message queues</h2>
+<ul><li>In a <strong>queue</strong>, each message is handled by one consumer from a pool; the purpose is to spread work.</li><li>In <strong>pub/sub</strong>, each message is delivered to every subscriber; the purpose is to broadcast a fact.</li><li>The producer's intent differs: a queue message says "someone should do this task"; an event says "this thing happened".</li><li>A queue scales throughput by adding workers; pub/sub scales reach by adding subscriptions.</li><li>The rule of thumb: use a queue when exactly one worker should do the job, and pub/sub when several services may care.</li><li>Pub/sub also tolerates a subscriber being down, because a durable subscription holds its copy until it catches up.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Question</th><th>Message queue</th><th>Pub/sub</th></tr></thead><tbody><tr><td>Who receives a message?</td><td>One worker from a pool</td><td>Every subscriber</td></tr>
+<tr><td>Main purpose</td><td>Spread work across workers</td><td>Broadcast one event to many listeners</td></tr>
+<tr><td>Producer intent</td><td>"Someone should do this task"</td><td>"This thing happened"</td></tr>
+<tr><td>Example</td><td>Transcode this video</td><td>Order placed</td></tr>
+<tr><td>Scaling lever</td><td>More competing consumers</td><td>More independent subscriptions</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The life of a message</h2>
+<ul><li><strong>Publish and store:</strong> the broker writes the message durably — often to disk and to replicas — before acknowledging the publish.</li><li>The publish acknowledgment tells the producer the message is safe, so it can stop retrying.</li><li><strong>Fan-out:</strong> the broker makes the message available to every subscription on the topic, not to every process.</li><li><strong>Process and acknowledge:</strong> each subscriber handles its copy and acks; an unacked message is redelivered later.</li><li>Each subscription tracks its own progress, so a lagging analytics service does not slow down email delivery.</li><li>That independence is the main operational benefit: one slow consumer creates its own backlog instead of imposing backpressure on the producer.</li></ul>
+
+<div class="flow"><span class="flow-step">Publisher sends OrderPlaced to the orders topic</span><span class="flow-arrow">→</span><span class="flow-step">Broker stores the message durably and acknowledges the publish</span><span class="flow-arrow">→</span><span class="flow-step">Broker fans out one copy to each subscription</span><span class="flow-arrow">→</span><span class="flow-step">Each subscriber processes its copy at its own pace</span><span class="flow-arrow">→</span><span class="flow-step">Subscriber acknowledges; the broker records its progress</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Fan-out and combining pub/sub with queues</h2>
+<ul><li>Fan-out at the topic gives every subscriber an independent copy, so one consumer's failure or slowness does not affect the others.</li><li>A subscription can also represent a group of workers, in which case the group shares the work rather than each worker getting a copy.</li><li>A common production shape is a topic feeding one queue per service (for example SNS to SQS): the topic handles fan-out, and each queue buffers work for its owner.</li><li>Per-service queues add retry policies, dead-letter queues, and buffering that a bare push subscription does not provide.</li><li>Fan-out multiplies storage and network cost: N subscriptions mean N copies delivered, even if some subscribers do nothing useful with them.</li><li>Every new subscription also multiplies the blast radius of a bad event, because more consumers will process the same poison message.</li><li>Filtering at the broker can scope a subscription to a subset of events, which is cheaper than fanning out everything and discarding most of it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Push versus pull delivery</h2>
+<ul><li><strong>Push:</strong> the broker sends messages to an endpoint the subscriber exposes, usually over HTTP.</li><li>Push is simple — no polling loop — but the broker sets the pace, so it must detect a slow or failing subscriber and back off.</li><li>A push endpoint must stay reachable; a serverless function or a public webhook fits, a private batch job usually does not.</li><li><strong>Pull:</strong> the subscriber asks for the next batch when it is ready, so it controls rate, batch size, and concurrency.</li><li>Pull handles bursts better and enables efficient batching, but requires long-running polling workers.</li><li>Pull is usually the better fit for high-throughput backend processing; push fits simple integrations and event-driven functions.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Mode</th><th>Strength</th><th>Trade-off</th><th>Examples</th></tr></thead><tbody><tr><td>Push</td><td>Simple setup, no polling loop</td><td>Broker sets the pace; endpoint must stay reachable</td><td>Amazon SNS, Cloud Pub/Sub push</td></tr>
+<tr><td>Pull</td><td>Subscriber controls rate and batching</td><td>Subscriber must run polling workers</td><td>Kafka, Cloud Pub/Sub pull</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Ephemeral, durable, and replayable pub/sub</h2>
+<ul><li><strong>Ephemeral</strong> brokers such as Redis Pub/Sub forward a message to whoever is connected right now, then forget it.</li><li>A subscriber disconnected for a few seconds misses everything published in that window; there is no backlog and no replay.</li><li>Ephemeral is right for live cursor positions, typing indicators, and presence, where only the latest state matters.</li><li><strong>Durable</strong> systems keep a message until each subscription acknowledges it or a retention period expires.</li><li>A durable subscription lets a service be down for maintenance and still receive its events when it returns.</li><li><strong>Replayable logs</strong> such as Kafka retain messages for a configured time whether or not anyone read them, and each consumer group tracks an offset.</li><li>Rewinding an offset replays history: useful for reprocessing after a bug fix or for a new service building state from past events.</li><li>Replay is not free — it re-runs side effects, so consumers must be idempotent and downstream systems must tolerate duplicates.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>Behavior</th><th>Good for</th></tr></thead><tbody><tr><td>Ephemeral (Redis Pub/Sub)</td><td>Only currently connected subscribers receive it</td><td>Cursor positions, typing indicators, presence</td></tr>
+<tr><td>Durable (Cloud Pub/Sub, SNS + SQS)</td><td>Waits until each subscriber acks or retention expires</td><td>Business events, background processing</td></tr>
+<tr><td>Replayable log (Kafka)</td><td>Retained for a set time whether read or not</td><td>Reprocessing, pipelines, rebuilding state</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Delivery guarantees, duplicates, and idempotency</h2>
+<ul><li>Most practical systems give <strong>at-least-once</strong> delivery: a message is never silently lost, but it may arrive more than once.</li><li>Duplicates arise when a subscriber processes a message and crashes before acknowledging it, or when the broker retries an unconfirmed delivery.</li><li>Replay and outbox relays add more duplicate sources, so duplicates are a normal operating condition, not an edge case.</li><li>Make consumers <strong>idempotent</strong>: record processed event IDs, or write with an upsert keyed by event ID so a repeat is a no-op.</li><li>Business operations should be expressed as idempotent state changes ("set status to shipped") rather than increments ("add one shipment").</li><li>Exactly-once is usually a bounded claim — exactly-once within one broker and one transactional consumer — not across arbitrary external systems.</li><li>Pair at-least-once delivery with a dead-letter queue so a message that always fails stops blocking the subscription.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Message ordering</h2>
+<ul><li>Pub/sub generally does not guarantee order across an entire topic, because messages are spread over partitions and retries can reorder them.</li><li>A subscriber can therefore see <code>OrderCancelled</code> before the <code>OrderCreated</code> that logically preceded it.</li><li>The practical guarantee is <strong>ordering per key</strong>: all messages with the same key (for example an order ID) go to one partition and are consumed in order.</li><li>Different keys still process in parallel, which is how ordering coexists with throughput.</li><li>Ordering costs parallelism: a hot key funnels all its traffic through one partition and one consumer, and adding consumers does not help.</li><li>Choose the ordering key from what the business actually requires, not from the primary key of convenience.</li><li>When order can still break, carry a version number and drop events older than the latest version already applied.</li><li>Design consumers to be tolerant anyway: an out-of-order event should be parked or reconciled, not allowed to corrupt state.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Scaling subscribers</h2>
+<ul><li>Scale a slow subscription by adding workers to its <strong>consumer group</strong>, so the group's partitions are shared across more processes.</li><li>Every group still receives every event; within a group, each event is handled by exactly one worker.</li><li>In Kafka, a partition is assigned to only one consumer in a group at a time, so the partition count caps parallelism — extra consumers sit idle.</li><li>Plan partition count for future throughput, because increasing it later changes key-to-partition mapping and can break per-key ordering.</li><li>Watch <strong>consumer lag</strong> per partition; a steadily rising lag is the earliest signal that consumers cannot keep up.</li><li>Lag can also grow because of a slow downstream dependency, so check whether adding workers would just add pressure to a saturated database.</li><li>Rebalancing when consumers join or leave briefly pauses partition assignment, which can cause latency spikes during autoscaling.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Publishing reliably: the outbox pattern</h2>
+<p class="lede">There is a failure mode on the producer side that no amount of broker durability fixes.</p>
+<ul><li>If the order service commits the order and then crashes before publishing, the order exists but no other service ever hears about it.</li><li>If it publishes first and the database write then fails, subscribers act on an order that does not exist.</li><li>This is the <strong>dual-write problem</strong>: two systems are updated without a transaction that covers both.</li><li>The <strong>transactional outbox</strong> writes the business row and an event row to the same database in one transaction, so both or neither persist.</li><li>A relay process reads new outbox rows and publishes them, resuming safely after a crash.</li><li>The relay can publish the same event twice if it crashes after publishing but before marking the row sent, so consumers still need idempotency.</li><li>Change data capture tools can read the database log instead of polling the outbox table, reducing latency and polling load.</li></ul>
+
+<div class="flow"><span class="flow-step">Begin transaction</span><span class="flow-arrow">→</span><span class="flow-step">Insert the order row</span><span class="flow-arrow">→</span><span class="flow-step">Insert the OrderPlaced row into the outbox table</span><span class="flow-arrow">→</span><span class="flow-step">Commit — both rows are now durable</span><span class="flow-arrow">→</span><span class="flow-step">Relay publishes outbox rows to the broker</span><span class="flow-arrow">→</span><span class="flow-step">Mark rows as sent (duplicates possible, so consumers deduplicate)</span></div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Designing events and evolving schemas</h2>
+<ul><li>Name events for facts in the past tense — <code>OrderPlaced</code>, not <code>SendEmail</code> — so the publisher does not encode another team's behavior.</li><li>Include an event ID for deduplication, an event type, a timestamp, a schema version, and the payload.</li><li>A command-style event forces the publisher to know consumers, which recreates the coupling pub/sub was meant to remove.</li><li>Add new optional fields rather than renaming or removing existing ones; unknown fields should be ignored by consumers.</li><li>A schema registry with Avro or Protobuf can reject incompatible changes before they are deployed.</li><li>Organize topics by domain (<code>orders.events</code>, <code>payments.events</code>) instead of creating one topic per tiny variation.</li><li>Use attribute filtering so a subscription receives only the events it cares about instead of parsing and discarding most of them.</li><li>Keep payloads small: publish an ID and a reference to large objects rather than embedding megabytes in the event.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use pub/sub — and what it costs</h2>
+<ul><li>Good fits: order and payment events, user activity tracking, notifications, cache invalidation across servers, and real-time fan-out to WebSocket servers.</li><li>It is also the right shape when teams must evolve independently or when a spike must not overwhelm downstream services.</li><li>It is a poor fit when the caller needs an immediate answer, such as checking whether a payment was approved before rendering the next page.</li><li>The system becomes eventually consistent: different services are updated at different times, and the UI must reflect that.</li><li>Debugging gets harder because one user action becomes a chain of events across services; distributed tracing becomes mandatory.</li><li>Operating a broker adds a critical dependency, retention storage, schema governance, and monitoring for lag and dead letters.</li><li>Every subscriber must be designed for duplicates, retries, and replay — that is the price of decoupling.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Decoupling</strong> lets new subscribers join without touching the publisher, but the publisher loses visibility into who consumes its events and how they behave.</li><li><strong>Asynchronous fan-out</strong> absorbs spikes and isolates failures, but the system becomes eventually consistent and harder to reason about end to end.</li><li><strong>Durable subscriptions</strong> survive subscriber downtime, but require retention storage, replay discipline, and idempotent consumers.</li><li><strong>Ephemeral pub/sub</strong> is cheap and low-latency, but any disconnected subscriber loses messages permanently.</li><li><strong>Per-key ordering</strong> makes related events safe to process, but concentrates a hot key onto one partition and limits parallelism.</li><li><strong>Push delivery</strong> removes polling and suits serverless, but hands rate control to the broker and requires a reachable endpoint.</li><li><strong>Pull delivery</strong> gives the consumer control over rate and batching, but needs always-on workers and careful lag monitoring.</li><li><strong>Replay</strong> enables reprocessing and state rebuilds, but re-runs side effects and can double-charge or double-notify without idempotency.</li><li><strong>The transactional outbox</strong> removes the dual-write gap, but adds a table, a relay, and duplicate publishes that consumers must tolerate.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is pub/sub in one sentence?</summary><div class="answer"><p>A messaging pattern where publishers send events to a topic and a broker delivers a copy to every subscription, so producers do not know or care which services consume them.</p></div></details>
+<details><summary>2. How is pub/sub different from a message queue?</summary><div class="answer"><p>A queue delivers each message to exactly one worker to spread work. Pub/sub delivers each message to every subscriber to broadcast a fact. In practice many systems combine them: a topic fans out into one queue per service.</p></div></details>
+<details><summary>3. What is fan-out and what does it cost?</summary><div class="answer"><p>Fan-out is delivering one published message to every subscription. It gives independent progress and failure isolation, but multiplies delivery, storage, and compute cost, and sends the same bad event to every consumer.</p></div></details>
+<details><summary>4. Why must subscribers be idempotent?</summary><div class="answer"><p>Because delivery is usually at-least-once. A consumer can crash after doing the work but before acking, the broker redelivers, and the work runs twice. Replays and outbox relays create more duplicates. Deduplicate by event ID or make writes naturally idempotent.</p></div></details>
+<details><summary>5. Push versus pull delivery — how do you choose?</summary><div class="answer"><p>Push is simpler and fits serverless or webhook-style integrations, but the broker controls the pace and the endpoint must be reachable. Pull lets the consumer control rate and batching, which suits high-throughput backend workers that can poll continuously.</p></div></details>
+<details><summary>6. What happens to messages when a subscriber is offline?</summary><div class="answer"><p>In an ephemeral system they are lost. In a durable system the broker retains each subscription's copy until it is acked or retention expires, so the subscriber catches up later. In a replayable log, the group's offset determines where it resumes.</p></div></details>
+<details><summary>7. How does Kafka replay work?</summary><div class="answer"><p>Kafka keeps an append-only log for a retention period and each consumer group stores an offset. Rewinding the offset re-reads older records, which is useful after a bug fix or for bootstrapping a new service. Replay re-executes side effects, so consumers must tolerate duplicates.</p></div></details>
+<details><summary>8. Does pub/sub guarantee ordering?</summary><div class="answer"><p>Not across a whole topic. Partitioning and retries reorder messages. Most systems guarantee order per key by routing all messages with that key to the same partition. That preserves order for one entity while different entities process in parallel.</p></div></details>
+<details><summary>9. What is the cost of per-key ordering?</summary><div class="answer"><p>Reduced parallelism. All messages for a key go through one partition and one consumer, so a hot key becomes a bottleneck that more consumers cannot fix. Partition count also caps the number of consumers in a group.</p></div></details>
+<details><summary>10. How do you scale a slow subscriber?</summary><div class="answer"><p>Add workers to its consumer group, up to the partition count, and check that the bottleneck is not a shared downstream dependency. Watch consumer lag per partition to see whether scaling is actually helping.</p></div></details>
+<details><summary>11. What is consumer lag?</summary><div class="answer"><p>The distance between a consumer group's committed offset and the latest message in each partition. Rising lag means arrival outpaces processing; it is the primary health metric for a subscription.</p></div></details>
+<details><summary>12. What is the dual-write problem and how does the outbox fix it?</summary><div class="answer"><p>Updating the database and publishing an event are two systems with no shared transaction, so one can succeed while the other fails. The outbox writes the business row and the event row in one local transaction, then a relay publishes from the outbox. The relay may publish twice, so consumers deduplicate.</p></div></details>
+<details><summary>13. How should an event be designed?</summary><div class="answer"><p>As a past-tense fact such as <code>OrderPlaced</code>, with an event ID, type, timestamp, schema version, and payload. It should describe what happened, not instruct a specific consumer. Schemas evolve by adding optional fields, ideally enforced by a schema registry.</p></div></details>
+<details><summary>14. When would you not use pub/sub?</summary><div class="answer"><p>When the caller needs an immediate answer, such as validating a password or confirming a payment before continuing. A direct synchronous call is simpler and easier to reason about. Pub/sub also adds broker operations and eventual consistency that a small system may not need.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating pub/sub as a work queue and expecting each message to be processed by only one consumer.</li><li>Assuming messages arrive exactly once, then double-charging or double-notifying on redelivery or replay.</li><li>Promising global ordering across a topic when only per-key ordering exists.</li><li>Publishing the event inside the same request as the database write without an outbox, then losing events on a crash.</li><li>Using a hot ordering key and wondering why adding consumers does not increase throughput.</li><li>Forgetting that partition count caps consumer-group parallelism and that changing it later can break key ordering.</li><li>Publishing command-style events such as <code>SendEmail</code>, recreating the coupling the broker was meant to remove.</li><li>Ignoring consumer lag until the backlog is hours deep and the retention window is about to drop events.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="content-delivery-network-cdn.html"><span>← Previous</span><strong>Content Delivery Network (CDN)</strong></a><a class="next" href="message-queues.html"><span>Next →</span><strong>Message Queues</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/pub-sub">AlgoMaster — Pub/Sub</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

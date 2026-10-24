@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Query Optimization — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 20 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Query Optimization</h1>
+    <p class="dek">Databases &amp; Storage · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/query-optimization">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: the query did not change, the data did</a>
+<a href="#s2">How a database runs a query</a>
+<a href="#s3">The cost-based optimizer</a>
+<a href="#s4">When statistics mislead the optimizer</a>
+<a href="#s5">Finding the queries worth optimizing</a>
+<a href="#s6">Reading the query plan</a>
+<a href="#s7">Reducing the rows and pages read</a>
+<a href="#s8">Indexing for the query shape</a>
+<a href="#s9">Join strategy and join order</a>
+<a href="#s10">Sorting, aggregation, and pagination</a>
+<a href="#s11">N+1 queries and application-level patterns</a>
+<a href="#s12">Fix, verify, and keep it fixed</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Query optimization is the work of making a query read only the rows it needs — usually a far better return than a bigger server, a read replica, or a cache layered over a query that scans 50 million rows to return 20.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Declarative query</dt><dd>SQL states the result you want, not the algorithm; the database chooses indexes, join order, and execution strategy.</dd></div><div class="term"><dt>Query plan</dt><dd>The tree of operations the executor will run: scans, joins, sorts, aggregates, and the access method for each table.</dd></div><div class="term"><dt>Cost-based optimizer</dt><dd>The planner component that estimates the cost of alternative plans using statistics and picks the cheapest.</dd></div><div class="term"><dt>Cardinality estimate</dt><dd>The optimizer's prediction of how many rows a step will produce; wrong estimates cascade into bad join orders.</dd></div><div class="term"><dt>Statistics</dt><dd>Per-table summaries such as row counts, distinct values, most common values, and histograms of distribution.</dd></div><div class="term"><dt>Sequential scan</dt><dd>Reading every row of a table and filtering as it goes; correct but expensive when the filter is selective.</dd></div><div class="term"><dt>Sargable predicate</dt><dd>A filter the index can be used for, such as <code>col = ?</code> or <code>col &gt; ?</code>, as opposed to a function applied to the column.</dd></div><div class="term"><dt>Nested loop join</dt><dd>For each row of the outer input, look up matching rows in the inner input; cheap for small inputs, disastrous for large ones.</dd></div><div class="term"><dt>Hash join</dt><dd>Builds a hash table from one input and probes it with the other; good for large unsorted inputs with equality joins.</dd></div><div class="term"><dt>N+1 query</dt><dd>One query to fetch a list plus one query per item, turning a single logical read into hundreds of round trips.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: the query did not change, the data did</h2>
+<p class="lede">An orders page loaded instantly with a few thousand rows. Two years later the table holds 50 million rows and the same query takes seconds, even though no application code changed.</p>
+<ul><li>The query now does far more work: more rows to examine, more pages to read, more rows to sort.</li><li>The instinct is to scale up, add a replica, or add a cache — all of which mask the symptom.</li><li>A query that reads 50 million rows to return 20 will be slow on almost any hardware.</li><li>If the query reads only the rows it needs, one well-sized primary can often absorb much more traffic.</li><li>Latency growth is often nonlinear because an index stops fitting in memory or the planner switches strategies.</li><li>Optimization is about <strong>rows and pages touched</strong>, not about the elegance of the SQL text.</li><li>Fix the work first; add hardware only when the work is already minimal.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Symptom</th><th>Likely cause</th><th>First check</th></tr></thead><tbody><tr><td>Slow only for recent date ranges</td><td>Missing or wrong composite index</td><td>Plan shows a sequential scan</td></tr>
+<tr><td>Slow for one customer, fast for others</td><td>Skewed data or stale statistics</td><td>Estimated versus actual rows</td></tr>
+<tr><td>Gets slower every month</td><td>Table and index growth, cache misses</td><td>Rows read per execution</td></tr>
+<tr><td>Fast in staging, slow in production</td><td>Different data volume or parameter values</td><td>Plan for the real parameters</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>How a database runs a query</h2>
+<p class="lede">SQL is declarative. You say what you want; the database decides how to get it. That translation happens in four stages.</p>
+<ul><li><strong>Parse:</strong> check syntax and confirm the tables, columns, and types exist; produce a parse tree.</li><li><strong>Rewrite:</strong> normalize the query into an equivalent but easier form — simplify expressions, flatten views, turn some subqueries into joins.</li><li><strong>Plan:</strong> the optimizer enumerates access paths and join orders, estimates each cost, and selects a plan.</li><li><strong>Execute:</strong> the executor runs the plan tree and streams rows back, or buffers them for sorting and aggregation.</li><li>The plan is a tree: each node consumes rows from its children and emits rows upward.</li><li>The same SQL text can map to thousands of plans; the difference between the best and worst is often orders of magnitude.</li><li>Prepared statements may cache a plan, so the plan chosen for one parameter set can be reused for a very different one.</li><li>Because the plan is derived, changing data or statistics can change performance without any code change.</li></ul>
+
+<div class="flow"><span class="flow-step">SQL text</span><span class="flow-arrow">→</span><span class="flow-step">Parse</span><span class="flow-arrow">→</span><span class="flow-step">Rewrite</span><span class="flow-arrow">→</span><span class="flow-step">Plan</span><span class="flow-arrow">→</span><span class="flow-step">Execute</span><span class="flow-arrow">→</span><span class="flow-step">Rows returned</span></div>
+<div class="note">This is why 'the query is the same as day one' is not a defense: the plan is an output of the data, not of the text.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The cost-based optimizer</h2>
+<p class="lede">Most relational databases use a cost-based optimizer. For each query it considers alternative plans and estimates which one will do the least work.</p>
+<ul><li>Should it read the whole table sequentially, or use an index and follow row references?</li><li>For a three-table join, which table should be read first, and which join algorithm should combine them?</li><li>Should it sort the result, or read rows from an index that is already in the required order?</li><li>Should it materialize a subquery once, or re-evaluate it per outer row?</li><li>To estimate row counts it uses statistics: table size, distinct values, most common values, and histograms.</li><li>Cardinality estimates propagate upward: each node's estimated output becomes the next node's input estimate.</li><li>Cost combines estimated I/O (pages read) with CPU work, weighted by the engine's cost constants.</li><li>It picks the cheapest plan it found, not the global optimum: the search is bounded for large joins, so heuristics and pruning matter too.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Decision</th><th>Options</th><th>What drives the choice</th></tr></thead><tbody><tr><td>Access path</td><td>Sequential scan, index scan, index-only scan</td><td>Selectivity and whether the index covers the needed columns</td></tr>
+<tr><td>Join algorithm</td><td>Nested loop, hash, merge</td><td>Input sizes, sort order, equality versus range predicate</td></tr>
+<tr><td>Join order</td><td>Any permutation of tables</td><td>Estimated intermediate result sizes</td></tr>
+<tr><td>Sort</td><td>Explicit sort, index order</td><td>Whether an index already provides the ordering</td></tr>
+<tr><td>Aggregation</td><td>Hash aggregate, sorted aggregate</td><td>Input size and available ordering</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>When statistics mislead the optimizer</h2>
+<ul><li>Estimates are only as good as the statistics; stale statistics after a large load are a classic cause of a sudden plan change.</li><li>The optimizer assumes columns are <strong>independent</strong>; correlated columns (city and postal code) multiply selectivities and undercount matches.</li><li>Histograms have limited buckets, so values in the tail can be badly misestimated.</li><li>Skewed data means the average case is not the case you are running; a tenant with millions of rows behaves differently from one with ten.</li><li>A prepared plan built for a common value can be terrible for a rare value — the same cached plan serves both.</li><li>Uniformly distributed parameters hide the problem in testing and expose it in production.</li><li>A wrong estimate at the bottom of the plan compounds: a nested loop chosen for 10 rows but fed 100,000 becomes a disaster.</li><li>Fixes include refreshing statistics, extended or multi-column statistics, plan hints, and restructuring the query so estimates are less fragile.</li></ul>
+
+
+<div class="note">When the plan looks insane, compare estimated rows to actual rows. The mistake is usually an estimate, not the SQL.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Finding the queries worth optimizing</h2>
+<ul><li>Do not start from the query that annoys you; start from the queries that consume the most total database time.</li><li>Rank by <strong>total time</strong> = calls × average latency, not by the single slowest outlier.</li><li>Use the slow query log for outliers and a statement-statistics view for aggregate cost, calls, and rows.</li><li>Look for queries with a very high <strong>rows examined to rows returned</strong> ratio; that gap is wasted work.</li><li>Separate read queries from write queries; the fixes and the risks differ.</li><li>Sample production parameters, not synthetic ones, because plans depend on value distribution.</li><li>Correlate with application traces to find the endpoint and user action responsible.</li><li>Optimize one query, re-measure, and confirm the database-wide time actually dropped rather than shifting elsewhere.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Signal</th><th>What it suggests</th></tr></thead><tbody><tr><td>High total time, many calls</td><td>A frequent query with mediocre latency — often the biggest win</td></tr>
+<tr><td>High total time, few calls</td><td>A rare catastrophic query, often a report or admin screen</td></tr>
+<tr><td>Rows examined far above rows returned</td><td>Missing or unusable index</td></tr>
+<tr><td>High shared block reads per call</td><td>Reading more pages than needed; check the plan</td></tr>
+<tr><td>Frequent identical calls in a burst</td><td>Possible N+1 pattern in the application</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Reading the query plan</h2>
+<ul><li><code>EXPLAIN</code> shows the plan the optimizer chose without running the query; <code>EXPLAIN ANALYZE</code> runs it and reports actual times and rows.</li><li>Read the plan <strong>inside out and bottom up</strong>: leaves are scans, upper nodes combine and transform.</li><li>Check the access method first: sequential scan, index scan, index-only scan, or bitmap scan.</li><li>For each node, compare <strong>estimated rows with actual rows</strong>; a large gap explains most bad plans.</li><li>Look for the node where actual time drops sharply — the expensive work happens below it.</li><li>Watch for explicit sorts and hash operations that spill to disk when the working set exceeds memory.</li><li>A high number of loop iterations on a nested loop means the inner side is being re-read many times.</li><li>Beware of <code>EXPLAIN ANALYZE</code> on writes: it really executes them, so wrap it in a transaction you roll back.</li></ul>
+
+
+<pre class="code"><code>EXPLAIN (ANALYZE, BUFFERS)
+SELECT id, total, created_at
+FROM orders
+WHERE customer_id = 42
+ORDER BY created_at DESC
+LIMIT 20;</code></pre>
+<div class="note">Buffers matter: they show whether the time is disk I/O or CPU, and whether the plan is touching far more pages than the result needs.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Reducing the rows and pages read</h2>
+<ul><li>Make predicates <strong>sargable</strong>: compare the bare column, not an expression around it.</li><li><code>WHERE date(created_at) = '2026-01-01'</code> usually cannot use an index on <code>created_at</code>; rewrite as a half-open range.</li><li><code>WHERE name LIKE '%shoes%'</code> cannot use a normal B-tree; a leading wildcard forces a scan.</li><li>Avoid wrapping indexed columns in functions or implicit casts that change the comparison type.</li><li>Select only needed columns; <code>SELECT *</code> widens rows, defeats covering indexes, and increases network cost.</li><li>Filter early and push predicates as close to the scan as possible; reduce rows before joins and sorts.</li><li>Replace repeated correlated subqueries with a join or a lateral aggregate when the planner re-executes them per row.</li><li>Use <code>EXISTS</code> rather than <code>COUNT(*)</code> when you only need to know whether a row exists.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Slow form</th><th>Faster form</th><th>Why</th></tr></thead><tbody><tr><td><code>date(created_at) = ?</code></td><td><code>created_at &gt;= ? AND created_at &lt; ?</code></td><td>Index on the bare column becomes usable</td></tr>
+<tr><td><code>LIKE '%term%'</code></td><td>Full-text or trigram index</td><td>B-tree cannot seek on a leading wildcard</td></tr>
+<tr><td><code>SELECT *</code></td><td>List needed columns</td><td>Narrower rows, covering index possible</td></tr>
+<tr><td><code>OFFSET 100000</code></td><td>Keyset pagination on the sort key</td><td>Offset scans and discards every skipped row</td></tr>
+<tr><td><code>COUNT(*)</code> for existence</td><td><code>SELECT 1 ... LIMIT 1</code></td><td>Stops at the first match</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Indexing for the query shape</h2>
+<ul><li>An index helps only if its leading columns match how the query filters; column order is part of the design.</li><li>For a query filtering one column and sorting by another, a composite index in <strong>equality-then-sort</strong> order can remove the sort entirely.</li><li>A <strong>covering index</strong> that includes every referenced column can answer the query without fetching table rows.</li><li>Add the ordering column to the index rather than sorting a large result at query time.</li><li>Partial or filtered indexes help when queries always target a small subset, such as unresolved jobs.</li><li>An index on a low-selectivity column is often ignored; put it in a composite index where another column narrows first.</li><li>Indexes cost write throughput and storage, so add the smallest set that supports the measured queries.</li><li>Verify with the plan: an index that exists but is not used changes nothing.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Join strategy and join order</h2>
+<ul><li>A <strong>nested loop</strong> is efficient when the outer side is small and the inner side has an index on the join key.</li><li>A <strong>hash join</strong> handles large unsorted inputs and equality joins, but builds a hash table that must fit in memory to stay fast.</li><li>A <strong>merge join</strong> exploits sorted inputs and works well when both sides are already ordered by the join key.</li><li>Join order matters most when intermediate results are large; a selective table should usually be read first.</li><li>Filtering before the join reduces the rows that every later node must process.</li><li>Missing indexes on join columns force repeated scans of the inner table.</li><li>Join types must match data types and collations; an implicit cast can prevent index use on the join key.</li><li>When the planner's order is wrong because of bad estimates, fix statistics before reaching for hints.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Join</th><th>Strength</th><th>Weakness</th></tr></thead><tbody><tr><td>Nested loop</td><td>Great with small outer input and indexed inner key</td><td>Degrades badly as outer rows grow</td></tr>
+<tr><td>Hash join</td><td>Scales to large unsorted inputs</td><td>Memory-hungry; spills to disk when oversized</td></tr>
+<tr><td>Merge join</td><td>Cheap when both inputs are already sorted</td><td>Requires sorting otherwise; equality-oriented</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Sorting, aggregation, and pagination</h2>
+<ul><li>An explicit sort costs memory and spills to disk when the row set exceeds the sort budget.</li><li>Reading rows from an index that is already ordered avoids the sort entirely, especially with a small <code>LIMIT</code>.</li><li>Aggregating over a huge table is expensive; pre-aggregated rollups or materialized views move the cost off the request path.</li><li><code>COUNT(*)</code> over a large table must count rows; approximate or cached counts are a product decision.</li><li><code>OFFSET n</code> makes the database produce and discard n rows, so deep pages get progressively slower.</li><li><strong>Keyset pagination</strong> uses the last seen sort key in the <code>WHERE</code> clause and seeks directly with an index.</li><li>Grouping by a high-cardinality column builds a huge hash table; grouping by a low-cardinality column is cheaper.</li><li>Window functions can be cheaper than self-joins for running totals and rankings, but still require sorting.</li></ul>
+
+
+<pre class="code"><code>-- keyset pagination instead of OFFSET
+SELECT id, created_at, total
+FROM orders
+WHERE customer_id = 42
+  AND created_at &lt; $1
+ORDER BY created_at DESC
+LIMIT 20;</code></pre>
+<div class="note">Keyset pagination is stable only with a deterministic tiebreaker, such as <code>(created_at, id)</code>.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>N+1 queries and application-level patterns</h2>
+<ul><li>The N+1 pattern issues one query for a list and then one per item, multiplying round-trip latency and database load.</li><li>It often hides inside an ORM that lazily loads an association while rendering a page.</li><li>Fix it by batch loading the related rows with a single <code>IN</code> query and joining in memory, or by using a join.</li><li>Check the query count per request in a trace; latency that scales with result size is the signature.</li><li>Avoid unbounded <code>IN</code> lists and <code>SELECT *</code> in batch queries; chunk very large id sets.</li><li>Connection pool exhaustion is often an N+1 symptom, not a pool-size problem.</li><li>Caching a query result is valid only when the invalidation story is clear; otherwise it hides staleness.</li><li>Denormalization and materialized views are legitimate end states, but only after the query itself is efficient.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Fix, verify, and keep it fixed</h2>
+<ul><li>Change one thing at a time: index, query rewrite, or schema — not all three — so you can attribute the improvement.</li><li>Re-run <code>EXPLAIN ANALYZE</code> after each change and compare rows read, buffers, and actual time.</li><li>Test with production-shaped data and parameters; a small dataset will happily choose a plan that fails at scale.</li><li>Add the query to a performance regression check so a future schema change cannot silently reintroduce the scan.</li><li>Update statistics after large backfills or bulk loads so plans reflect the new distribution.</li><li>Watch for plan changes after upgrades; optimizer versions and cost constants change behavior.</li><li>Retire indexes that no query uses; they slow writes and add planning work.</li><li>Only after the query reads a sensible number of rows should you consider replicas, caching, or a bigger machine.</li></ul>
+
+<div class="flow"><span class="flow-step">Find the expensive query</span><span class="flow-arrow">→</span><span class="flow-step">Read the plan</span><span class="flow-arrow">→</span><span class="flow-step">Compare estimates to actuals</span><span class="flow-arrow">→</span><span class="flow-step">Fix the access path</span><span class="flow-arrow">→</span><span class="flow-step">Re-measure</span><span class="flow-arrow">→</span><span class="flow-step">Guard against regression</span></div>
+<div class="note">A cache in front of a query that scans 50 million rows turns one slow query into a fast one and a cold-start outage.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Adding an index</strong> speeds the targeted read but slows every insert, update, and delete on that table.</li><li><strong>Covering indexes</strong> eliminate table lookups but widen the index and increase storage and maintenance cost.</li><li><strong>Rewriting a query</strong> is free in infrastructure but can reduce readability and must be re-verified against every data distribution.</li><li><strong>Denormalization or rollups</strong> make reads cheap but move cost to write time and introduce staleness.</li><li><strong>Caching results</strong> cuts latency and load but adds invalidation logic and a cold-start failure mode.</li><li><strong>Keyset pagination</strong> is fast at any depth but forbids jumping to an arbitrary page number.</li><li><strong>Optimizer hints</strong> rescue one bad plan but freeze it, so it can become wrong as data changes.</li><li><strong>Scaling hardware</strong> is immediate and code-free but leaves the wasted work in place and raises cost permanently.</li><li><strong>Prepared statements</strong> reduce planning overhead but risk reusing a plan that fits a different parameter value.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is query optimization?</summary><div class="answer"><p>Reducing the work a query does — rows read, pages touched, sorts, and joins — so it returns the same result with less I/O and CPU. It is usually about the access path and the plan, not about rewriting SQL for style.</p></div></details>
+<details><summary>2. Why did a query get slow when nothing in the code changed?</summary><div class="answer"><p>The data grew. More rows mean more pages to scan, indexes that no longer fit in memory, and different planner choices. The plan is derived from statistics about the data, so the same SQL can map to a very different plan over time.</p></div></details>
+<details><summary>3. Walk through how a database executes a query.</summary><div class="answer"><p>It parses and validates the SQL, rewrites it into an equivalent form, plans it by estimating the cost of alternative access paths and join orders, then executes the chosen plan tree and returns rows. The plan step determines almost all of the performance.</p></div></details>
+<details><summary>4. How does a cost-based optimizer choose a plan?</summary><div class="answer"><p>It uses table statistics — row counts, distinct values, most common values, histograms — to estimate how many rows each step will produce. It assigns each candidate plan a cost from estimated I/O and CPU, then picks the cheapest plan it explored, which is not necessarily the true optimum.</p></div></details>
+<details><summary>5. What are the most common causes of a bad plan?</summary><div class="answer"><p>Bad cardinality estimates: stale statistics, correlated columns the optimizer assumes are independent, skewed data, and a cached plan built for a different parameter value. A wrong estimate at the bottom turns a nested loop into millions of lookups.</p></div></details>
+<details><summary>6. How do you find which queries to optimize?</summary><div class="answer"><p>Rank by total database time, which is calls times average latency, and by rows examined versus rows returned. Use the slow query log for outliers and statement statistics for aggregate load, with real production parameters.</p></div></details>
+<details><summary>7. How do you read an EXPLAIN plan?</summary><div class="answer"><p>Read bottom-up: scans at the leaves, joins and sorts above. Check the access method, then compare estimated rows to actual rows at each node. The node where actual time drops sharply marks where the expensive work happens. Buffers tell you whether it is I/O or CPU.</p></div></details>
+<details><summary>8. What makes a predicate non-sargable?</summary><div class="answer"><p>Anything that prevents the engine from seeking the index on the bare column: a function on the column, a leading-wildcard <code>LIKE</code>, an implicit cast, or arithmetic around the column. Rewriting it as a range comparison on the column usually restores index use.</p></div></details>
+<details><summary>9. Why is a composite index better than two single-column indexes for some queries?</summary><div class="answer"><p>A composite index is ordered by its leading column and then by the next, so it can satisfy an equality filter and an ordering in one seek, avoiding a sort. Two separate single-column indexes usually require the engine to intersect row sets and still sort.</p></div></details>
+<details><summary>10. When is a sequential scan the right choice?</summary><div class="answer"><p>When the predicate matches a large fraction of the table, when the table is small, or when the index would require many random row fetches. Reading pages in order is cheaper than scattering across the table, so the optimizer may correctly ignore a usable index.</p></div></details>
+<details><summary>11. What is an N+1 query and how do you fix it?</summary><div class="answer"><p>One query fetches a list, then one query per item fetches related data. Batch the related fetch with a single <code>IN</code> query or use a join, and confirm with a per-request query count. Connection pool exhaustion is often a symptom.</p></div></details>
+<details><summary>12. Why is OFFSET pagination slow at depth?</summary><div class="answer"><p>The database must generate and discard every row before the offset, so page 10,000 does far more work than page 1 for the same page size. Keyset pagination filters on the last seen sort key and seeks directly into the index.</p></div></details>
+<details><summary>13. How do you stop a query from regressing after an upgrade?</summary><div class="answer"><p>Keep a performance test with production-shaped data, capture the plan and rows read for critical queries, and alert on changes. Refresh statistics after bulk loads and review new indexes and schema changes for their effect on existing plans.</p></div></details>
+<details><summary>14. The query is already optimal but still too slow — what next?</summary><div class="answer"><p>Then add capacity or remove the work from the request path: read replicas, caching with a clear invalidation story, pre-aggregation, or archiving old rows so the hot table stays small. Do this after fixing the plan, not instead of it.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Adding a read replica or a cache before reading the query plan; both hide a bad access path instead of fixing it.</li><li>Joining on a column with a mismatched type or collation and wondering why the index is ignored.</li><li>Wrapping an indexed column in a function inside the WHERE clause.</li><li>Trusting a plan generated on a tiny staging dataset with different parameter values.</li><li>Deep OFFSET pagination on a large ordered result.</li><li>Treating a single slow outlier as the priority while a frequent mediocre query consumes more total time.</li><li>Adding indexes until writes suffer, without checking which indexes are actually used.</li><li>Running EXPLAIN ANALYZE on an UPDATE or DELETE in production and actually applying it.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="object-storage.html"><span>← Previous</span><strong>Object Storage</strong></a><a class="next" href="indexing.html"><span>Next →</span><strong>Indexing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/query-optimization">AlgoMaster — Query Optimization</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

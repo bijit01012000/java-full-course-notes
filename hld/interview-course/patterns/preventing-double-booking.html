@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preventing Double Booking — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 14 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Preventing Double Booking</h1>
+    <p class="dek">Interview Patterns · Keeping Data Correct</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/preventing-double-booking">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Why double booking happens</a>
+<a href="#s3">Model the unit of inventory</a>
+<a href="#s4">Atomic conditional writes in one database</a>
+<a href="#s5">Pessimistic locking</a>
+<a href="#s6">Optimistic concurrency</a>
+<a href="#s7">Distributed locks and their limits</a>
+<a href="#s8">The reservation (hold) pattern</a>
+<a href="#s9">Flash crowds: thousands competing for the same units</a>
+<a href="#s10">Idempotent booking requests</a>
+<a href="#s11">Expiry, cancellation, overbooking, and waitlists</a>
+<a href="#s12">Failure modes and what to monitor</a>
+<a href="#s13">Choosing a design in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A booking is correct only if one unit of inventory — a seat, a room, a slot — is assigned to exactly one owner, even when thousands of users hit the same unit at the same instant. The pattern is <strong>atomic claim of a uniquely identified unit</strong>, surrounded by holds, idempotency, and expiry.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Inventory unit</dt><dd>The smallest thing that can be booked exactly once: a specific seat, a room-night, a doctor's slot. Bookability must be modeled at this granularity, not as a free-form count.</dd></div><div class="term"><dt>Reservation (hold)</dt><dd>A temporary claim on a unit that is not yet a confirmed booking, with an expiry, so a user can finish payment without losing the seat.</dd></div><div class="term"><dt>Overbooking</dt><dd>Deliberately selling more reservations than capacity, betting on cancellations and no-shows. A business policy, not a race-condition fix.</dd></div><div class="term"><dt>Pessimistic locking</dt><dd>Taking a lock on the row before checking availability, so competing transactions queue instead of racing.</dd></div><div class="term"><dt>Optimistic concurrency control</dt><dd>Reading a version, then committing only if the version is unchanged. Conflicts fail fast and the caller retries.</dd></div><div class="term"><dt>Compare-and-set (CAS)</dt><dd>An atomic conditional update such as <code>SET owner = ? WHERE id = ? AND owner IS NULL</code>; the database decides the winner.</dd></div><div class="term"><dt>Distributed lock</dt><dd>A lock held in an external store so multiple services or nodes can coordinate. Correctness still depends on the resource honoring a fencing token.</dd></div><div class="term"><dt>Fencing token</dt><dd>A monotonically increasing number issued with each lock acquisition, so a stale lock holder's late write can be rejected.</dd></div><div class="term"><dt>Idempotency key</dt><dd>A client-supplied identifier that makes retrying the same booking request return the original result instead of creating a second booking.</dd></div><div class="term"><dt>Hot row contention</dt><dd>The bottleneck where many transactions target the same row, serializing throughput to what one row lock can sustain.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">Double booking is a correctness problem disguised as a performance problem. The business rule is trivial — one unit, one owner — but enforcing it under concurrency is where designs fail.</p>
+<ul><li>Two users read the same availability, both see the seat free, both write, and both think they succeeded.</li><li>The failure is not slow response or high load; it is a <strong>lost update</strong> that violates a uniqueness rule.</li><li>It shows up in flights, hotels, concert seats, restaurant tables, doctor appointments, and delivery time slots.</li><li>The same race exists in inventory counts, coupon redemption, and username or handle registration.</li><li>Reads cannot fix this: any check performed before the write is advisory unless the write itself is conditional.</li><li>The design question is where the single point of serialization lives, and how much contention it can absorb.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why double booking happens</h2>
+<ul><li><strong>Check-then-act:</strong> availability is read in one step and written in another, with a window in between.</li><li><strong>Lost update:</strong> two transactions overwrite each other because neither observed the other's change.</li><li><strong>Retries:</strong> a client times out, retries, and the first attempt actually succeeded — creating two bookings for one intent.</li><li><strong>Multiple channels:</strong> web, mobile, call center, and partner APIs write through different paths with different rules.</li><li><strong>Async confirmation:</strong> the booking is accepted into a queue and the final check happens later, after the user was told yes.</li><li><strong>Cache and read replicas:</strong> availability shown from a stale copy makes users believe a sold-out unit is free.</li><li>Most real incidents are a retry plus a non-idempotent write, not a textbook race in a single query.</li></ul>
+
+
+<div class="note">If the availability check and the claim are not the same atomic operation, you have a race regardless of how fast the code runs.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Model the unit of inventory</h2>
+<p class="lede">You cannot make an aggregate atomic if the aggregate is a number. Model what is actually scarce.</p>
+<ul><li>Convert a slotted resource into <strong>individually identified units</strong> (seat 14A, room 302 on a given night) and give each a uniqueness constraint.</li><li>For genuinely interchangeable capacity, keep a counter with a check constraint that it never goes below zero.</li><li>Separate the <strong>reservation</strong> (temporary claim) from the <strong>booking</strong> (confirmed, paid, committed).</li><li>Store an explicit status — held, confirmed, cancelled, expired — rather than deleting rows, so history and disputes are auditable.</li><li>Every state transition should be conditional on the current state, not a blind update.</li><li>Pick the shard/partition key so units that compete for the same resource live together; splitting a seat's row across nodes destroys atomicity.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Resource type</th><th>Model</th><th>Uniqueness enforced by</th></tr></thead><tbody><tr><td>Assigned seat</td><td>One row per seat per showing</td><td>Unique seat + event ID, status conditional</td></tr>
+<tr><td>Hotel room-night</td><td>One row per room per date</td><td>Unique room + date</td></tr>
+<tr><td>Interchangeable capacity</td><td>Counter per bucket</td><td>Check constraint / conditional decrement</td></tr>
+<tr><td>Time slot with one staff member</td><td>One row per slot</td><td>Unique slot + provider ID</td></tr>
+<tr><td>Username</td><td>One row per handle</td><td>Unique index</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Atomic conditional writes in one database</h2>
+<p class="lede">The strongest and simplest answer is to let a single database decide the winner.</p>
+<ul><li>Use a <strong>unique constraint</strong> on the unit so a second insert fails loudly instead of silently overwriting.</li><li>Use a conditional update: claim only if the row is still free, and inspect the affected-row count.</li><li>If the update affects zero rows, the unit was taken; return a clear conflict rather than a success.</li><li>Do the claim and the booking record in <strong>one transaction</strong> so a crash cannot leave a half-state.</li><li>Keep the transaction short; never hold it open while calling a payment provider or sending email.</li><li>This is the default design in an interview: one primary, one row per unit, one atomic claim.</li></ul>
+
+
+<pre class="code"><code>-- Atomic claim: the affected-row count is the answer
+UPDATE inventory
+   SET status = &#x27;held&#x27;, owner_id = :user, hold_expires_at = :ts
+ WHERE unit_id = :unit
+   AND status = &#x27;available&#x27;;</code></pre>
+<div class="note">Returning the number of affected rows is the correctness signal. A 200 response with zero rows updated is a double booking.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Pessimistic locking</h2>
+<ul><li>Lock the row (<code>SELECT ... FOR UPDATE</code>) before checking availability, then update and commit.</li><li>Competing transactions wait, so there is no window between check and write.</li><li>Clean and easy to reason about when contention per unit is low.</li><li>Lock ordering matters: acquiring multiple locks in inconsistent order causes deadlocks.</li><li>Lock duration is the throughput limit; holding a lock across a network call can stall every request for that unit.</li><li>Use a bounded lock wait and fail fast with a retry or a friendly 'seat being held' response.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Optimistic concurrency</h2>
+<ul><li>Read the row and its <strong>version</strong>; write with <code>WHERE version = :v</code> and increment on success.</li><li>Conflicts are detected at commit time and surface as zero rows updated, which the service maps to a retry or a conflict response.</li><li>No locks are held while the user thinks, which suits long human flows like checkout.</li><li>Under heavy contention on one unit, most attempts fail and retry storms make throughput worse.</li><li>Retries must be bounded and jittered; unbounded retry loops turn a conflict into an outage.</li><li>Works well when contention is naturally spread across many units.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Distributed locks and their limits</h2>
+<ul><li>A lock in Redis or another external store can coordinate services, but it is not a correctness guarantee by itself.</li><li>A holder can pause (GC, network partition) past its lease, and a second holder can acquire the lock while the first still believes it owns it.</li><li>Every write must verify a <strong>fencing token</strong>, or the late writer silently overwrites the new owner.</li><li>Lease expiry trades safety against liveness: short leases recover fast but expire during slow work.</li><li>If the resource is a single database row, prefer the row's own conditional update; it needs no separate lock service.</li><li>Use distributed locks for coarse coordination (one scheduler active, one job running), not as the primary booking primitive.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>How it serializes</th><th>Main risk</th></tr></thead><tbody><tr><td>Unique constraint</td><td>Database index</td><td>Must handle constraint violation as a normal outcome</td></tr>
+<tr><td>Conditional / CAS update</td><td>Row-level atomicity</td><td>Zero-row result mistaken for success</td></tr>
+<tr><td>Pessimistic lock</td><td>Row lock held across transaction</td><td>Deadlock, lock held too long</td></tr>
+<tr><td>Optimistic version</td><td>Commit-time conflict detection</td><td>Retry storm under hot contention</td></tr>
+<tr><td>Distributed lock</td><td>External lease</td><td>Stale holder without fencing token</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>The reservation (hold) pattern</h2>
+<p class="lede">Users need time to pay, and holding a database lock for that long is not viable. A hold decouples the claim from the payment.</p>
+<ul><li>The claim creates a <strong>hold with an expiry</strong>, owned by one user or session.</li><li>The seat is unavailable to others while held, but not yet sold.</li><li>Payment confirmation converts the hold to a confirmed booking in one conditional update.</li><li>Expiry releases the hold back to available; a background job sweeps expired holds so a crashed client cannot strand inventory.</li><li>Expiry must be enforced by the <strong>database or a sweeper</strong>, never by a client-side timer.</li><li>Distinguish 'hold expired and released' from 'hold still valid' in the confirm path; a late payment should fail cleanly, not double-sell.</li></ul>
+
+<div class="flow"><span class="flow-step">Select unit</span><span class="flow-arrow">→</span><span class="flow-step">Atomic claim → hold with TTL</span><span class="flow-arrow">→</span><span class="flow-step">User pays</span><span class="flow-arrow">→</span><span class="flow-step">Conditional confirm</span><span class="flow-arrow">→</span><span class="flow-step">Confirmed or hold released on expiry</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Flash crowds: thousands competing for the same units</h2>
+<ul><li>The bottleneck is <strong>contention on a few rows</strong>, so more app servers do not help; they add retries.</li><li>Admit users through a <strong>virtual waiting room</strong> or queue, issuing a token that grants a time-limited right to book.</li><li>Issue a token only for units that exist, so the crowd is bounded by real inventory rather than by request volume.</li><li>Reject obviously impossible requests early (sold-out event, past date) before they reach the database.</li><li>Shard inventory by event or region so unrelated bookings do not share a hot row.</li><li>Show accurate remaining inventory from the authoritative path; a stale cache turns the queue into a lottery of errors.</li><li>Accept that most contenders will fail; make failure fast, informative, and free of side effects.</li></ul>
+
+
+<div class="note">At flash-sale scale, the design goal shifts from 'everyone can try' to 'everyone gets a fast, honest answer'.</div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Idempotent booking requests</h2>
+<ul><li>Require an <strong>idempotency key</strong> per booking attempt, stored with the resulting booking.</li><li>A retry with the same key returns the original result instead of claiming a second unit.</li><li>Keys must be scoped to the user or session and expired eventually, or the table grows without bound.</li><li>The key must be recorded in the same transaction as the booking, otherwise a crash between them reopens the duplicate window.</li><li>Client-side timeouts are ambiguous: the server may have succeeded, so retries are expected, not exceptional.</li><li>Payment capture needs its own idempotency key with the provider; a duplicate charge is worse than a duplicate seat.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Expiry, cancellation, overbooking, and waitlists</h2>
+<ul><li>Cancellation frees the unit only if the booking is currently confirmed; make that a conditional state change.</li><li>Refund and inventory release should be consistent: release after the refund is recorded, or compensate if it fails.</li><li>Overbooking is a deliberate policy with a compensation plan; it must never be the accidental result of a race.</li><li>A waitlist converts failed claims into demand you can notify when a hold expires or a booking cancels.</li><li>Expired holds and abandoned checkouts are the main source of recoverable inventory; sweep them aggressively but safely.</li><li>Report sold-out and released inventory so the business can see whether holds are too long or too short.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Failure modes and what to monitor</h2>
+<ul><li><strong>Duplicate confirmations:</strong> two confirmed bookings for one unit — alert immediately; this is a data-integrity incident, not a latency issue.</li><li><strong>Stranded holds:</strong> units stuck in held state because the sweeper is down; monitor hold age.</li><li><strong>Retry storms:</strong> conflict rate and retry counts rising together with latency.</li><li><strong>Deadlocks:</strong> lock-wait timeouts and deadlock counters on the inventory tables.</li><li><strong>Queue or token leakage:</strong> admitted users far exceeding available inventory.</li><li><strong>Clock and expiry skew:</strong> sweeper and confirm path disagreeing about whether a hold is still valid.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Choosing a design in an interview</h2>
+<ul><li>Start by stating the invariant: one unit, at most one active owner, at every instant.</li><li>Model the unit explicitly and put a unique constraint or conditional update on it.</li><li>Explain why a pre-check read is insufficient, then show the atomic claim.</li><li>Add holds with TTL so payment does not hold a database lock.</li><li>Add idempotency keys for retries, and say how expired holds are swept.</li><li>Only then discuss scale: admission queue, sharding by event, read replicas for browsing.</li><li>Close with the failure you would page on: a second confirmed booking for the same unit.</li></ul>
+
+<div class="flow"><span class="flow-step">State invariant</span><span class="flow-arrow">→</span><span class="flow-step">Model unit</span><span class="flow-arrow">→</span><span class="flow-step">Atomic claim</span><span class="flow-arrow">→</span><span class="flow-step">Hold + TTL</span><span class="flow-arrow">→</span><span class="flow-step">Confirm conditionally</span><span class="flow-arrow">→</span><span class="flow-step">Idempotent retries</span><span class="flow-arrow">→</span><span class="flow-step">Sweep + monitor</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Pessimistic locking</strong> gives simple correctness but serializes access to the unit and risks deadlocks and lock-held-too-long stalls.</li><li><strong>Optimistic concurrency</strong> avoids held locks and suits human-paced checkout, but collapses into retry storms when many users target one unit.</li><li><strong>Unique constraints</strong> are the cheapest guard but throw errors as normal control flow, so the API must translate them into a clean conflict response.</li><li><strong>Distributed locks</strong> coordinate across services but are unsafe without fencing tokens and add a dependency and a failure mode.</li><li><strong>Holds with TTL</strong> protect the user during payment but strand inventory when clients abandon or sweepers fail.</li><li><strong>Virtual waiting rooms</strong> protect the database during flash crowds but add latency and a second system to operate and get right.</li><li><strong>Overbooking</strong> raises utilization and revenue but creates a compensation obligation and can damage trust.</li><li><strong>Caching availability for browsing</strong> reduces read load but shows stale inventory and makes users angry when the claim fails.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why can't you just check availability and then insert the booking?</summary><div class="answer"><p>Because the check and the insert are separate operations. Two requests can both observe the unit as free before either writes, so both inserts succeed and the invariant breaks. The claim itself must be conditional and atomic.</p></div></details>
+<details><summary>2. What is the simplest correct design for booking a seat?</summary><div class="answer"><p>One row per seat with a unique identity, and a conditional update that claims it only if its status is available. The affected-row count tells you whether you won. Wrap the claim and the booking record in one short transaction.</p></div></details>
+<details><summary>3. Pessimistic or optimistic locking?</summary><div class="answer"><p>Pessimistic when contention per unit is low and the critical section is short — it is easier to reason about. Optimistic when users spend real time deciding, so you cannot hold a lock, and conflicts are naturally spread out. Both need bounded retries and a clean conflict response.</p></div></details>
+<details><summary>4. When is a distributed lock the right tool?</summary><div class="answer"><p>For coarse coordination such as electing one active scheduler or ensuring a single job runs, and only with fencing tokens so a stale holder's writes are rejected. For a single row's uniqueness, the database itself is the better lock.</p></div></details>
+<details><summary>5. Why is a Redis lock dangerous for booking?</summary><div class="answer"><p>Because a lock holder can pause past its lease and keep writing after another process has acquired the lock. Without a fencing token checked by the resource, the late write wins and you double-book. Redis locks also depend on the store's availability and clock assumptions.</p></div></details>
+<details><summary>6. Why do you need a hold instead of a long transaction?</summary><div class="answer"><p>A payment can take minutes, and holding a database lock that long blocks every other request for that unit and risks timeouts. A hold is a persisted, expiring claim: it reserves the unit without holding a lock, and a sweeper releases it if the user never completes checkout.</p></div></details>
+<details><summary>7. How do you handle a user who pays after their hold expired?</summary><div class="answer"><p>Confirm conditionally on the hold still being valid. If it expired and the unit was resold, do not confirm — refund or rebook and tell the user clearly. The failure must be explicit, never a silent second booking.</p></div></details>
+<details><summary>8. How do you prevent duplicate bookings from retries?</summary><div class="answer"><p>An idempotency key supplied per attempt, stored in the same transaction as the booking. A retry with the same key returns the original result. Also make the payment capture idempotent with its own key.</p></div></details>
+<details><summary>9. How would you handle a flash sale with far more users than seats?</summary><div class="answer"><p>Admit through a waiting room or queue and issue time-limited tokens for units that actually exist. Reject impossible requests early, shard inventory by event, serve accurate availability, and make failures fast. More app servers alone will not help because the bottleneck is contention on the same rows.</p></div></details>
+<details><summary>10. What does overbooking have to do with this pattern?</summary><div class="answer"><p>Nothing mechanically. Overbooking is a deliberate business policy based on expected cancellations. It must be implemented as an explicit capacity setting, never as a side effect of a race, and it needs a compensation plan when more guests arrive than rooms exist.</p></div></details>
+<details><summary>11. How do you model hotel inventory where any room of a type will do?</summary><div class="answer"><p>Use a counter per room type per night with a conditional decrement that cannot go below zero, or one row per physical room-night if assignment matters. Per-night rows make multi-night bookings require claiming every night atomically, usually in a fixed order.</p></div></details>
+<details><summary>12. What breaks when you shard inventory across databases?</summary><div class="answer"><p>Atomicity across shards. A booking spanning several units on different shards needs a single owner per shard, ordered claims, and compensation if a later claim fails. Shard by the resource that must be claimed together, such as event or property.</p></div></details>
+<details><summary>13. What would you monitor and page on?</summary><div class="answer"><p>Page on any second confirmed booking for the same unit — that is the invariant breaking. Also watch hold age, conflict and retry rates, deadlock counts, sweep failures, and admitted-versus-available ratios during sales.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Reading availability, then inserting the booking, and treating that as atomic.</li><li>Returning HTTP 200 without checking how many rows the conditional update affected.</li><li>Holding a database transaction open while calling the payment provider.</li><li>Using a Redis lock without a fencing token and assuming it guarantees exclusivity.</li><li>Shrinking the problem to 'add a unique index' while ignoring retries and multi-night claims.</li><li>Trusting a client-side timer to release expired holds.</li><li>Caching availability for browsing and then showing users seats they cannot actually book.</li><li>Treating overbooking as an implementation detail instead of an explicit policy with compensation.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="keeping-data-in-sync.html"><span>← Previous</span><strong>Keeping Data in Sync</strong></a><a class="next" href="handling-long-running-tasks.html"><span>Next →</span><strong>Handling Long-Running Tasks</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/preventing-double-booking">AlgoMaster — Preventing Double Booking</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

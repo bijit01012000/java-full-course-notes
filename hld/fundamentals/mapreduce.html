@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MapReduce — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 37 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>MapReduce</h1>
+    <p class="dek">Big Data Processing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/mapreduce">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: the data does not fit on one machine</a>
+<a href="#s2">The programming model</a>
+<a href="#s3">A job from start to finish</a>
+<a href="#s4">Input splits and the map phase</a>
+<a href="#s5">Shuffle and sort: the expensive middle</a>
+<a href="#s6">The reduce phase</a>
+<a href="#s7">Combiners and partitioners</a>
+<a href="#s8">Fault tolerance</a>
+<a href="#s9">Stragglers and speculative execution</a>
+<a href="#s10">Data skew and hot keys</a>
+<a href="#s11">Limits and where MapReduce fits today</a>
+<a href="#s12">Worked example: word count</a>
+<a href="#s13">Answering a MapReduce design question</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>MapReduce is a batch framework that splits a huge dataset into independent map tasks, groups intermediate results by key through shuffle and sort, and aggregates them in reduce tasks — while the framework handles distribution and failure.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Map function</dt><dd>A user-supplied function that reads one input record and emits zero or more intermediate key-value pairs.</dd></div><div class="term"><dt>Reduce function</dt><dd>A user-supplied function that receives a key and all its values and produces the final output for that key.</dd></div><div class="term"><dt>Input split</dt><dd>A logical chunk of the input, usually aligned with storage blocks, assigned to one map task.</dd></div><div class="term"><dt>Shuffle</dt><dd>The phase that moves map output across the network so every reducer receives all values for its keys.</dd></div><div class="term"><dt>Combiner</dt><dd>A map-side partial aggregation that reduces shuffle volume; it may run zero or more times, so it must preserve semantics.</dd></div><div class="term"><dt>Partitioner</dt><dd>A function, commonly hash of the key modulo the number of reducers, that decides which reducer owns a key.</dd></div><div class="term"><dt>Speculative execution</dt><dd>Running a duplicate copy of a slow task and accepting whichever attempt finishes first.</dd></div><div class="term"><dt>Data skew</dt><dd>An uneven distribution of work, usually caused by one key or partition holding far more records than the others.</dd></div><div class="term"><dt>Straggler</dt><dd>A task that runs much slower than its peers and extends the job's completion time.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: the data does not fit on one machine</h2>
+<p class="lede">A dataset too large for one machine must be processed across many. That raises three questions the programmer should not have to answer per job.</p>
+<ul><li>How do you split the data so each machine gets a manageable, independent piece?</li><li>How do you combine partial results that belong to the same key but were computed on different machines?</li><li>What happens when a machine crashes halfway through and its work disappears?</li><li>Moving data to a compute node is expensive, so processing should run near the stored bytes where possible.</li><li>The coordination logic is the same for many batch jobs, so it belongs in a framework rather than in every program.</li><li>MapReduce answers these questions once and asks the job author for only two functions.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The programming model</h2>
+<ul><li>The input is a sequence of records; the framework decides how to divide it, not the job code.</li><li><strong>Map</strong> is applied independently to each record and emits intermediate <code>(key, value)</code> pairs.</li><li>The framework groups all intermediate values by key, so the reducer never sees the original record boundaries.</li><li><strong>Reduce</strong> is applied once per key to the full list of values for that key and emits zero or more output pairs.</li><li>The contract is narrow on purpose: the programmer writes two pure-ish functions, and the framework owns placement, movement, and retries.</li><li>Both functions should be deterministic; a nondeterministic map makes retries and speculative execution produce inconsistent results.</li><li>The model fits computations expressible as independent per-record work followed by aggregation per key.</li></ul>
+
+
+<pre class="code"><code>map(key1, value1) -&gt; list(key2, value2)
+reduce(key2, list(value2)) -&gt; list(value3)</code></pre>
+<div class="note">Keys define the grouping. Choosing the key is the real design decision: it determines both the result and how evenly the reducers are loaded.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>A job from start to finish</h2>
+<ul><li>The client submits the job with input paths, output path, and the map and reduce implementations.</li><li>The framework divides input into splits and schedules one map task per split on nodes near the data.</li><li>Each map task reads its split, applies the map function, and writes partitioned intermediate output.</li><li>Map output is buffered in memory, sorted per partition, spilled to disk when needed, and merged.</li><li>Reducers fetch their partitions from every map task — this is the shuffle — then merge-sort by key.</li><li>The reduce function runs once per key, and its output is written to durable storage, usually one file per reducer.</li><li>The job succeeds only when every task succeeds; the framework reports counters and status to the client.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Phase</th><th>Work</th><th>Data movement</th></tr></thead><tbody><tr><td>Map</td><td>Apply function to each record</td><td>Read local or nearby input</td></tr>
+<tr><td>Shuffle</td><td>Group map output by reducer</td><td>Network transfer of partitions</td></tr>
+<tr><td>Sort</td><td>Order by key for grouping</td><td>Local disk and memory</td></tr>
+<tr><td>Reduce</td><td>Aggregate all values per key</td><td>Write final output</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Submit job</span><span class="flow-arrow">→</span><span class="flow-step">Split input</span><span class="flow-arrow">→</span><span class="flow-step">Map tasks</span><span class="flow-arrow">→</span><span class="flow-step">Buffer, partition, spill</span><span class="flow-arrow">→</span><span class="flow-step">Shuffle</span><span class="flow-arrow">→</span><span class="flow-step">Merge-sort</span><span class="flow-arrow">→</span><span class="flow-step">Reduce tasks</span><span class="flow-arrow">→</span><span class="flow-step">Write output</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Input splits and the map phase</h2>
+<ul><li>An <strong>input split</strong> is a logical range of the input, not necessarily one physical file; a large file becomes many splits.</li><li>Splits are usually aligned with storage blocks so a map task can read mostly local data.</li><li>One map task processes one split; more splits mean more parallelism, but also more task overhead.</li><li>A <strong>record reader</strong> turns the raw bytes into records and handles records that cross block boundaries.</li><li>The map function emits intermediate pairs into a circular memory buffer rather than writing each one to disk.</li><li>When the buffer fills, its contents are partitioned by destination reducer, sorted by key, and spilled to disk.</li><li>Map-side work is embarrassingly parallel; the expensive coordination begins only after the maps produce output.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Shuffle and sort: the expensive middle</h2>
+<p class="lede">Shuffle is where MapReduce earns its cost. Every reducer needs every value for its keys, so data crosses the network.</p>
+<ul><li>Each map output is partitioned by the <strong>partitioner</strong>, so all values for a key go to the same reducer.</li><li>Within a partition, records are sorted by key; this sort is what lets the reducer group values without a hash table over the whole dataset.</li><li>Spills are merged into larger sorted runs before being fetched, reducing random reads and file count.</li><li>Reducers fetch their partitions from all map tasks, then merge-sort the incoming runs by key.</li><li>The shuffle is sensitive to record size, compression, partition count, and the number of map outputs per reducer.</li><li>Too few reducers underuse the cluster; too many create small files and scheduling overhead.</li><li>Compressing intermediate data trades CPU for network and disk, and is usually worth it on large shuffles.</li></ul>
+
+
+<div class="note">A job can be slow with fast map and reduce functions simply because the shuffle is moving too much data. Reduce what the map emits before tuning anything else.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>The reduce phase</h2>
+<ul><li>The reducer receives a key and an iterator over all its values, already grouped by the shuffle.</li><li>It applies the reduce function once per key, so state can be kept across values of that key but not across keys.</li><li>Output is written through the output format, often one part file per reducer.</li><li>The number of output files equals the number of reducers, which matters for downstream readers and small-file problems.</li><li>A reducer with no input still produces an empty part file unless the framework suppresses it.</li><li>Reduce-side work cannot start until its input partitions are available, so a few slow maps delay every reducer.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Combiners and partitioners</h2>
+<ul><li>A <strong>combiner</strong> runs on the map side and partially aggregates values for the same key before they are shuffled.</li><li>It is semantically safe only when the operation is associative and commutative, such as sum, count, min, or max.</li><li>The framework may run a combiner zero, one, or many times, so it must not change the final result.</li><li>A combiner can cut shuffle volume dramatically when many records share a key, and do nothing when keys are unique.</li><li>The <strong>partitioner</strong> maps a key to a reducer; the default hash partitioner spreads keys reasonably well.</li><li>A custom partitioner can keep related keys together or isolate a hot key, but it must still be deterministic.</li><li>The number of reducers sets the number of partitions; it is a tuning knob and a correctness-relevant choice for output layout.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Component</th><th>Runs where</th><th>Purpose</th><th>Constraint</th></tr></thead><tbody><tr><td>Combiner</td><td>Map side, before shuffle</td><td>Shrink intermediate data</td><td>Associative, commutative, no side effects</td></tr>
+<tr><td>Partitioner</td><td>Map side, on each key</td><td>Choose the destination reducer</td><td>Deterministic, reasonably balanced</td></tr>
+<tr><td>Reducer</td><td>Reduce side</td><td>Compute final per-key result</td><td>Sees all values for one key</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Fault tolerance</h2>
+<ul><li>The framework assumes machines fail and reruns failed tasks on other nodes rather than aborting the job.</li><li>A failed map task is retried; its completed output on the failed node is lost and must be regenerated.</li><li>A failed reduce task is retried, but its completed output is usually written atomically so partial files do not survive.</li><li>The master tracks task state and reschedules work when a worker stops heartbeating.</li><li>Map output is intermediate and can be recomputed from the durable input, which is why recomputation is an acceptable recovery strategy.</li><li>Retries are bounded; a task that fails repeatedly is marked failed and the job reports it rather than looping forever.</li><li>Deterministic functions make retries safe; side effects such as writing to an external system outside the framework do not.</li></ul>
+
+
+<div class="note">The original design had a single master. Losing it meant losing the job, which is why later systems added master high availability.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Stragglers and speculative execution</h2>
+<ul><li>A job finishes only when its slowest task finishes, so one slow node can dominate total runtime.</li><li>Causes include a bad disk, a busy host, uneven input, or a garbage-collection pause.</li><li><strong>Speculative execution</strong> launches a duplicate attempt for a task that is progressing far behind its peers.</li><li>The first attempt to complete wins, and the duplicate is killed to avoid double-counting output.</li><li>Speculation wastes cluster capacity, so it should be off for non-idempotent or expensive side-effecting tasks.</li><li>It treats the symptom, not the cause; persistent stragglers usually point to skew or unhealthy hardware.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Data skew and hot keys</h2>
+<ul><li>Skew appears when one key has far more values than others, so one reducer does most of the work while the rest idle.</li><li>The default hash partitioner cannot split a single key across reducers, because all values for a key must meet.</li><li>A <strong>custom partitioner</strong> can spread known hot keys, but it complicates the reduce contract.</li><li><strong>Salting</strong> appends a random suffix to a hot key in the map, computes partial results, then aggregates the partials in a second pass.</li><li><strong>Two-stage aggregation</strong> reduces locally by salted key, then globally by the original key.</li><li>A map-side combiner often shrinks a hot key's data enough to make the skew tolerable without changing the algorithm.</li><li>Detect skew from per-reducer input sizes and runtimes; if one reducer is much larger, the partitioning is the problem.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Technique</th><th>How it works</th><th>Cost</th></tr></thead><tbody><tr><td>Combiner</td><td>Aggregate partial values on the map side</td><td>Only works for associative operations</td></tr>
+<tr><td>Custom partitioner</td><td>Route hot keys deliberately</td><td>Must know the key distribution</td></tr>
+<tr><td>Salting</td><td>Split a hot key into random subkeys</td><td>Needs a second aggregation pass</td></tr>
+<tr><td>More reducers</td><td>Increase partition count</td><td>Does not split one hot key</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Limits and where MapReduce fits today</h2>
+<ul><li>Each job reads input and writes output to durable storage, so iterative algorithms pay a full round trip per iteration.</li><li>It is a batch model: latency is minutes or more, not milliseconds, and it is a poor fit for interactive queries.</li><li>Complex pipelines become chains of jobs, and each intermediate stage is materialized.</li><li>It shines for one-pass scans and aggregations over very large immutable datasets where throughput matters more than latency.</li><li>Modern engines such as Spark keep intermediate data in memory and plan a DAG of stages, which removes many of these costs.</li><li>Warehouses and lakehouse engines now handle most SQL-shaped batch work that MapReduce once did.</li><li>The ideas survive everywhere: partition input, process locally, shuffle by key, tolerate failure by recomputation, and use combiners.</li></ul>
+
+
+<div class="note">In an interview, present MapReduce as the conceptual foundation for distributed batch processing, not as the default engine for a new pipeline.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Worked example: word count</h2>
+<p class="lede">Word count is the canonical job because it shows every phase in a few lines.</p>
+<ul><li>The map function emits <code>(word, 1)</code> for every word in its split.</li><li>A combiner sums the ones per word on the map side, turning repeated words into a single partial count.</li><li>The partitioner hashes each word to a reducer, so all occurrences of a word reach the same place.</li><li>The shuffle merge-sorts by word, and the reducer sums the partial counts for that word.</li><li>The output is one <code>(word, total)</code> line per distinct word, spread across reducer part files.</li><li>Swapping the combiner for a non-associative operation would change results and is therefore invalid.</li></ul>
+
+<div class="flow"><span class="flow-step">Split documents</span><span class="flow-arrow">→</span><span class="flow-step">Map to (word, 1)</span><span class="flow-arrow">→</span><span class="flow-step">Combine per split</span><span class="flow-arrow">→</span><span class="flow-step">Partition by word</span><span class="flow-arrow">→</span><span class="flow-step">Shuffle and sort</span><span class="flow-arrow">→</span><span class="flow-step">Sum per word</span><span class="flow-arrow">→</span><span class="flow-step">Write part files</span></div>
+<pre class="code"><code>map(doc):
+  for word in doc.split():
+    emit(word, 1)
+
+combine(word, counts):
+  emit(word, sum(counts))
+
+reduce(word, counts):
+  emit(word, sum(counts))</code></pre>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Answering a MapReduce design question</h2>
+<ul><li>Confirm the workload is batch and large enough that a single machine is genuinely infeasible.</li><li>Define the output grain first; that usually reveals the key the reducers must group on.</li><li>Check whether the aggregation is associative so a combiner is legal.</li><li>Estimate shuffle volume, because that is usually the bottleneck rather than map compute.</li><li>Plan for skew: identify hot keys before choosing the partition count.</li><li>Ask whether a newer engine would be simpler, and justify MapReduce only if its constraints fit.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Framework-managed distribution</strong> removes coordination code from each job but takes control away from the programmer.</li><li><strong>Recomputation-based recovery</strong> avoids replicating intermediate data but lengthens recovery and wastes work.</li><li><strong>Combiners</strong> cut shuffle volume but are only valid for associative, commutative operations.</li><li><strong>More reducers</strong> increase parallelism but create more output files and scheduling overhead.</li><li><strong>Speculative execution</strong> shortens straggler-dominated jobs but consumes extra capacity and risks duplicate side effects.</li><li><strong>Sort-based shuffle</strong> enables scalable grouping but writes intermediate data to disk.</li><li><strong>Materializing every stage</strong> makes recovery simple but makes iterative algorithms expensive.</li><li><strong>Custom partitioning</strong> can fix skew or co-locate keys but couples the job to the data distribution.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is MapReduce in one sentence?</summary><div class="answer"><p>A batch framework that processes data in parallel across machines with a map function per record and a reduce function per key, while the framework handles partitioning, shuffling, sorting, and failure recovery.</p></div></details>
+<details><summary>2. Explain the map phase.</summary><div class="answer"><p>The framework splits the input and assigns one split per map task, preferably near the data. The map function emits intermediate key-value pairs, which are buffered, partitioned by destination reducer, sorted, and spilled to disk.</p></div></details>
+<details><summary>3. What happens during shuffle and sort?</summary><div class="answer"><p>Map outputs are partitioned and sorted locally, then fetched by the reducers that own each partition. Reducers merge-sort the incoming runs by key so that all values for a key arrive together and can be passed to one reduce call.</p></div></details>
+<details><summary>4. What does the reducer receive?</summary><div class="answer"><p>A key and an iterator over all values emitted for that key across every map task. It runs once per key and writes its output through the job's output format, typically one part file per reducer.</p></div></details>
+<details><summary>5. What is a combiner and when is it safe?</summary><div class="answer"><p>A map-side partial aggregation that reduces shuffle volume. It is safe only when the operation is associative and commutative and has no side effects, because the framework may run it zero, one, or many times.</p></div></details>
+<details><summary>6. How does MapReduce tolerate a machine failure?</summary><div class="answer"><p>The master detects missed heartbeats and reschedules the node's tasks elsewhere. Completed map output is lost and recomputed from durable input; reduce output is written atomically, so a failed attempt does not leave a partial result.</p></div></details>
+<details><summary>7. Why is the master a concern?</summary><div class="answer"><p>In the original design the master tracked all task state, so losing it lost the job. Later implementations added master high availability and external resource management.</p></div></details>
+<details><summary>8. What is speculative execution?</summary><div class="answer"><p>When a task lags far behind its peers, the framework runs a duplicate attempt and accepts the first to finish. It helps with stragglers but wastes capacity and is unsafe for tasks with external side effects.</p></div></details>
+<details><summary>9. How do you handle data skew?</summary><div class="answer"><p>First use a combiner to shrink the hot key locally. If that is not enough, salt the key and do a two-stage aggregation, or use a custom partitioner. Adding reducers alone does not split a single hot key.</p></div></details>
+<details><summary>10. Why did MapReduce fall out of favor for many workloads?</summary><div class="answer"><p>It materializes every stage to durable storage, which makes iteration and multi-step pipelines slow, and it has high latency. Spark and modern warehouse engines keep data in memory and plan whole DAGs, while retaining the same partition-and-shuffle ideas.</p></div></details>
+<details><summary>11. When would MapReduce still be a reasonable choice?</summary><div class="answer"><p>For large, one-pass batch scans and aggregations over immutable data where throughput matters more than latency, especially on an existing Hadoop deployment. It is a poor fit for iterative ML, interactive queries, or small datasets.</p></div></details>
+<details><summary>12. Design a job that finds the top 10 products by revenue.</summary><div class="answer"><p>Map each sale to <code>(product_id, revenue)</code>, combine per split to cut shuffle volume, partition by product, and reduce to a per-product total. A second job, or a single-reducer final stage, sorts the totals and keeps the top 10. The final stage is intentionally small because it must see all products.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Using a combiner for an operation that is not associative, then getting wrong results.</li><li>Assuming more reducers will fix a single hot key.</li><li>Ignoring shuffle volume and tuning only map or reduce code.</li><li>Writing side effects to an external system from map or reduce tasks, where retries duplicate them.</li><li>Treating MapReduce as low-latency or suitable for iterative algorithms.</li><li>Forgetting that output is split into one part file per reducer.</li><li>Letting the number of reducers default without considering output size and downstream readers.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="etl-pipelines.html"><span>← Previous</span><strong>ETL Pipelines</strong></a><a class="next" href="data-lakes.html"><span>Next →</span><strong>Data Lakes</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/mapreduce">AlgoMaster — MapReduce</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

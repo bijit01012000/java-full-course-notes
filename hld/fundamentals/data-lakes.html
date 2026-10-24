@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Lakes — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 38 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Data Lakes</h1>
+    <p class="dek">Big Data Processing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/data-lakes">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why data lakes exist</a>
+<a href="#s2">Storage and zones</a>
+<a href="#s3">Schema-on-read</a>
+<a href="#s4">File formats and compression</a>
+<a href="#s5">Layout and partitioning</a>
+<a href="#s6">Catalog and metadata</a>
+<a href="#s7">Query engines and separation of storage and compute</a>
+<a href="#s8">Governance and security</a>
+<a href="#s9">The lakehouse: adding warehouse guarantees</a>
+<a href="#s10">Failure modes and the data swamp</a>
+<a href="#s11">Choosing lake, warehouse, or lakehouse</a>
+<a href="#s12">Designing a lake in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A data lake stores raw data from many sources in cheap object storage and applies schema when it is read, which makes it flexible and inexpensive but puts the burden of cataloging, governance, and quality on the organization.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Data lake</dt><dd>A central repository that holds raw and processed data from many sources in its native format, usually on object storage.</dd></div><div class="term"><dt>Schema-on-read</dt><dd>The reader interprets the data's structure at query time, so no schema is enforced when the data is written.</dd></div><div class="term"><dt>Object storage</dt><dd>Durable, cheap, flat-namespaced storage such as S3 or GCS, the usual foundation for a lake.</dd></div><div class="term"><dt>Data catalog</dt><dd>A metadata service that records datasets, schemas, locations, owners, and partitions so data can be discovered.</dd></div><div class="term"><dt>Partitioning</dt><dd>Physically organizing files by column values, such as date or region, so queries can skip irrelevant data.</dd></div><div class="term"><dt>Columnar format</dt><dd>A file layout such as Parquet or ORC that stores values by column, enabling compression and column pruning.</dd></div><div class="term"><dt>Lakehouse</dt><dd>A lake plus an open table format that adds ACID transactions, schema enforcement, and time travel.</dd></div><div class="term"><dt>Data swamp</dt><dd>A lake without ownership, cataloging, or quality control, where data exists but cannot be trusted or found.</dd></div><div class="term"><dt>Small-file problem</dt><dd>A layout with many tiny files that overwhelms metadata operations and degrades query planning.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why data lakes exist</h2>
+<p class="lede">A warehouse expects data to be cleaned and modeled before loading. A lake takes the opposite approach: keep everything in its original form and decide later.</p>
+<ul><li>Companies produce far more data than they can model upfront: events, logs, queries, exports, images, audio, and documents.</li><li>Some of that data has no known schema yet, and modeling it early would discard detail or block ingestion.</li><li>Cheap object storage makes it practical to retain raw history at a fraction of warehouse cost.</li><li>Different teams want different transformations of the same source, so the raw copy becomes the shared origin.</li><li>A lake also holds non-tabular data that a relational warehouse handles poorly.</li><li>Flexibility is the selling point and also the risk: without discipline, the lake becomes an unqueryable dump.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Storage and zones</h2>
+<ul><li>The physical foundation is object storage: durable, replicated by the provider, and effectively unbounded.</li><li>Object stores offer simple put, get, list, and delete operations; they are not POSIX file systems.</li><li>Data is organized into zones such as <strong>raw</strong>, <strong>cleaned</strong>, and <strong>curated</strong> or <strong>trusted</strong>.</li><li>The raw zone is append-only and immutable; reprocessing starts from it when logic changes.</li><li>The cleaned zone has parsed, typed, deduplicated data; the curated zone serves analysts and models.</li><li>Each zone should have named owners, retention rules, and access controls.</li><li>Separation of storage from compute lets many engines query the same bytes without copying them.</li></ul>
+
+<div class="flow"><span class="flow-step">Sources</span><span class="flow-arrow">→</span><span class="flow-step">Raw zone (immutable)</span><span class="flow-arrow">→</span><span class="flow-step">Cleaned zone</span><span class="flow-arrow">→</span><span class="flow-step">Curated zone</span><span class="flow-arrow">→</span><span class="flow-step">Consumers</span></div>
+<div class="note">Keeping the raw layer immutable is what makes a lake replayable. If the first transform overwrites the source data, you lose the ability to fix history.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Schema-on-read</h2>
+<ul><li>Data is written without a enforced table schema; the reader supplies column names and types when querying.</li><li>This allows ingestion before the shape or use case is fully known.</li><li>It also means one bad file can break a query, because nothing rejected it at write time.</li><li>Different readers may interpret the same files differently, producing inconsistent answers.</li><li>Type mismatches, changed columns, and corrupt records surface at query time rather than at load time.</li><li>A catalog with declared schemas restores much of the safety while keeping flexible ingestion.</li><li>Schema-on-read shifts validation work from the writer to every reader and to the platform team.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Schema-on-write</th><th>Schema-on-read</th></tr></thead><tbody><tr><td>When schema is enforced</td><td>Before or during load</td><td>At query time</td></tr>
+<tr><td>Ingestion speed</td><td>Slower, requires modeling</td><td>Fast, accept first</td></tr>
+<tr><td>Bad data</td><td>Rejected early</td><td>Discovered later</td></tr>
+<tr><td>Flexibility</td><td>Lower</td><td>Higher</td></tr>
+<tr><td>Typical home</td><td>Warehouse</td><td>Lake</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>File formats and compression</h2>
+<ul><li>CSV and JSON are easy to produce and read but verbose, weakly typed, and slow to scan at scale.</li><li><strong>Parquet</strong> and <strong>ORC</strong> are columnar: queries read only the columns they need and compress well.</li><li><strong>Avro</strong> is row-based with a schema, which suits write-heavy event data and schema evolution.</li><li>Compression such as Snappy, Zstandard, or gzip reduces storage and I/O, at some CPU cost.</li><li>Columnar files store statistics that let readers skip row groups that cannot match a filter.</li><li>Many small files are worse than fewer large files; aim for a sensible target file size.</li><li>Format choice must match access: full-row event replay favors Avro, analytical scans favor Parquet.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Layout and partitioning</h2>
+<ul><li>Partition by the columns most queries filter on, usually date and sometimes region or tenant.</li><li>Partitioning creates directory-like prefixes that let engines skip entire groups of files.</li><li>Over-partitioning produces too many small files and directories, which slows listing and planning.</li><li>High-cardinality keys such as user ID make poor partition columns; cluster or sort within files instead.</li><li>A consistent path convention and partition naming scheme is part of the data contract.</li><li>Late data must still land in the correct partition, so the writer, not the clock, decides the path.</li><li>Compaction jobs merge small files and rewrite partitions to keep scan performance stable.</li></ul>
+
+
+<div class="note">Partition pruning only helps if queries filter on the partition column. A beautiful layout that nobody queries by is pure overhead.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Catalog and metadata</h2>
+<ul><li>A <strong>catalog</strong> records datasets, schemas, locations, formats, partitions, and ownership.</li><li>It is the difference between a searchable lake and a bucket that only its author understands.</li><li>Catalogs support discovery, access control, and lineage integration with the query engine.</li><li>Schema versions should be tracked so readers know what a table looked like at a given time.</li><li>Statistics such as row counts and min/max values help the query planner avoid unnecessary scans.</li><li>A crawler can infer schemas, but inferred types are often wrong and need review.</li><li>The catalog must be updated as part of the write path, not as an occasional manual cleanup.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Query engines and separation of storage and compute</h2>
+<ul><li>Engines such as Trino, Presto, Spark, Athena, and warehouse query services read directly from object storage.</li><li>Storage and compute scale independently: keep petabytes resident and spin up compute only for queries.</li><li>This makes it cheap to retain data but easy to create runaway query cost.</li><li>Each engine has its own SQL dialect, functions, and performance characteristics, which affects portability.</li><li>Query performance depends heavily on file layout, partitioning, and statistics rather than only on engine power.</li><li>A metastore or catalog shared across engines keeps definitions consistent.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Governance and security</h2>
+<ul><li>The lake crosses many teams, so access must be controlled per dataset, column, and sometimes row.</li><li>Classify data at ingestion: public, internal, confidential, and personal data each need different handling.</li><li>Mask, tokenize, or encrypt sensitive fields such as email, phone, and government IDs.</li><li>Enforce retention and deletion; a lake that never deletes is a compliance liability.</li><li>Track lineage from source to derived table so a deletion request or bad source can be traced.</li><li>Audit who read which dataset and when, especially for regulated data.</li><li>Without ownership, nobody fixes quality or responds when a dataset is wrong.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>The lakehouse: adding warehouse guarantees</h2>
+<p class="lede">A lakehouse keeps lake storage but adds a table layer that provides the reliability analysts expect from a warehouse.</p>
+<ul><li>Open table formats such as Delta Lake, Apache Iceberg, and Apache Hudi add a transaction log over data files.</li><li>They provide ACID commits, so readers never see a half-written batch.</li><li>They support <code>MERGE</code>, deletes, and updates, which plain Parquet directories cannot do safely.</li><li>Schema enforcement and evolution become explicit rather than accidental.</li><li>Time travel queries let teams reproduce a report or roll back a bad write.</li><li>Background compaction and file pruning manage the small-file problem.</li><li>The lakehouse narrows the gap with a warehouse but still requires cataloging, governance, and modeling.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Capability</th><th>Raw lake</th><th>Lakehouse</th><th>Warehouse</th></tr></thead><tbody><tr><td>Cheap raw storage</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+<tr><td>ACID transactions</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>Schema enforcement</td><td>Optional</td><td>Yes, with evolution</td><td>Yes</td></tr>
+<tr><td>Open file formats</td><td>Yes</td><td>Yes</td><td>Usually proprietary</td></tr>
+<tr><td>Handles unstructured data</td><td>Yes</td><td>Partly</td><td>No</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Failure modes and the data swamp</h2>
+<ul><li>No catalog or ownership: data exists, but nobody can find it or knows whether it is current.</li><li>No quality checks: dashboards read corrupt or duplicated files and look authoritative.</li><li>Unbounded raw ingestion with no retention policy turns storage into a cost and compliance problem.</li><li>Too many small files make even simple queries slow and expensive.</li><li>Schema drift breaks readers because nothing validated the writer's output.</li><li>Duplicate pipelines compute the same metric differently, so two teams report different numbers.</li><li>Sensitive data lands in an open bucket because access control was added later.</li></ul>
+
+
+<div class="note">The lake did not fail because of object storage. It failed because ingestion was treated as the end of the project rather than the start of stewardship.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Choosing lake, warehouse, or lakehouse</h2>
+<ul><li>Choose a <strong>warehouse</strong> when the questions are known, the data is structured, and governed SQL performance matters most.</li><li>Choose a <strong>lake</strong> when you must retain raw and unstructured data cheaply and use cases are still emerging.</li><li>Choose a <strong>lakehouse</strong> when you want lake economics and open formats but need transactions and updates.</li><li>Most organizations end up with both: a lake for raw and ML data, a warehouse or lakehouse marts layer for BI.</li><li>The deciding constraints are usually governance, concurrency, query latency, and cost — not storage format alone.</li><li>Whatever you choose, the catalog and quality layer matter more than the label.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Designing a lake in an interview</h2>
+<ul><li>Start with the sources and the questions; do not start by naming a file format.</li><li>Define zones and ownership, and make the raw zone immutable.</li><li>Choose formats per access pattern: columnar for analytics, row-based for event replay.</li><li>Partition by the dominant filter column and compact small files on a schedule.</li><li>Register every dataset in a catalog with schema, owner, and classification.</li><li>Add quality checks, lineage, retention, and access control before opening the lake to analysts.</li><li>Plan for backfills by keeping raw history and making derived partitions rebuildable.</li></ul>
+
+<div class="flow"><span class="flow-step">Sources</span><span class="flow-arrow">→</span><span class="flow-step">Immutable raw</span><span class="flow-arrow">→</span><span class="flow-step">Catalog and classify</span><span class="flow-arrow">→</span><span class="flow-step">Clean and conform</span><span class="flow-arrow">→</span><span class="flow-step">Quality checks</span><span class="flow-arrow">→</span><span class="flow-step">Curated tables</span><span class="flow-arrow">→</span><span class="flow-step">Governed access</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Schema-on-read</strong> speeds ingestion and preserves flexibility but defers errors to query time and every reader.</li><li><strong>Raw retention</strong> enables replay and new use cases but increases storage cost and compliance exposure.</li><li><strong>Many small files</strong> make writes simple but degrade query planning and metadata operations.</li><li><strong>Partitioning</strong> prunes scans but over-partitioning creates a small-file and directory explosion.</li><li><strong>Open formats</strong> avoid lock-in and support many engines but lack the mature optimizer of a proprietary warehouse.</li><li><strong>Lakehouse table formats</strong> add ACID and updates but introduce compaction, catalog, and concurrency complexity.</li><li><strong>Central lake ownership</strong> improves governance but can bottleneck teams; federated ownership moves faster but drifts.</li><li><strong>Keeping everything</strong> maximizes future optionality but conflicts with deletion requirements and cost control.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a data lake?</summary><div class="answer"><p>A central repository that stores raw and processed data from many sources in native formats, typically on object storage. It is queried by multiple engines and relies on schema-on-read and a catalog rather than upfront modeling.</p></div></details>
+<details><summary>2. How does a lake differ from a warehouse?</summary><div class="answer"><p>A warehouse enforces schema and modeling before load and optimizes structured SQL. A lake accepts raw data cheaply and applies structure at read time. Warehouses favor governance and performance; lakes favor flexibility, volume, and varied data types.</p></div></details>
+<details><summary>3. What is schema-on-read and what is the cost?</summary><div class="answer"><p>The reader interprets structure at query time, so ingestion does not need a fixed schema. The cost is that bad or changed data is discovered late, different readers may disagree, and every query pays interpretation overhead.</p></div></details>
+<details><summary>4. Why does file format matter in a lake?</summary><div class="answer"><p>Analytical queries benefit from columnar formats that read only needed columns and compress well. Row formats suit full-record replay. Poor formats and many small files turn cheap storage into slow, expensive scans.</p></div></details>
+<details><summary>5. How do you organize a lake?</summary><div class="answer"><p>Use immutable raw, cleaned, and curated zones with named owners. Partition by the dominant filter column, keep files reasonably large, register datasets in a catalog, and apply classification and retention rules.</p></div></details>
+<details><summary>6. What does a catalog do?</summary><div class="answer"><p>It stores dataset names, schemas, locations, partitions, owners, and statistics so users and engines can find and correctly read data. It is also the anchor for access control and lineage.</p></div></details>
+<details><summary>7. What is a data swamp and how do you avoid it?</summary><div class="answer"><p>A lake that has lost discoverability and trust. Avoid it with ownership, a catalog, ingestion contracts, quality checks, retention rules, and access control enforced from the start rather than added later.</p></div></details>
+<details><summary>8. What is a lakehouse?</summary><div class="answer"><p>Lake storage plus an open table format that adds a transaction log, ACID commits, schema enforcement, upserts, and time travel. It gives warehouse-like reliability without moving data into a proprietary store.</p></div></details>
+<details><summary>9. How do you handle updates and deletes in a lake?</summary><div class="answer"><p>Use a table format that supports <code>MERGE</code> and deletes with snapshot isolation, or rewrite the affected partitions. Plain Parquet directories cannot do this safely under concurrent writers.</p></div></details>
+<details><summary>10. What is the small-file problem?</summary><div class="answer"><p>Many tiny files force the engine to open and plan across huge numbers of objects, which dominates query time. Compact files periodically and avoid over-partitioning or per-event files.</p></div></details>
+<details><summary>11. How do you secure a data lake?</summary><div class="answer"><p>Classify data on ingestion, enforce least-privilege access at dataset and column level, mask or tokenize personal data, encrypt at rest and in transit, audit access, and apply retention and deletion policy.</p></div></details>
+<details><summary>12. When would you still choose a warehouse over a lake?</summary><div class="answer"><p>When the questions are well known, data is structured, many analysts need fast concurrent SQL, and strong governance matters more than raw flexibility. A lakehouse can cover both, but a warehouse is simpler if the scope is narrow.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Calling any bucket of files a data lake and skipping the catalog.</li><li>Assuming schema-on-read means no schema management is needed.</li><li>Partitioning by a high-cardinality column such as user ID.</li><li>Letting every event become its own small file.</li><li>Storing personal data in the lake without classification or deletion policy.</li><li>Building a lakehouse table format and assuming it solves ownership and quality by itself.</li><li>Keeping raw data forever without a retention or cost plan.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="mapreduce.html"><span>← Previous</span><strong>MapReduce</strong></a><a class="next" href="data-warehousing.html"><span>Next →</span><strong>Data Warehousing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/data-lakes">AlgoMaster — Data Lakes</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

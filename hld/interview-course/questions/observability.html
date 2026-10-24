@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design Observability — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 25 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p2">P2 · Operations</span></div>
+    <h1>Design Observability</h1>
+    <p class="dek">Interviewers use this to check whether you can operate what you build: turning logs, metrics, and traces into detection and diagnosis, and paging a human only when action is genuinely needed.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Instrument every service with structured logs, low-cardinality metrics, and sampled traces that share a trace ID, then page on SLO burn for user-visible symptoms while keeping logs and traces one click from the alert.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Ingest logs, metrics, and traces from services, gateways, background workers, and the edge.</li><li>Correlate all telemetry for one request across services by a shared trace or correlation ID.</li><li>Query and dashboard by service, endpoint, error type, or business entity over a time range.</li><li>Evaluate alert rules, deduplicate them into incidents, and route pages or tickets to the owning team.</li><li>Track SLOs and error budgets per user journey and per service.</li><li>Keep an incident timeline and an audit trail of who acknowledged, mitigated, and changed what.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Telemetry ingestion must not block or materially slow the request path; buffer and batch asynchronously.</li><li>Metrics should appear within seconds and logs within about a minute, fast enough to debug a live incident.</li><li>The observability stack needs its own blast radius; an outage in the systems it watches must not take it down.</li><li>Cost must stay bounded through sampling, low cardinality, compression, and tiered retention.</li><li>Sensitive data must be redacted before ingestion, with per-team access control and audit.</li><li>Alerts must survive collector restarts without duplicate pages or silently missed conditions.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 50 services and 20k requests/s at peak, with one structured log line per request at about 1 KB: roughly 20 MB/s of raw logs before sampling, so success logs need sampling while errors are kept.</li><li>About 200 active metric series per service at a 15-60s scrape interval gives roughly 10k active series; adding user_id or request_id as a label would multiply that by orders of magnitude.</li><li>Keep 100 percent of traces for errors and slow requests and sample 1-5 percent of successful ones, at 20-50 spans per trace and a few hundred bytes per span.</li><li>Retention of 7-30 days hot and searchable, about 90 days in object storage, and 1 year for audit logs keeps the expensive tier small.</li><li>Aim for fewer than two pages per on-call shift, each with an owner, a runbook, and a dashboard link.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Service</span><span class="fields">service_id, name, team, tier, slo_id, runbook_url</span></div><div class="entity"><span class="name">SLO</span><span class="fields">slo_id, service_id, sli_query, target, window, error_budget</span></div><div class="entity"><span class="name">TelemetryRecord</span><span class="fields">trace_id, span_id, service, timestamp, level, message, fields</span></div><div class="entity"><span class="name">MetricSeries</span><span class="fields">name, labels, unit, timestamp, value</span></div><div class="entity"><span class="name">AlertRule</span><span class="fields">rule_id, query, threshold, for_window, severity, owner, runbook_url</span></div><div class="entity"><span class="name">Incident</span><span class="fields">incident_id, rule_ids, started_at, acknowledged_by, status, postmortem_url</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/logs</code></td><td>Batch-ingest structured log entries carrying service, level, trace_id, and stable fields.</td></tr><tr><td><code>POST</code></td><td><code>/v1/metrics</code></td><td>Ingest metric samples from agents and client libraries with a bounded label set.</td></tr><tr><td><code>POST</code></td><td><code>/v1/spans</code></td><td>Ingest trace spans for one or more traces, including parent span and duration.</td></tr><tr><td><code>GET</code></td><td><code>/v1/traces/{trace_id}</code></td><td>Return the full trace and the log entries linked to that trace ID.</td></tr><tr><td><code>GET</code></td><td><code>/v1/query</code></td><td>Query logs or metric series by service, signal, filters, and time range.</td></tr><tr><td><code>POST</code></td><td><code>/v1/alert-rules</code></td><td>Create or update a rule with its query, for-window, severity, owner, and runbook.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Ingestion path</td><td>A per-host or sidecar agent buffers in memory and ships OTLP batches to a collector tier</td><td>The request path must never block on the observability backend, and a collector absorbs retries and protocol translation.</td></tr><tr><td>Metric storage</td><td>A time-series store keyed by metric name plus a small fixed label set, never user_id or request_id</td><td>Low cardinality keeps index size, query cost, and ingestion affordable; high-cardinality detail belongs in logs and traces.</td></tr><tr><td>Log storage</td><td>Append-only, time-partitioned storage with hot searchable days and cold object-storage tiers</td><td>Logs are immutable, queried mainly by time and service, and older data is rarely read but must still exist for audits.</td></tr><tr><td>Trace storage</td><td>Span rows keyed by trace_id, head sampling for successes plus tail sampling for errors and slow requests</td><td>Storing every successful trace is expensive, while the requests that matter for debugging are the failures and outliers.</td></tr><tr><td>Correlation</td><td>Generate trace_id at the gateway, propagate it with W3C traceparent and event attributes, and attach it to every log line</td><td>One identifier joins logs, traces, and alert context without guessing from timestamps or user IDs.</td></tr><tr><td>Alert state</td><td>Evaluate rules in a stateless engine, keyed by a rule fingerprint plus a for-window, with dedupe and acknowledgement in a small KV store</td><td>The engine can scale horizontally while duplicate notifications and repeated pages for one incident are suppressed.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  U[📱 Client] --> G[🛡️ API Gateway]
+  G --> A[⚙️ Service A]
+  G --> B[⚙️ Service B]
+  A --> C[📡 OTel Collector]
+  B --> C
+  C --> M[📊 Metrics TSDB]
+  C --> L[🗄️ Log Store]
+  C --> T[🧭 Trace Store]
+  M --> R[🚨 Alert Engine]
+  R --> P[📟 On-call]
+  L --> D[📈 Dashboards]
+  T --> D
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef alert fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class U client;
+  class G,A,B,C svc;
+  class M,L,T,D store;
+  class R,P alert;</div><div class="diagram-caption">Services emit logs, metrics, and spans through a collector into separate stores; the alert engine reads metrics and pages the owner, while dashboards join all three signals by trace ID.</div></div>
+        <ul><li>Metrics detect, traces locate the slow hop, and logs explain the event; do not use one signal to do all three jobs.</li><li>Instrument at the boundaries first: inbound requests, outbound dependency calls, important state changes, and decisions such as a fallback or a tripped breaker.</li><li>Page on symptoms such as error-budget burn or failed checkouts; keep cause metrics on dashboards and as leading indicators, not as twenty separate pages.</li><li>Every alert carries the current value, threshold, window, owner, dashboard link, and runbook so the responder does not start by re-deriving the rule.</li><li>Run the observability stack with its own SLO and a dead-man switch; missing telemetry is a failure, not a quiet healthy system.</li><li>Propagate the trace ID through HTTP headers, queue messages, and scheduled jobs so asynchronous work stays attached to the request that caused it.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Tail-based trace sampling</td><td>Keeps complete traces for errors and slow requests, which are the ones investigators need</td><td>The collector must buffer spans until the trace completes, adding memory and pipeline complexity</td></tr><tr><td>Full log retention</td><td>Any past event can be reconstructed exactly</td><td>Volume grows with traffic and the hot search tier becomes the dominant bill</td></tr><tr><td>Rich metric labels</td><td>Faster slicing by region, endpoint, or tenant</td><td>Each extra label multiplies series and can make the time-series store unusable</td></tr><tr><td>Symptom-based paging</td><td>Roughly one page per incident and pages that map to user pain</td><td>Detection can lag a known leading cause, so some failures are caught later</td></tr><tr><td>Short alert for-window</td><td>Fast detection of a real outage</td><td>Brief spikes page repeatedly unless paired with a longer confirmation window</td></tr><tr><td>One central observability stack</td><td>A single search across every service and one place to manage access</td><td>It becomes a shared dependency and a large blast radius if it fails</td></tr><tr><td>Managed observability service</td><td>No storage or indexing cluster to operate</td><td>Per-GB ingest, data egress, lock-in, and data-residency constraints</td></tr><tr><td>Asynchronous log shipping</td><td>Protects request latency from a slow or unavailable backend</td><td>Buffered entries can be lost on a crash, so the buffer policy must be explicit</td></tr></tbody></table></div>
+        <ul><li>Tail-sample traces: keep every error and every request above the latency SLO, and sample routine successes aggressively.</li><li>Pre-aggregate at the collector with recording rules so dashboards and alerts read a few series instead of scanning raw events.</li><li>Use constant log messages with values in structured fields, so identical events group cleanly instead of creating a unique string per line.</li><li>Buffer, compress, and batch on ingest, and drop DEBUG first under backpressure rather than blocking the application.</li><li>Tier retention and delete on a schedule; audit logs can live for a year in cheap storage while debug logs expire in days.</li><li>Drop or aggregate labels that exceed a cardinality budget, and move the detail into exemplars or logs.</li><li>Link a metric bucket to a sample trace with an exemplar, so an alert jumps straight to a representative slow request.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why not just collect logs?</strong> Metrics are cheap to aggregate and alert on, traces show where time went, and logs explain one event in detail; each answers a different question.</div><div class="followup"><strong>What is a correlation ID and where is it created?</strong> It is generated at the edge or gateway and propagated through headers and messages so every service can write it on every log line and one search reconstructs the request.</div><div class="followup"><strong>Should you page on symptoms or causes?</strong> Page on symptoms because they match user impact one-to-one, and use cause metrics as dashboard context or as leading indicators for failures that reliably precede impact.</div><div class="followup"><strong>What is an error budget?</strong> It is one minus the SLO: the amount of unreliability allowed in the window, spent on releases and risk and used to justify freezing changes when exhausted.</div><div class="followup"><strong>What is burn-rate alerting?</strong> It measures how fast the error budget is being consumed; a fast burn over a short window pages now, while a slow burn over a long window opens a ticket.</div><div class="followup"><strong>How do you control metric cardinality?</strong> Keep labels to a small, bounded set such as service, endpoint, region, and status; put user and request identifiers in logs or trace attributes instead.</div><div class="followup"><strong>How do you keep observability costs down?</strong> Sample success telemetry, keep all errors, pre-aggregate metrics, compress and batch at the agent, and tier retention from hot search to cheap object storage.</div><div class="followup"><strong>How do you reduce alert fatigue?</strong> Delete non-actionable rules, downgrade slow-burn conditions to tickets, add for-windows and hysteresis, deduplicate into incidents, and inhibit downstream pages during a known dependency outage.</div><div class="followup"><strong>How do you monitor the monitoring system?</strong> Use a dead-man switch or heartbeat on expected telemetry, synthetic checks from the user path, and alerts on collector lag, dropped batches, and missing series.</div><div class="followup"><strong>What happens if the collector is down?</strong> Agents buffer within a bounded disk or memory limit, shed DEBUG and INFO first, and raise a local alarm if the buffer is close to overflowing.</div><div class="followup"><strong>Head sampling or tail sampling?</strong> Head sampling is decided at the start and is cheap but can miss rare failures; tail sampling waits for the whole trace and keeps errors and slow requests at the cost of buffering.</div><div class="followup"><strong>What would you alert on for checkout?</strong> Checkout success rate and latency against the SLO, error-budget burn, and a drop in completed orders versus baseline, with dependency errors and queue depth attached as context.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Paging on every CPU spike, disk at seventy percent, or other causes, so one incident produces many pages and responders stop trusting the pager.</li><li>Writing alert thresholds with no for-window, so every brief spike becomes an incident.</li><li>Putting user_id, request_id, or raw URLs in metric labels and then wondering why the time-series store melts.</li><li>Logging the same exception at every layer and alerting on the inflated error count.</li><li>Treating dashboards as alerting and assuming someone is watching when nobody knows an incident is happening.</li><li>Keeping every log forever in the expensive searchable tier and discovering the bill before discovering the outage.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="tls-mtls.html"><span>← Previous</span><strong>TLS and mTLS</strong></a><a class="next" href="circuit-breaker.html"><span>Next →</span><strong>Circuit Breaker and Bulkhead</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

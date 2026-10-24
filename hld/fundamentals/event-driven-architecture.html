@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Event-Driven Architecture — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 43 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Event-Driven Architecture</h1>
+    <p class="dek">Architectural Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/event-driven-architecture">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with direct calls</a>
+<a href="#s2">What event-driven architecture is</a>
+<a href="#s3">Broker, topics, partitions, and consumer groups</a>
+<a href="#s4">Events, commands, and queries</a>
+<a href="#s5">Three styles: notification, state transfer, sourcing</a>
+<a href="#s6">Delivery semantics and duplicates</a>
+<a href="#s7">Ordering</a>
+<a href="#s8">Eventual consistency and the user experience</a>
+<a href="#s9">Schema evolution and contracts</a>
+<a href="#s10">Failure handling in the stream</a>
+<a href="#s11">Debugging and observability</a>
+<a href="#s12">Choreography, orchestration, and fit</a>
+<a href="#s13">Designing an event-driven system</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Event-driven architecture replaces direct calls with facts: a producer announces that something happened, a broker stores and delivers it, and any number of consumers react on their own — trading immediate consistency and simple debugging for decoupling and resilience.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Event</dt><dd>An immutable statement that something happened, named in the past tense and carrying the facts needed to react.</dd></div><div class="term"><dt>Producer</dt><dd>The service that detects a state change and publishes an event without knowing who consumes it.</dd></div><div class="term"><dt>Broker</dt><dd>The middleware that receives, stores, and delivers events, decoupling producers from consumers in time and space.</dd></div><div class="term"><dt>Topic</dt><dd>A named, append-only stream of events that consumers subscribe to and that can often be replayed.</dd></div><div class="term"><dt>Partition</dt><dd>An ordered subset of a topic; ordering is guaranteed within a partition, not across the whole topic.</dd></div><div class="term"><dt>Consumer group</dt><dd>A set of consumers sharing the work of a subscription so each event is processed by one member per group.</dd></div><div class="term"><dt>Idempotency</dt><dd>The property that processing the same event twice leaves the system in the same state as processing it once.</dd></div><div class="term"><dt>Event sourcing</dt><dd>Persisting the sequence of events as the source of truth and deriving current state by replaying them.</dd></div><div class="term"><dt>Schema registry</dt><dd>A central store of event schemas and compatibility rules that producers and consumers validate against.</dd></div><div class="term"><dt>Eventual consistency</dt><dd>A guarantee that replicas converge once all events are processed, rather than agreeing at every instant.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with direct calls</h2>
+<p class="lede">When one service calls another directly, it must know where it lives, wait for a response, and handle the failure if the other side is slow or down.</p>
+<ul><li>The caller is coupled to the callee's address, availability, and latency at the moment of the request.</li><li>When many services need to react to the same change, the producer must know and call every one of them.</li><li>Adding a new consumer means changing the producer and redeploying it — a closed system.</li><li>Chains of synchronous calls multiply latency and the probability that at least one hop fails.</li><li>A consumer outage propagates back to the producer and then to the user.</li><li>The producer often ends up owning retry, ordering, and failure handling for work that is not its concern.</li><li>This is fine for simple request/response flows; it becomes awkward when many independent reactions are needed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What event-driven architecture is</h2>
+<ul><li>A service <strong>announces a fact</strong> — order placed, payment captured, user registered — and other services react.</li><li>The producer does not know who consumes the event or what they do with it.</li><li>A <strong>broker</strong> sits between them and handles storage, delivery, and often retention and replay.</li><li>Consumers can be added, removed, or restarted without changing the producer.</li><li>The flow is inverted: instead of asking for work, services subscribe to what they care about.</li><li>The architecture is asynchronous by default, so results are eventually consistent rather than immediate.</li><li>The win is decoupling in space (no addresses), time (no simultaneous availability), and change (no producer edits).</li></ul>
+
+<div class="flow"><span class="flow-step">Producer detects change</span><span class="flow-arrow">→</span><span class="flow-step">Publish event to broker</span><span class="flow-arrow">→</span><span class="flow-step">Broker stores and delivers</span><span class="flow-arrow">→</span><span class="flow-step">Consumers react independently</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Broker, topics, partitions, and consumer groups</h2>
+<ul><li>A <strong>topic</strong> is an append-only log or channel; a consumer subscribes rather than polling a producer.</li><li>The log model keeps events for a retention period, so a new consumer can replay history.</li><li>A topic is split into <strong>partitions</strong>; each partition is an ordered sequence, and partitions are processed in parallel.</li><li>The partition key decides placement — events with the same key land in the same partition and stay ordered.</li><li>A <strong>consumer group</strong> shares partitions among members, giving scale-out plus one logical subscription.</li><li>Different consumer groups each receive the full stream, so independent services do not steal each other's events.</li><li>Consumer offsets record progress; committing an offset is the acknowledgement that processing succeeded.</li><li>A queue differs from a log: once a message is acknowledged it is gone, and there is no replay for new readers.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Queue</th><th>Log / topic</th></tr></thead><tbody><tr><td>Delivery</td><td>One consumer per message</td><td>Every consumer group sees the event</td></tr>
+<tr><td>Replay</td><td>Generally no</td><td>Yes, within retention</td></tr>
+<tr><td>Ordering</td><td>Usually best-effort</td><td>Guaranteed within a partition</td></tr>
+<tr><td>Typical use</td><td>Work distribution</td><td>Event propagation and streams</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Events, commands, and queries</h2>
+<ul><li>An <strong>event</strong> is a past-tense fact: PaymentCaptured. It cannot be rejected, only reacted to.</li><li>A <strong>command</strong> is a request: CapturePayment. It has one intended recipient and can be refused.</li><li>A <strong>query</strong> asks for data and expects an answer synchronously.</li><li>Mixing commands and events in the same channel blurs ownership and makes failures ambiguous.</li><li>Commands are usually point-to-point through a queue; events are usually broadcast to a topic.</li><li>Name events for the business fact, not for the database operation that produced them.</li><li>If the producer needs the outcome, that is a command or a request/response flow, not an event.</li></ul>
+
+
+<div class="note">A useful test: if the sender expects a reply or can be refused, it is a command. If it merely reports what happened, it is an event.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Three styles: notification, state transfer, sourcing</h2>
+<ul><li><strong>Event notification:</strong> a thin event says only that something changed and carries an ID; consumers call back for details.</li><li>Notification keeps payloads small and contracts stable, but creates a callback dependency and possible read-after-write races.</li><li><strong>Event-carried state transfer:</strong> the event includes the changed fields, so consumers update local copies without calling back.</li><li>State transfer removes runtime coupling but duplicates data and enlarges payloads and contracts.</li><li><strong>Event sourcing:</strong> the event log itself is the source of truth; current state is a projection built by replaying events.</li><li>Event sourcing gives a full audit trail and time travel, but requires snapshots, projections, and schema migration of history.</li><li>Most systems mix styles: notifications for triggers, state transfer for read models, sourcing only where history is a requirement.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Style</th><th>Event carries</th><th>Consumer does</th><th>Main cost</th></tr></thead><tbody><tr><td>Notification</td><td>ID and type</td><td>Calls back for data</td><td>Callback coupling</td></tr>
+<tr><td>State transfer</td><td>Changed fields</td><td>Updates local copy</td><td>Data duplication</td></tr>
+<tr><td>Event sourcing</td><td>Every state change</td><td>Replays into a projection</td><td>Replay and schema evolution</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Delivery semantics and duplicates</h2>
+<ul><li><strong>At-most-once:</strong> deliver and forget; fast, but events can be lost.</li><li><strong>At-least-once:</strong> retry until acknowledged; the practical default, and duplicates are expected.</li><li><strong>Effectively-once:</strong> at-least-once delivery plus idempotent or deduplicated processing, not a magic transport guarantee.</li><li>A crash after processing but before committing the offset causes redelivery of an already-handled event.</li><li>Make consumers idempotent with a natural key, a processed-event table, or conditional writes.</li><li>Deduplicate on an event ID with a bounded window; unbounded history for deduplication is a storage problem.</li><li>Producer-side retries can also create duplicates, so the event ID must be assigned before the first send attempt.</li><li>Exactly-once claims usually apply only inside one broker's ecosystem, not across an arbitrary database write.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Ordering</h2>
+<ul><li>Global ordering across a topic is expensive and rarely required; per-entity ordering usually is.</li><li>Order is guaranteed only within a partition, so the partition key must match the entity whose order matters.</li><li>Choosing a coarse key (tenant, region) preserves order but concentrates load and limits parallelism.</li><li>Choosing a fine key (random) spreads load but makes related events arrive out of order.</li><li>Consumers can reorder using a version or sequence number and reject stale updates.</li><li>Processing with multiple threads or parallel batches inside a consumer breaks ordering even if the broker preserved it.</li><li>Out-of-order events are often handled by making operations commutative or by keeping the latest version per key.</li></ul>
+
+
+<div class="note">The question is never is ordering guaranteed, but ordering of what, and does the business logic actually depend on it.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Eventual consistency and the user experience</h2>
+<ul><li>Once work is asynchronous, the write is accepted before all read models reflect it.</li><li>Replicas and projections converge only after every event is processed, so reads can be temporarily stale.</li><li>Read-your-writes can be preserved by routing that read to the source, or by waiting for a version marker.</li><li>The UI should show pending or processing states instead of implying instant completion.</li><li>Idempotent operations plus retries make convergence likely; reconciliation jobs catch the rest.</li><li>Business rules must tolerate a window where two services disagree about the same entity.</li><li>Some flows genuinely need strong consistency; keep those inside one service or one transaction.</li></ul>
+
+<div class="flow"><span class="flow-step">Accept write</span><span class="flow-arrow">→</span><span class="flow-step">Publish event</span><span class="flow-arrow">→</span><span class="flow-step">Projections update</span><span class="flow-arrow">→</span><span class="flow-step">Client sees updated state</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Schema evolution and contracts</h2>
+<ul><li>An event schema is a public contract; once published, consumers depend on it.</li><li>Additive changes (new optional fields) are usually safe; renames, type changes, and removals break consumers.</li><li>Use a <strong>schema registry</strong> with compatibility rules to reject breaking changes at publish time.</li><li>Version events explicitly when semantics change, and support old and new versions during migration.</li><li>Consumers should ignore unknown fields and tolerate missing optional ones.</li><li>Include an event ID, type, version, timestamp, and correlation ID in a standard envelope.</li><li>Never reuse a field name with different meaning; that silently corrupts historical data and replays.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Change</th><th>Compatibility</th></tr></thead><tbody><tr><td>Add optional field</td><td>Backward compatible</td></tr>
+<tr><td>Remove a required field</td><td>Breaking</td></tr>
+<tr><td>Rename a field</td><td>Breaking for consumers</td></tr>
+<tr><td>Widen a type</td><td>Usually compatible</td></tr>
+<tr><td>Change semantics, same name</td><td>Breaking and dangerous</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Failure handling in the stream</h2>
+<ul><li>Retry transient failures with backoff and jitter; do not retry permanent validation errors forever.</li><li>A poison message can block a partition, so cap retries and route failures to a <strong>dead-letter queue</strong>.</li><li>A DLQ without an owner and a replay procedure is just a graveyard.</li><li>Backpressure matters: if consumers fall behind, lag grows and data becomes stale.</li><li>Monitor consumer lag, processing time, retry counts, and DLQ depth as first-class signals.</li><li>Batch processing needs per-record error handling so one bad record does not fail the whole batch.</li><li>Consider the transactional outbox so the state change and the publish cannot diverge.</li></ul>
+
+<div class="flow"><span class="flow-step">Consume event</span><span class="flow-arrow">→</span><span class="flow-step">Process</span><span class="flow-arrow">→</span><span class="flow-step">Failure</span><span class="flow-arrow">→</span><span class="flow-step">Retry with backoff</span><span class="flow-arrow">→</span><span class="flow-step">Dead-letter</span><span class="flow-arrow">→</span><span class="flow-step">Inspect and replay</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Debugging and observability</h2>
+<ul><li>There is no single call stack, so debugging depends on identifiers and recorded history.</li><li>Propagate a correlation ID and the event ID through logs, and include the producer and consumer service names.</li><li>Distributed tracing links the producing request to the downstream consumption, even when it happens later.</li><li>Record what was processed, when, and by which consumer version.</li><li>Replay is the event-driven equivalent of rerunning a job: it is powerful, but only safe if consumers are idempotent.</li><li>A timeline of events for one entity is often more useful than aggregated metrics alone.</li><li>Without instrumentation, a missing side effect looks identical to a lost event.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Choreography, orchestration, and fit</h2>
+<ul><li><strong>Choreography</strong> lets each service react to events with no central controller; flexible, but the end-to-end flow is emergent.</li><li><strong>Orchestration</strong> uses a coordinator that issues commands and tracks progress; easier to reason about, but more coupling.</li><li>Choreography suits simple fan-out and independent reactions; orchestration suits multi-step workflows with compensation.</li><li>Event-driven design fits spiky workloads, cross-service propagation, audit requirements, and slow side effects.</li><li>It is a poor fit for simple CRUD, strict synchronous consistency, or teams without broker operations experience.</li><li>Events should not become a distributed database you query for current state; use projections for that.</li><li>A hybrid — synchronous reads, asynchronous writes and side effects — is often the most practical design.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Request/response</th><th>Event-driven</th></tr></thead><tbody><tr><td>Coupling</td><td>Temporal and address</td><td>Loose in time and space</td></tr>
+<tr><td>Latency</td><td>Immediate answer</td><td>Eventually consistent</td></tr>
+<tr><td>Adding consumers</td><td>Change the caller</td><td>Subscribe, no producer change</td></tr>
+<tr><td>Failure</td><td>Propagates to caller</td><td>Buffered and retried</td></tr>
+<tr><td>Debugging</td><td>Single call stack</td><td>Needs tracing and event history</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Designing an event-driven system</h2>
+<ul><li>Start from the business facts that multiple services care about, and name them in the past tense.</li><li>Choose the style per event: notification for triggers, state transfer for read models, sourcing only when history is required.</li><li>Pick partition keys from the entity whose ordering matters, and accept the parallelism that follows.</li><li>Define the envelope once: event ID, type, version, timestamp, correlation ID, producer.</li><li>Decide delivery semantics and idempotency strategy before writing consumers.</li><li>Plan schema evolution, retention, replay, and dead-letter ownership up front.</li><li>Instrument lag, errors, and DLQ depth, and rehearse replaying a topic.</li></ul>
+
+<div class="flow"><span class="flow-step">Identify facts</span><span class="flow-arrow">→</span><span class="flow-step">Define events and envelope</span><span class="flow-arrow">→</span><span class="flow-step">Choose broker and partitions</span><span class="flow-arrow">→</span><span class="flow-step">Implement idempotent consumers</span><span class="flow-arrow">→</span><span class="flow-step">Add schema and DLQ policy</span><span class="flow-arrow">→</span><span class="flow-step">Instrument and rehearse replay</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Decoupling</strong> lets consumers be added without producer changes but makes the end-to-end flow hard to see.</li><li><strong>Asynchronous delivery</strong> absorbs spikes and outages but introduces eventual consistency and stale reads.</li><li><strong>At-least-once delivery</strong> avoids loss but requires idempotency and deduplication in every consumer.</li><li><strong>Partitioned ordering</strong> gives scalability and per-key order but not global order, and hot keys limit parallelism.</li><li><strong>Event-carried state</strong> removes callbacks but duplicates data and enlarges contracts.</li><li><strong>Event sourcing</strong> provides a full audit log but demands snapshots, projections, and historical schema migration.</li><li><strong>Replay</strong> enables recovery and new projections but can re-trigger side effects if consumers are not idempotent.</li><li><strong>A broker</strong> adds resilience and buffering but is another stateful system to operate and secure.</li><li><strong>Choreography</strong> is flexible but hides the workflow; orchestration is visible but centralizes control.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is event-driven architecture?</summary><div class="answer"><p>A style where services communicate by producing and consuming events through a broker instead of calling each other directly. The producer publishes a fact and does not know the consumers, which decouples services in time, space, and change.</p></div></details>
+<details><summary>2. What is the difference between an event and a command?</summary><div class="answer"><p>An event is a past-tense fact that already happened and cannot be rejected, and it can have many consumers. A command is a request with one intended recipient that can fail or be refused. Sending commands through an event channel hides ownership and error handling.</p></div></details>
+<details><summary>3. Explain notification versus state transfer versus event sourcing.</summary><div class="answer"><p>Notification carries only an ID and makes consumers call back. State transfer carries the changed fields so consumers update local copies. Event sourcing stores the events as the source of truth and derives state by replay. They differ in payload size, coupling, and how much history you must keep.</p></div></details>
+<details><summary>4. How do you guarantee ordering?</summary><div class="answer"><p>You cannot cheaply guarantee global order; guarantee it per partition by choosing a partition key that matches the entity. Ordering also requires the consumer to process a partition sequentially. If you need resilience to out-of-order delivery, add version numbers and reject stale updates.</p></div></details>
+<details><summary>5. How do you handle duplicate events?</summary><div class="answer"><p>Assume at-least-once delivery and make consumers idempotent: a natural key, a processed-event table, or a conditional write. Deduplicate on an event ID with a bounded retention window. Producer retries and offset-commit crashes both create duplicates, so the event ID must exist before the first send.</p></div></details>
+<details><summary>6. What does exactly-once delivery really mean?</summary><div class="answer"><p>Usually it means at-least-once delivery combined with idempotent or transactional processing inside one broker ecosystem. It does not generally span an arbitrary external database and a broker, so cross-system effects still need idempotency or a transactional outbox.</p></div></details>
+<details><summary>7. How do you deal with eventual consistency?</summary><div class="answer"><p>Accept that read models lag, make projections converge, and expose pending states in the UI. Route reads that must see the latest write to the source, or wait for a version marker. Add reconciliation for cases where retries and compensations fail.</p></div></details>
+<details><summary>8. How do you evolve event schemas?</summary><div class="answer"><p>Treat schemas as public contracts: additive optional fields are safe, while renames, removals, and semantic changes break consumers. Use a schema registry with compatibility checks, version events explicitly, include a version in the envelope, and support two versions during migration.</p></div></details>
+<details><summary>9. What happens when a consumer repeatedly fails?</summary><div class="answer"><p>Cap retries with backoff, then route the event to a dead-letter queue so it stops blocking the partition. A DLQ needs an owner, alerting, and a documented replay path. Batch consumers also need per-record failure handling so one poison record does not fail everything.</p></div></details>
+<details><summary>10. How do you debug an event-driven system?</summary><div class="answer"><p>Propagate a correlation ID and event ID through logs and traces, record which consumer version processed what, and keep an event timeline per entity. Distributed tracing links production to later consumption. Missing side effects are otherwise indistinguishable from lost events.</p></div></details>
+<details><summary>11. What is the transactional outbox and why does it matter?</summary><div class="answer"><p>It writes the database change and the outgoing event record in the same local transaction, then a relay publishes the event. This avoids the dual-write problem where the database commits but the publish fails, or the reverse, leaving state and events inconsistent.</p></div></details>
+<details><summary>12. Choreography or orchestration?</summary><div class="answer"><p>Choreography has services react to events with no central controller and suits simple fan-out and independent reactions. Orchestration uses a coordinator that tracks steps and is easier to reason about for multi-step workflows with compensation. Choose based on workflow complexity and how much visibility you need.</p></div></details>
+<details><summary>13. When would you avoid event-driven architecture?</summary><div class="answer"><p>For simple CRUD, strict synchronous consistency, or small systems where a direct call is clearer. Events add a broker to operate, eventual consistency, duplicate handling, schema management, and harder debugging. Use a hybrid: synchronous reads with asynchronous side effects.</p></div></details>
+<details><summary>14. How do you prevent a consumer from falling permanently behind?</summary><div class="answer"><p>Monitor consumer lag and processing rate, scale consumers up to the partition count, and reduce per-event work. Add backpressure and alert on growing lag. If lag is structural, increase partitions or split the topic — but changing partitions affects key-to-partition ordering.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Using events as remote procedure calls and expecting an immediate reply.</li><li>Publishing events before the database transaction commits, so consumers read stale state or the event is lost.</li><li>Assuming ordering across a whole topic instead of within a partition.</li><li>Building consumers that are not idempotent on an at-least-once broker.</li><li>Treating a dead-letter queue as a solution without an owner or replay procedure.</li><li>Letting the event log become the primary query surface instead of building projections.</li><li>Changing an event field's meaning without versioning it, silently corrupting replays.</li><li>Adding a broker without monitoring lag, retries, and schema compatibility.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="serverless-architecture.html"><span>← Previous</span><strong>Serverless Architecture</strong></a><a class="next" href="peer-to-peer-p2p-architecture.html"><span>Next →</span><strong>Peer-to-Peer (P2P) Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/event-driven-architecture">AlgoMaster — Event-Driven Architecture</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

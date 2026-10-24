@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Counting at Scale — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 20 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Counting at Scale</h1>
+    <p class="dek">Interview Patterns · Specialized Data</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/distributed-counting">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Where this pattern shows up</a>
+<a href="#s3">Define the count semantics first</a>
+<a href="#s4">Why a single counter row fails</a>
+<a href="#s5">Sharded exact counters</a>
+<a href="#s6">In-memory counters and write-behind</a>
+<a href="#s7">Event streaming and windowed aggregation</a>
+<a href="#s8">Batch recomputation, lambda, and kappa</a>
+<a href="#s9">Approximate counting</a>
+<a href="#s10">Unique counts and deduplication</a>
+<a href="#s11">Idempotency and correctness</a>
+<a href="#s12">Read path, hot keys, and ranking</a>
+<a href="#s13">Multi-region, durability, and operations</a>
+<a href="#s14">How to approach it in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A counter looks like a single increment, but one hot row serializes every write. Counting at scale means choosing between <strong>sharded exact counters</strong>, <strong>stream or batch aggregation</strong>, and <strong>approximate sketches</strong> based on how exact, fresh, and durable the number really needs to be.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Hot row</dt><dd>A single counter record that every write must lock and update, serializing throughput and concentrating contention.</dd></div><div class="term"><dt>Sharded counter</dt><dd>A counter split across multiple rows or keys; writers increment different shards and readers sum them.</dd></div><div class="term"><dt>Write-behind</dt><dd>Buffering increments in a fast store and persisting them to durable storage asynchronously in batches.</dd></div><div class="term"><dt>Windowed aggregation</dt><dd>Grouping events into fixed or sliding time windows and computing counts per window in a stream processor.</dd></div><div class="term"><dt>Watermark</dt><dd>A stream-processing estimate of when all events up to a given time have arrived, used to close windows and emit results.</dd></div><div class="term"><dt>HyperLogLog</dt><dd>A compact, mergeable sketch that estimates the number of distinct values with controlled error instead of storing every value.</dd></div><div class="term"><dt>Count-Min Sketch</dt><dd>A fixed-size sketch that estimates item frequencies and may overestimate but never underestimates.</dd></div><div class="term"><dt>CRDT counter</dt><dd>A conflict-free replicated data type whose increments and decrements merge deterministically across replicas.</dd></div><div class="term"><dt>Idempotency key</dt><dd>A unique identifier attached to an event or request so retries can be recognized and counted only once.</dd></div><div class="term"><dt>Reconciliation</dt><dd>A periodic comparison of a derived counter against the event log or source of truth, followed by correction.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">Every product counts something: views, likes, clicks, followers, downloads, or votes. On one server, counting is an atomic increment. At scale, millions of events per second arrive across many servers, and a single counter row becomes a serialization point.</p>
+<ul><li>The write path must absorb bursts without losing events or blocking on a hot record.</li><li>The read path must return a number quickly, even if it is slightly behind.</li><li>Different counts have different correctness needs: billing cannot be approximate, view counts often can.</li><li>Events arrive late, out of order, and more than once because producers retry.</li><li>Counts feed ranking and recommendations, so a slow counter can affect what users see elsewhere.</li><li>The design must define what one unit means before optimizing how to add it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Where this pattern shows up</h2>
+<ul><li>View counts on videos, posts, and articles, often tolerant of small errors and short delays.</li><li>Likes, reactions, and votes, which are expected to be exact per user and idempotent.</li><li>Ad clicks and impressions, where billing demands auditability and duplicate protection.</li><li>Follower and subscriber counts, which drive profiles and ranking.</li><li>Rate limiting and quota counters, where approximate counts are usually unacceptable.</li><li>Analytics dashboards counting events by dimension, time window, and cohort.</li><li>Any interview problem that asks for a trending list, a popular post, or a real-time metric.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Define the count semantics first</h2>
+<ul><li><strong>Total versus unique:</strong> every view is a different unit from every distinct viewer.</li><li><strong>Exact versus approximate:</strong> can the product display an estimate, and can billing tolerate an error?</li><li><strong>Freshness:</strong> must the number update immediately, within seconds, or is a periodic snapshot acceptable?</li><li><strong>Durability:</strong> can a crash lose the last few seconds of increments, or must every event survive?</li><li><strong>Idempotency:</strong> what makes two events the same event, and how long must duplicates be remembered?</li><li><strong>Dimensions:</strong> counts per post, per user, per region, per hour, or all of them at once.</li><li><strong>Monotonicity:</strong> can a count go down because of deletion, fraud correction, or a refund?</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Count type</th><th>Exactness</th><th>Typical approach</th></tr></thead><tbody><tr><td>View count</td><td>Approximate, delayed</td><td>Stream aggregation plus cached display</td></tr>
+<tr><td>Like count</td><td>Exact per user</td><td>Idempotent writes plus sharded or transactional counter</td></tr>
+<tr><td>Ad billing</td><td>Exact and auditable</td><td>Durable event log plus idempotent aggregation</td></tr>
+<tr><td>Unique viewers</td><td>Approximate</td><td>HyperLogLog or sampled distinct counting</td></tr>
+<tr><td>Trending score</td><td>Approximate, time-decayed</td><td>Windowed stream aggregation</td></tr>
+<tr><td>Quota / rate limit</td><td>Exact within a window</td><td>Atomic store or token bucket</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Why a single counter row fails</h2>
+<ul><li>Every increment takes a row lock, so concurrent writers queue behind each other.</li><li>The row becomes a <strong>hot row</strong>: one page, one lock, one write-ahead log position at a time.</li><li>Transaction overhead and fsync make each increment far more expensive than the arithmetic itself.</li><li>Contention grows with traffic, so latency rises and throughput flattens instead of scaling.</li><li>Replication amplifies the write traffic to every replica and can create apply lag.</li><li>Reads of the same hot row compete with writes, and reporting queries make it worse.</li><li>Caching the read does not fix the write bottleneck; it only hides the symptom.</li></ul>
+
+
+<div class="note">The arithmetic is trivial. The cost is coordination: every writer wants the same record at the same time.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Sharded exact counters</h2>
+<ul><li>Split one logical counter into multiple physical counter rows or keys, each holding a partial total.</li><li>A writer picks a shard at random, by hash of user, or by node, and increments only that shard.</li><li>A reader sums all shards, or sums a cached snapshot plus recent deltas.</li><li>Write throughput scales with the number of shards; read cost also scales with it.</li><li>Shard count is hard to change because old and new shard layouts must be summed consistently during migration.</li><li>Random sharding spreads load but makes per-user idempotency harder; per-user sharding helps dedupe but can still skew.</li><li>Use a background job to compact shards into a base total and keep the number of live shards bounded.</li></ul>
+
+<div class="flow"><span class="flow-step">Event arrives</span><span class="flow-arrow">→</span><span class="flow-step">Choose shard</span><span class="flow-arrow">→</span><span class="flow-step">Increment shard atomically</span><span class="flow-arrow">→</span><span class="flow-step">Cache invalidated or delta published</span><span class="flow-arrow">→</span><span class="flow-step">Reader sums base plus shards</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>In-memory counters and write-behind</h2>
+<ul><li>An in-memory store such as Redis performs atomic increments without touching the transactional database on every event.</li><li>A single-threaded atomic increment is fast, but a hot key still maps to one node and one core.</li><li>Persistence settings determine the loss window: snapshotting loses recent writes, while append-only logging reduces but does not eliminate loss.</li><li>A common design buffers increments in memory and flushes aggregated deltas to durable storage in batches.</li><li>The cache is not the source of truth; the durable event log or counter table must be able to reconstruct it.</li><li>A crash can lose buffered increments, so critical counts need an event log that is replayed after restart.</li><li>Expiry and eviction must never silently delete a counter that has not been persisted.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Event streaming and windowed aggregation</h2>
+<ul><li>Append each event to a durable, partitioned log keyed by the counter or entity.</li><li>A stream processor aggregates events per key and window, then writes results to a serving store.</li><li>Tumbling windows cover fixed intervals; sliding windows answer recent-rate questions; session windows group activity per user.</li><li>Watermarks decide when a window is complete enough to emit, balancing latency against late events.</li><li>Late events either update a still-open window, trigger a correction, or are dropped, and that policy must be explicit.</li><li>Exactly-once effects require idempotent sinks, transactional writes, or deduplication, not just an exactly-once label on the framework.</li><li>The log can be replayed to rebuild counters after a bug or a bad deployment.</li></ul>
+
+<div class="flow"><span class="flow-step">Produce event with key and event ID</span><span class="flow-arrow">→</span><span class="flow-step">Partitioned durable log</span><span class="flow-arrow">→</span><span class="flow-step">Windowed aggregation</span><span class="flow-arrow">→</span><span class="flow-step">Idempotent sink write</span><span class="flow-arrow">→</span><span class="flow-step">Serving store</span><span class="flow-arrow">→</span><span class="flow-step">Dashboard or API read</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Batch recomputation, lambda, and kappa</h2>
+<ul><li>Batch jobs recompute counts from immutable events over a long horizon, producing authoritative totals.</li><li>Recomputation corrects drift, duplicate processing, and logic bugs that streaming alone cannot fix.</li><li>The cost is latency: batch results are hours old and expensive to rerun over large histories.</li><li>A lambda architecture combines a batch layer for correctness with a speed layer for freshness, at the cost of two code paths.</li><li>A kappa architecture keeps one streaming path and replays the log when logic changes, reducing duplicated logic but requiring long retention.</li><li>Incremental materialization is cheaper than full recomputation when only recent data changes.</li><li>Always keep the raw events; without them, a wrong counter cannot be repaired.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Approximate counting</h2>
+<ul><li><strong>HyperLogLog</strong> estimates distinct cardinality with a small, fixed memory footprint and mergeable sketches.</li><li>HLL error is controlled by the number of registers, not by the number of distinct items, which is why it scales.</li><li>Sketches for different windows can be merged, but you cannot add daily unique counts to get a weekly unique count.</li><li><strong>Count-Min Sketch</strong> estimates frequencies and may overestimate, making it suitable for heavy hitters and rate estimates.</li><li>Sampling a fraction of events and scaling up is simple but adds variance and interacts badly with rare events.</li><li>Approximate counts are inappropriate for billing, quotas, or anything a user can audit against their own actions.</li><li>Label approximate numbers in the UI and document the error budget so product decisions do not treat them as exact.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Technique</th><th>Answers</th><th>Error behavior</th><th>Mergeable</th></tr></thead><tbody><tr><td>Exact counter</td><td>How many events</td><td>None</td><td>Yes, by addition</td></tr>
+<tr><td>Sharded counter</td><td>How many events</td><td>None</td><td>Yes, by summing shards</td></tr>
+<tr><td>HyperLogLog</td><td>How many distinct items</td><td>Controlled over/under estimate</td><td>Yes, by union</td></tr>
+<tr><td>Count-Min Sketch</td><td>How often an item occurs</td><td>Overestimates</td><td>Yes, by cell-wise addition</td></tr>
+<tr><td>Sampling</td><td>Any aggregate</td><td>Statistical variance</td><td>Yes, with weights</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Unique counts and deduplication</h2>
+<ul><li>Exact distinct counting requires remembering every distinct key, which does not scale to millions of viewers.</li><li>A dedupe store keyed by user and content can enforce one count per window, at the cost of storage and expiry management.</li><li>For approximate unique counts, maintain one sketch per window and merge sketches for the union of windows.</li><li>Summing per-day unique counts overcounts people who appear on multiple days; union the sketches instead.</li><li>Define the identity used for uniqueness: user ID, device ID, cookie, or IP, each with different privacy and accuracy properties.</li><li>Bots, crawlers, and repeated refreshes inflate counts; filter or classify them before they enter the counter.</li><li>Idempotency keys and dedupe windows must be long enough to cover retries, but not so long that storage grows without bound.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Idempotency and correctness</h2>
+<ul><li>Producers retry, networks duplicate, and consumers reprocess after rebalance, so at-least-once delivery is the normal case.</li><li>Attach a stable event ID and enforce uniqueness at the sink with a conditional write or a dedupe table.</li><li>Make increments idempotent per logical event, not per HTTP request; a retry of the same event must not add again.</li><li>Ordering matters for decrements and corrections; a delete that arrives before its create must not drive a count negative.</li><li>Recompute from the event log when drift is detected instead of trying to guess which increment was wrong.</li><li>Track a checksum or per-window event count so reconciliation can detect missing or extra updates.</li><li>Guard against double-counting from both the streaming path and the batch path when they overlap.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Read path, hot keys, and ranking</h2>
+<ul><li>Serve counts from a cache or serving table; never run a <code>COUNT(*)</code> over a large event table on the request path.</li><li>Display a cached snapshot with a short TTL, and accept that the number may lag by seconds or minutes.</li><li>For very large numbers, show a rounded or abbreviated value to avoid implying precision the system does not have.</li><li>A celebrity post or viral video creates a hot key; pre-aggregate at the edge or split the key into more shards.</li><li>Ranking by count should read from a separate, precomputed pipeline rather than triggering an expensive live count per item.</li><li>Rate-limit and sample abusive traffic before it reaches the counter, or a bot can distort both the number and the ranking.</li><li>When the count is used for money or eligibility, read from the authoritative store rather than the display cache.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Multi-region, durability, and operations</h2>
+<ul><li>Regional counters can accept writes locally and merge later, trading immediate global accuracy for availability and latency.</li><li><strong>G-counters</strong> merge by summing per-replica increments; <strong>PN-counters</strong> add decrements with per-replica state.</li><li>CRDT counters converge without coordination but carry metadata per replica and cannot enforce global invariants such as a hard cap.</li><li>Async replication means two regions can briefly disagree; define which reads need the global value and which can use the local one.</li><li>Monitor drift between the counter and the event log, aggregation lag, shard skew, duplicate rate, and sink errors.</li><li>Run periodic reconciliation and keep an audit trail so a wrong number can be explained and repaired.</li><li>Capacity planning must account for the event log and sketches, not just the counter rows.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>How to approach it in an interview</h2>
+<ul><li>Ask what is being counted, whether it is total or unique, how exact it must be, and how fresh it must be.</li><li>Estimate event rate and read rate, then show why a single-row increment becomes the bottleneck.</li><li>Choose a mechanism explicitly: sharded exact counter, in-memory buffer with durable log, stream aggregation, or a sketch.</li><li>Describe the event schema, the partition key, and the idempotency strategy before discussing storage products.</li><li>Explain how the read path serves a fast number and how it handles staleness.</li><li>Cover hot keys, late events, retries, and reconciliation from the raw log.</li><li>Finish with the metrics you would monitor and the cases where approximate counting is not acceptable.</li></ul>
+
+
+<div class="note">The key interview signal is matching the counting mechanism to the required semantics. Exact billing and a view counter should not share a design.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Sharded counters</strong> scale writes but multiply read cost and make shard resizing and per-user deduplication harder.</li><li><strong>In-memory counters</strong> are fast but risk losing recent increments and require a durable log for recovery.</li><li><strong>Write-behind batching</strong> reduces database load but widens the window in which acknowledged events can be lost.</li><li><strong>Stream aggregation</strong> gives fresh results but adds late-event, watermark, and exactly-once complexity.</li><li><strong>Batch recomputation</strong> is authoritative and repairable but slow and expensive over long histories.</li><li><strong>HyperLogLog</strong> makes unique counting cheap but gives an estimate and cannot answer per-item questions.</li><li><strong>Count-Min Sketch</strong> is compact and fast but overestimates and cannot produce exact totals.</li><li><strong>CRDT counters</strong> enable local writes and convergence but carry metadata and cannot enforce global limits.</li><li><strong>Aggressive caching</strong> protects the read path but shows stale counts and complicates corrections.</li><li><strong>Long dedupe windows</strong> improve idempotency but increase storage and operational cost.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why is incrementing a counter hard at scale?</summary><div class="answer"><p>All writers target the same row, so row locks serialize the updates. Transaction overhead and replication add cost, and throughput flattens while latency rises. The arithmetic is cheap; the coordination is not.</p></div></details>
+<details><summary>2. How does a sharded counter work?</summary><div class="answer"><p>The logical counter is split into many physical shards. Each write increments one shard, and a read sums the shards or a base snapshot plus deltas. Writes scale with the shard count, but reads and migrations become more expensive.</p></div></details>
+<details><summary>3. How do you choose the number of shards?</summary><div class="answer"><p>Base it on peak write rate and contention, with headroom for growth. More shards improve write throughput but increase read amplification and make resizing harder. Use a base-plus-delta scheme to keep the live shard count manageable.</p></div></details>
+<details><summary>4. Can you just use Redis INCR?</summary><div class="answer"><p>It is fast and atomic, but Redis is memory-bound, a hot key still lands on one node, and persistence may lose recent increments. Use it as a buffer in front of a durable event log or counter store, not as the only source of truth for critical counts.</p></div></details>
+<details><summary>5. How do you count unique viewers?</summary><div class="answer"><p>At small scale, store distinct user IDs per window. At large scale, use a HyperLogLog per window and merge sketches for unions. Do not add daily unique counts to get a weekly unique count.</p></div></details>
+<details><summary>6. What is HyperLogLog good for?</summary><div class="answer"><p>Estimating distinct cardinality with small, mergeable state. It is ideal for unique viewers and reach metrics, but it cannot tell you which users were counted or produce an exact billable number.</p></div></details>
+<details><summary>7. How do you handle duplicate events?</summary><div class="answer"><p>Attach a stable event ID and enforce it at the sink with a conditional write, unique constraint, or dedupe table. Make the increment idempotent for the logical event, and size the dedupe window to cover retries and reprocessing.</p></div></details>
+<details><summary>8. What is a watermark in stream aggregation?</summary><div class="answer"><p>It is the processor's estimate that all events up to a certain time have arrived. It decides when a window can close and emit a result, trading result latency against the risk of late events.</p></div></details>
+<details><summary>9. How do you correct a wrong count?</summary><div class="answer"><p>Recompute from the immutable event log for the affected key and window, then overwrite or adjust the serving value. Without the raw events, you can only guess. Reconciliation jobs should detect drift before users do.</p></div></details>
+<details><summary>10. Why use batch processing if streaming is available?</summary><div class="answer"><p>Batch recomputation is authoritative and can repair drift, duplicates, and logic bugs across long histories. Streaming gives freshness; batch gives correctness and replayability. Many systems run both.</p></div></details>
+<details><summary>11. How do you count a celebrity's post without a hot key?</summary><div class="answer"><p>Pre-aggregate at the edge, split the counter into many shards, and combine locally before a global write. Cache the displayed total, rate-limit abusive traffic, and keep ranking on a separate pipeline.</p></div></details>
+<details><summary>12. How do multi-region counters converge?</summary><div class="answer"><p>Use a CRDT such as a G-counter or PN-counter: each region tracks its own contribution and replicas merge by combining state. This converges without coordination but cannot enforce a global hard limit.</p></div></details>
+<details><summary>13. When is approximate counting unacceptable?</summary><div class="answer"><p>For billing, quotas, rate limits, votes, and any number a user can audit against their own actions. Approximate counts are fine for display metrics, reach estimates, and trending scores where small errors do not change the decision.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Running a live COUNT(*) over a large event table on every page view.</li><li>Sharding a counter but then reading it with one query per shard on the hot path.</li><li>Treating a cache or Redis as durable when persistence can lose recent increments.</li><li>Adding daily unique counts to compute a weekly unique count.</li><li>Assuming exactly-once delivery without making the sink idempotent.</li><li>Closing a stream window before late events can arrive and then ignoring corrections.</li><li>Letting a trending or billing pipeline depend on a stale display cache.</li><li>Forgetting that bot traffic and retries inflate both counts and rankings.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="generating-unique-ids.html"><span>← Previous</span><strong>Generating Unique IDs</strong></a><span></span></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/distributed-counting">AlgoMaster — Counting at Scale</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

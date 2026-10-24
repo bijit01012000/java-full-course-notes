@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSL/TLS — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 48 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>SSL/TLS</h1>
+    <p class="dek">Security · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/ssl-tls">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with plain HTTP</a>
+<a href="#s2">The three guarantees</a>
+<a href="#s3">Where TLS sits</a>
+<a href="#s4">The handshake, conceptually</a>
+<a href="#s5">Key exchange and forward secrecy</a>
+<a href="#s6">Certificates and the chain of trust</a>
+<a href="#s7">TLS 1.2 vs TLS 1.3</a>
+<a href="#s8">Termination, re-encryption, and where trust ends</a>
+<a href="#s9">Designing mTLS</a>
+<a href="#s10">HSTS and browser-side hardening</a>
+<a href="#s11">Certificate lifecycle and operations</a>
+<a href="#s12">Failure modes and diagnosis</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>TLS turns an untrusted network into a channel that is private, tamper-evident, and bound to a verified server identity — confidentiality, integrity, and authentication for data in transit.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>TLS</dt><dd>Transport Layer Security: the protocol behind HTTPS that encrypts and authenticates traffic between two endpoints. SSL is its obsolete predecessor.</dd></div><div class="term"><dt>Handshake</dt><dd>The negotiation at the start of a connection where both sides agree on versions and algorithms, authenticate, and derive shared session keys.</dd></div><div class="term"><dt>Cipher suite</dt><dd>The named combination of key exchange, authentication, bulk encryption, and hashing algorithms used by a connection.</dd></div><div class="term"><dt>Certificate</dt><dd>A signed X.509 document binding a public key to an identity such as a hostname, valid for a defined period.</dd></div><div class="term"><dt>Certificate authority (CA)</dt><dd>An entity whose certificate is trusted by clients and who signs the certificates of servers.</dd></div><div class="term"><dt>Chain of trust</dt><dd>The path from a server's leaf certificate through intermediates to a root CA that the client already trusts.</dd></div><div class="term"><dt>SAN</dt><dd>Subject Alternative Name: the certificate field listing the hostnames and IPs the certificate is valid for.</dd></div><div class="term"><dt>Forward secrecy</dt><dd>A property of ephemeral key exchange where compromise of the server's long-term key does not decrypt past sessions.</dd></div><div class="term"><dt>mTLS</dt><dd>Mutual TLS: both client and server present certificates, so each side authenticates the other.</dd></div><div class="term"><dt>HSTS</dt><dd>HTTP Strict Transport Security: a response header that tells browsers to use HTTPS only for a host for a period of time.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with plain HTTP</h2>
+<p class="lede">Connect to café Wi-Fi and log in to a website over HTTP. The request passes through the router, the ISP, and several other networks before it reaches the server.</p>
+<ul><li>Every machine on that path can read the request, including credentials, session cookies, and personal data.</li><li>Reading is not the only risk: an attacker in the middle can modify the response — injecting scripts, changing a payment amount, altering content.</li><li>An attacker can also impersonate the site entirely with their own server and collect the credentials directly.</li><li>Plain HTTP gives the client no way to detect any of these attacks; there is no integrity check and no identity proof.</li><li>TLS addresses all three at the transport layer, so the application protocol does not have to solve them itself.</li><li>The threat model includes passive eavesdropping and active man-in-the-middle attacks, not just curious network operators.</li></ul>
+
+<div class="flow"><span class="flow-step">Client</span><span class="flow-arrow">→</span><span class="flow-step">Coffee-shop Wi-Fi</span><span class="flow-arrow">→</span><span class="flow-step">ISP and transit networks</span><span class="flow-arrow">→</span><span class="flow-step">Server</span></div>
+<div class="note">A padlock means the connection is encrypted to a certificate-validated host — not that the site is honest, and not that data is safe at rest.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The three guarantees</h2>
+<ul><li><strong>Confidentiality:</strong> nobody on the path can read the payload; it is encrypted with keys only the endpoints know.</li><li><strong>Integrity:</strong> nobody can change data without detection; each record is authenticated, and a modified record is discarded.</li><li><strong>Authentication:</strong> the client is sure it is talking to the real server, proven by a certificate chaining to a trusted CA.</li><li>Confidentiality without authentication is useless: you could be encrypting your password to the attacker.</li><li>Integrity is checked per record, so tampering or reordering breaks the connection rather than silently corrupting data.</li><li>By default authentication is one-sided — the client verifies the server. mTLS adds verification in the other direction.</li><li>TLS also provides replay protection through sequence numbers and fresh per-session keys.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Property</th><th>Threat it stops</th><th>Mechanism</th></tr></thead><tbody><tr><td>Confidentiality</td><td>Eavesdropping on the network</td><td>Symmetric encryption with negotiated session keys</td></tr>
+<tr><td>Integrity</td><td>Modification, injection, reordering</td><td>AEAD or MAC over every record</td></tr>
+<tr><td>Authentication</td><td>Impersonation of the server</td><td>X.509 certificate signed by a trusted CA</td></tr>
+<tr><td>Forward secrecy</td><td>Later compromise of the private key</td><td>Ephemeral Diffie-Hellman key exchange</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Where TLS sits</h2>
+<ul><li>TLS runs above TCP and below the application protocol: HTTP, SMTP, the PostgreSQL wire protocol, gRPC, and others.</li><li>HTTPS is simply HTTP over TLS; HTTP/2 and HTTP/3 assume TLS, and QUIC builds TLS into the transport.</li><li>Databases, message brokers, caches, and internal APIs all support TLS, and internal traffic deserves the same protection as public traffic.</li><li>A service mesh terminates and originates TLS in a sidecar, so applications get encryption and identity without code changes.</li><li>The old name SSL persists, but SSLv2 and SSLv3 are broken and must be disabled; TLS 1.2 and 1.3 are the usable versions.</li><li>TLS adds handshake round trips, CPU for cryptography, and certificate operations; resumption and connection reuse amortize that cost.</li><li>It protects data in transit only — not data at rest, not data in logs, and not a compromised endpoint.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Version</th><th>Status</th><th>Notes</th></tr></thead><tbody><tr><td>SSLv3</td><td>Broken</td><td>POODLE; disable everywhere</td></tr>
+<tr><td>TLS 1.0 / 1.1</td><td>Deprecated</td><td>Weak primitives; disabled by modern clients</td></tr>
+<tr><td>TLS 1.2</td><td>Acceptable with correct configuration</td><td>Requires careful cipher and key-exchange choices</td></tr>
+<tr><td>TLS 1.3</td><td>Preferred</td><td>Fewer round trips, AEAD only, forward secrecy mandatory</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The handshake, conceptually</h2>
+<p class="lede">The handshake is where the two sides agree on parameters, authenticate, and create the keys used for the rest of the connection.</p>
+<ul><li>The client sends a <strong>ClientHello</strong>: supported TLS versions, cipher suites, a random value, the SNI hostname, and a key share.</li><li>The server replies with <strong>ServerHello</strong>, its chosen parameters, its key share, and its certificate chain.</li><li>The client validates the chain, the hostname, the validity dates, and the certificate's intended usage before trusting anything.</li><li>Both sides derive the same session keys from the key exchange; the certificate is what binds those keys to the server's identity.</li><li><strong>Finished</strong> messages prove each side derived the same keys and saw the same handshake transcript, catching tampering.</li><li>Only after the handshake does application data flow, encrypted with fast symmetric ciphers.</li><li>Session resumption skips most of the handshake using a pre-shared key from an earlier session.</li></ul>
+
+<div class="flow"><span class="flow-step">ClientHello</span><span class="flow-arrow">→</span><span class="flow-step">ServerHello + certificate + key share</span><span class="flow-arrow">→</span><span class="flow-step">Verify certificate chain</span><span class="flow-arrow">→</span><span class="flow-step">Derive session keys</span><span class="flow-arrow">→</span><span class="flow-step">Finished</span><span class="flow-arrow">→</span><span class="flow-step">Encrypted application data</span></div>
+<div class="note">A full TLS 1.3 handshake takes one round trip; TLS 1.2 takes two. Resumption can make it zero round trips for repeat visitors.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Key exchange and forward secrecy</h2>
+<ul><li>The two sides must agree on a shared secret without ever sending it over the network.</li><li>With ephemeral Diffie-Hellman (DHE/ECDHE), each session generates fresh key pairs; the shared secret is derived, not transmitted.</li><li><strong>Forward secrecy</strong> means that stealing the server's long-term private key later does not decrypt sessions recorded earlier.</li><li>Static RSA key transport — the client encrypts a secret with the server's public key — has no forward secrecy and is removed from TLS 1.3.</li><li>Asymmetric cryptography is used only for authentication and key agreement; bulk data uses fast symmetric ciphers such as AES-GCM or ChaCha20-Poly1305.</li><li>Weak parameters (small DH groups, legacy curves) undermine the exchange even when the protocol version is current.</li><li>Session keys are per-connection, so one compromised session does not expose others.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Key exchange</th><th>Forward secrecy</th><th>Status</th></tr></thead><tbody><tr><td>ECDHE (ephemeral)</td><td>Yes</td><td>Preferred in TLS 1.2 and required in TLS 1.3</td></tr>
+<tr><td>DHE (ephemeral)</td><td>Yes</td><td>Acceptable, but slower; needs strong parameters</td></tr>
+<tr><td>Static RSA transport</td><td>No</td><td>Deprecated and removed in TLS 1.3</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Certificates and the chain of trust</h2>
+<ul><li>A certificate binds a public key to an identity and is itself signed by a CA.</li><li>Key fields: subject, <strong>SAN</strong> (the hostnames it is valid for), issuer, validity window, public key, key usage, and the CA's signature.</li><li>Browsers and operating systems ship a trust store of root CAs; the server sends its leaf plus intermediates, and the client builds a path to a trusted root.</li><li>The leaf certificate must match the hostname the client requested — in practice via SAN, not the legacy Common Name field.</li><li>The current time must fall inside the validity window; expiry is one of the most common causes of self-inflicted outages.</li><li>Revocation is handled with CRLs and OCSP, and increasingly by issuing short-lived certificates so exposure windows stay small.</li><li>The private key must stay on the server or in an HSM; a leaked key plus a valid certificate allows undetectable impersonation.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Chain element</th><th>Role</th><th>Who holds it</th></tr></thead><tbody><tr><td>Root CA</td><td>Anchor of trust, pre-installed in clients</td><td>Browser and OS trust stores</td></tr>
+<tr><td>Intermediate CA</td><td>Issues leaf certificates, isolates the root</td><td>Sent by the server as part of the chain</td></tr>
+<tr><td>Leaf certificate</td><td>Identifies this specific server</td><td>The server</td></tr>
+<tr><td>Private key</td><td>Proves ownership of the certificate</td><td>The server or an HSM, never shared</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>TLS 1.2 vs TLS 1.3</h2>
+<ul><li>TLS 1.3 cuts a round trip from the full handshake and encrypts more of the handshake, including the certificate.</li><li>It permits only AEAD ciphers and ephemeral key exchange, so forward secrecy is mandatory rather than optional.</li><li>Legacy building blocks — static RSA, CBC-mode ciphers, RC4, 3DES, custom DH groups — are removed rather than disabled by configuration.</li><li>TLS 1.2 still works but needs deliberate configuration: modern ECDHE suites, AEAD ciphers, and weak options turned off.</li><li>TLS 1.3 has built-in downgrade protection; with 1.2, version negotiation needs care and old versions must be disabled.</li><li>0-RTT early data in TLS 1.3 reduces latency but is replayable, so it should be limited to idempotent requests.</li><li>Both versions are acceptable in production; the real risk is old versions, weak ciphers, and stale certificates.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>TLS 1.2</th><th>TLS 1.3</th></tr></thead><tbody><tr><td>Full handshake</td><td>Two round trips</td><td>One round trip</td></tr>
+<tr><td>Key exchange</td><td>RSA or (EC)DHE</td><td>(EC)DHE only</td></tr>
+<tr><td>Cipher suites</td><td>Many combinations, including CBC and RC4</td><td>AEAD only, simplified suites</td></tr>
+<tr><td>Forward secrecy</td><td>Optional, depends on configuration</td><td>Mandatory</td></tr>
+<tr><td>Handshake privacy</td><td>Certificate sent in clear</td><td>Most of the handshake encrypted</td></tr>
+<tr><td>0-RTT</td><td>Not available</td><td>Available but replayable</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Termination, re-encryption, and where trust ends</h2>
+<p class="lede">Where TLS terminates determines who can read the traffic and which controls can inspect it.</p>
+<ul><li><strong>Edge termination</strong> at a CDN or load balancer centralizes certificates, offloads crypto, and enables L7 routing, WAF, and caching.</li><li>After termination, traffic to the backend is plaintext unless it is encrypted again.</li><li><strong>Re-encryption</strong> establishes a second TLS connection from the edge to the service, protecting traffic inside the network or cloud boundary.</li><li><strong>Passthrough</strong> forwards encrypted bytes to the backend, preserving end-to-end encryption but preventing L7 inspection and host-based routing.</li><li><strong>mTLS</strong> adds client certificates so both ends authenticate, which is the basis of zero-trust service identity.</li><li>Termination plus re-encryption is a common compromise: edge controls stay, and the internal hop is protected.</li><li>Whatever the mode, the application still needs to know the original scheme and client IP from trusted proxy headers.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Mode</th><th>Decrypted at</th><th>Strength</th><th>Cost</th></tr></thead><tbody><tr><td>Edge termination</td><td>CDN or load balancer</td><td>Simple cert management, L7 controls</td><td>Plaintext inside the network</td></tr>
+<tr><td>Termination + re-encryption</td><td>Edge and service</td><td>End-to-end coverage with edge controls</td><td>Double crypto, more certs to manage</td></tr>
+<tr><td>Passthrough</td><td>Backend only</td><td>True end-to-end encryption</td><td>No L7 routing, WAF, or caching</td></tr>
+<tr><td>mTLS mesh</td><td>Each sidecar/service</td><td>Workload identity both directions</td><td>CA, rotation, authorization still needed</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Designing mTLS</h2>
+<ul><li>Each workload receives a certificate whose identity is the service or workload, not a shared hostname.</li><li>The server verifies the client's chain <em>and</em> its identity; trusting any certificate from the CA is not enough.</li><li>Certificates should be short-lived and rotated automatically by the platform or service mesh.</li><li>mTLS authenticates the connection; it does not grant permissions by itself — pair it with RBAC or policy.</li><li>Workload identity standards such as SPIFFE give certificates a stable, verifiable name independent of IP addresses.</li><li>Certificate issuance must be tied to workload attestation; otherwise any process can request an identity.</li><li>Common failure: accepting any client cert signed by the internal CA, which turns mTLS into a formality.</li></ul>
+
+<div class="flow"><span class="flow-step">Workload requests identity</span><span class="flow-arrow">→</span><span class="flow-step">Platform attests and issues short-lived cert</span><span class="flow-arrow">→</span><span class="flow-step">Client connects with cert</span><span class="flow-arrow">→</span><span class="flow-step">Server verifies chain and identity</span><span class="flow-arrow">→</span><span class="flow-step">Policy decision</span><span class="flow-arrow">→</span><span class="flow-step">Connection allowed</span></div>
+<div class="note">mTLS replaces network-location trust with cryptographic identity, which is why it is central to zero-trust designs.</div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>HSTS and browser-side hardening</h2>
+<ul><li><strong>HSTS</strong> tells the browser to use HTTPS only for a host for a given period, preventing downgrade attacks after the first visit.</li><li>The header is <code>Strict-Transport-Security: max-age=...; includeSubDomains; preload</code>; preload requires meeting browser list criteria.</li><li>Start with a short max-age, confirm every subdomain supports HTTPS, then raise it; removing HSTS is deliberately slow.</li><li>Always redirect HTTP to HTTPS, but remember the first redirect can itself be intercepted before HSTS is known.</li><li>Set cookies with <code>Secure</code>, and prefer the <code>__Host-</code> prefix so a cookie cannot be set over plaintext or for a parent domain.</li><li>Block or upgrade mixed content; one HTTP asset on an HTTPS page weakens the whole page.</li><li>HSTS does not replace a valid certificate or fix an application-level vulnerability; it only forces the secure transport.</li></ul>
+
+
+<pre class="code"><code>Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+Set-Cookie: session=...; Secure; HttpOnly; SameSite=Lax; Path=/</code></pre>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Certificate lifecycle and operations</h2>
+<ul><li>Automate issuance and renewal, typically with ACME, and monitor expiry independently of the application.</li><li>Alert on expiry with enough lead time for a human to act; renewal failure is a classic avoidable outage.</li><li>Serve the complete chain, including intermediates — some clients fail where browsers quietly repair the path.</li><li>Deploy certificate and key atomically and reload without dropping live connections where the server supports it.</li><li>Keep an inventory with an owner for every certificate, including internal services and non-HTTP protocols.</li><li>After renewal, test with a real client and the actual hostname, not only by inspecting the load balancer configuration.</li><li>Have an emergency path for compromise: revoke, reissue, redeploy, and invalidate anything that trusted the old key.</li></ul>
+
+<div class="flow"><span class="flow-step">Request certificate</span><span class="flow-arrow">→</span><span class="flow-step">Validate domain control</span><span class="flow-arrow">→</span><span class="flow-step">Deploy cert + key</span><span class="flow-arrow">→</span><span class="flow-step">Reload listeners</span><span class="flow-arrow">→</span><span class="flow-step">Verify with a real client</span><span class="flow-arrow">→</span><span class="flow-step">Monitor expiry</span></div>
+<div class="note">Short-lived certificates reduce exposure but only work if issuance and rotation are fully automated.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Failure modes and diagnosis</h2>
+<ul><li><strong>Expired certificate:</strong> browsers show an interstitial and API clients reject the connection; check <code>notAfter</code> first.</li><li><strong>Hostname mismatch:</strong> the SAN does not cover the requested name, often because SNI and the Host header disagree.</li><li><strong>Incomplete chain:</strong> works in browsers but fails in Java, Go, or curl clients that do not fetch missing intermediates.</li><li><strong>Unknown CA:</strong> the client trust store lacks the internal root, common with private CAs and pinned environments.</li><li><strong>Protocol or cipher mismatch:</strong> an old client meets a modern-only server policy, or the reverse after a hardening change.</li><li><strong>TLS inspection proxies</strong> break pinning and mTLS and produce certificate errors inside corporate networks.</li><li>Clock skew invalidates validity checks; correct time synchronization matters on servers and clients.</li><li>Debug with <code>openssl s_client -connect host:443 -servername host</code> and compare the presented chain with what the client trusts.</li></ul>
+
+
+<pre class="code"><code>openssl s_client -connect api.example.com:443 -servername api.example.com -showcerts
+openssl x509 -in cert.pem -noout -subject -issuer -dates -ext subjectAltName</code></pre>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>TLS everywhere</strong> gives confidentiality, integrity, and authentication but adds handshake latency, CPU cost, and a certificate lifecycle to operate.</li><li><strong>Edge termination</strong> simplifies certificate management and enables L7 inspection but leaves traffic plaintext inside the network unless it is re-encrypted.</li><li><strong>Re-encryption</strong> closes that internal gap but doubles cryptographic work and complicates debugging and latency analysis.</li><li><strong>TLS 1.3</strong> improves latency and handshake privacy but drops compatibility with old clients and makes some passive inspection harder.</li><li><strong>mTLS</strong> gives strong workload identity but requires a CA, attestation, automatic rotation, and separate authorization logic.</li><li><strong>HSTS with preload</strong> prevents downgrade attacks but is slow to undo and can lock users out of a misconfigured subdomain.</li><li><strong>Passthrough</strong> preserves true end-to-end encryption but blocks WAF, caching, and host-based routing at the edge.</li><li><strong>Short-lived certificates</strong> shrink compromise windows but turn an automation outage into a site-wide outage.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What three problems does TLS solve?</summary><div class="answer"><p>Confidentiality (nobody on the path can read the data), integrity (tampering is detected), and authentication (the client knows it is talking to the real server). Confidentiality alone is useless without authentication, because you could be encrypting to an attacker.</p></div></details>
+<details><summary>2. Walk me through the TLS handshake.</summary><div class="answer"><p>The client sends a ClientHello with supported versions, cipher suites, SNI, and a key share. The server selects parameters, returns its key share and certificate chain. The client validates the chain, hostname, and dates, both sides derive session keys from the key exchange, and Finished messages confirm the transcript. Then application data flows encrypted. TLS 1.3 does this in one round trip.</p></div></details>
+<details><summary>3. How does a certificate prove a server's identity?</summary><div class="answer"><p>A certificate binds a public key to a hostname and is signed by a CA. The client builds a chain from the leaf through intermediates to a root in its trust store, then checks the hostname in the SAN and the validity window. If all checks pass, the key exchange is bound to that identity.</p></div></details>
+<details><summary>4. What is the chain of trust?</summary><div class="answer"><p>The path from the server's leaf certificate, through one or more intermediates, to a root CA the client already trusts. The server sends the leaf and intermediates; the client supplies the root from its trust store. A missing intermediate breaks clients that do not fetch it themselves.</p></div></details>
+<details><summary>5. What is forward secrecy and why does it matter?</summary><div class="answer"><p>It means each session uses an ephemeral key exchange, so a later compromise of the server's long-term private key cannot decrypt previously recorded traffic. It protects against retrospective decryption of captured data. TLS 1.3 mandates it; TLS 1.2 provides it only when ECDHE or DHE is used.</p></div></details>
+<details><summary>6. TLS 1.2 vs TLS 1.3?</summary><div class="answer"><p>TLS 1.3 removes legacy ciphers, requires forward secrecy, encrypts more of the handshake, and saves a round trip. TLS 1.2 can be secure but depends on correct configuration. The practical difference is fewer ways to misconfigure 1.3 — but old clients may force you to keep 1.2 enabled.</p></div></details>
+<details><summary>7. Where should TLS terminate in a system design?</summary><div class="answer"><p>Commonly at the edge (CDN or load balancer) to centralize certificates and enable L7 routing, WAF, and caching — then re-encrypt to the backend to avoid plaintext inside the network. Passthrough is right when end-to-end encryption is required and edge L7 features are not.</p></div></details>
+<details><summary>8. What is the difference between TLS termination and re-encryption?</summary><div class="answer"><p>Termination decrypts at the edge and forwards plaintext. Re-encryption decrypts at the edge and immediately opens a new TLS connection to the service. Re-encryption protects the internal hop; termination alone trusts the internal network.</p></div></details>
+<details><summary>9. What is mTLS and when would you use it?</summary><div class="answer"><p>Mutual TLS: both client and server present certificates and verify each other. Use it for service-to-service authentication in zero-trust networks, internal APIs, and device identity. It authenticates the connection only, so authorization still needs RBAC or policy.</p></div></details>
+<details><summary>10. What does HSTS do?</summary><div class="answer"><p>It tells the browser to use HTTPS only for a host for a period, preventing downgrade and stripping attacks after the first visit. With <code>includeSubDomains</code> and preload it covers the whole domain. It is hard to undo, so roll it out carefully.</p></div></details>
+<details><summary>11. A service works in the browser but fails from a Java client. Why?</summary><div class="answer"><p>Most likely an incomplete certificate chain: the server is not sending the intermediate, and browsers fetch or cache it while the Java trust store does not. Check the presented chain with <code>openssl s_client</code>. Other candidates are an untrusted private root or a hostname mismatch.</p></div></details>
+<details><summary>12. Why is a certificate expiry such a common outage?</summary><div class="answer"><p>Renewal is manual or monitored only by the team that owns the load balancer, so it fails silently until clients reject the connection. The fix is automated issuance, expiry alerts independent of the application, and an inventory that includes internal services.</p></div></details>
+<details><summary>13. What is 0-RTT and what is the risk?</summary><div class="answer"><p>TLS 1.3 early data lets a returning client send application data with the first flight, saving a round trip. That data is replayable by an attacker, so it should be limited to idempotent requests and never used for state-changing operations.</p></div></details>
+<details><summary>14. Does HTTPS protect data at rest or in logs?</summary><div class="answer"><p>No. TLS protects data in transit between two endpoints. Once it is decrypted, stored in a database, written to a log, or captured by an inspection proxy, TLS provides no protection — those need encryption at rest, redaction, and access control.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Saying TLS provides confidentiality and forgetting authentication — encryption to an impersonator is worthless.</li><li>Treating the padlock as proof the site is trustworthy rather than proof of a validated certificate for that hostname.</li><li>Terminating TLS at the edge and calling the system end-to-end encrypted while the backend hop is plaintext.</li><li>Forgetting that TLS protects data in transit only, not data at rest, in logs, or in a compromised process.</li><li>Deploying a leaf certificate without the intermediate chain.</li><li>Assuming mTLS authorizes an action rather than only authenticating the connection.</li><li>Enabling HSTS preload before every subdomain supports HTTPS.</li><li>Keeping TLS 1.0/1.1 or CBC cipher suites enabled for compatibility and calling the deployment secure.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="jwt.html"><span>← Previous</span><strong>JWT</strong></a><a class="next" href="rbac.html"><span>Next →</span><strong>RBAC</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/ssl-tls">AlgoMaster — SSL/TLS</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAP Theorem — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 05 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>CAP Theorem</h1>
+    <p class="dek">Core Concepts · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>11</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/cap-theorem">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">The two choices</a>
+<a href="#s3">Consistency</a>
+<a href="#s4">Availability</a>
+<a href="#s5">Partition tolerance</a>
+<a href="#s6">Why “pick two” is too simple</a>
+<a href="#s7">CP: preserving consistency</a>
+<a href="#s8">AP: preserving availability</a>
+<a href="#s9">CA: consistency and availability</a>
+<a href="#s10">PACELC: the trade-off when the network is healthy</a>
+<a href="#s11">Summary and how to apply it</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>When a network partition splits replicas, CAP says you cannot keep both a single up-to-date view and a successful response for every affected request — and the choice belongs to each operation, not to the whole database.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>CAP theorem</dt><dd>A distributed system facing a network partition cannot guarantee both strong consistency and availability for affected requests.</dd></div><div class="term"><dt>Consistency (CAP)</dt><dd>Replicated data behaves as if there were one up-to-date copy: a read after a confirmed write does not return an older value.</dd></div><div class="term"><dt>Availability (CAP)</dt><dd>Every request sent to a healthy node eventually receives a valid response, even if replicas cannot coordinate.</dd></div><div class="term"><dt>Partition</dt><dd>A communication failure where groups of nodes can no longer reach each other while the nodes themselves remain running.</dd></div><div class="term"><dt>Partition tolerance</dt><dd>The system has defined behavior when nodes cannot communicate; it does not mean every request succeeds.</dd></div><div class="term"><dt>CP system</dt><dd>During a partition, the system rejects or waits rather than return data it cannot prove is current.</dd></div><div class="term"><dt>AP system</dt><dd>During a partition, the system keeps serving local data and reconciles divergent copies later.</dd></div><div class="term"><dt>CA</dt><dd>Consistency plus availability only while no partition exists; it is not a useful label for a replicated system that can be split.</dd></div><div class="term"><dt>PACELC</dt><dd>An extension of CAP: if there is a Partition, choose Availability or Consistency; Else, choose Latency or Consistency.</dd></div><div class="term"><dt>Eventual consistency</dt><dd>Replicas may diverge temporarily but converge once communication resumes, provided conflicts are resolved.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">An online store keeps product data in Region A and Region B. Both show a price of 50 dollars. An administrator changes it to 60 in Region A, and the update is confirmed.</p>
+<ul><li>Before the change reaches Region B, the network link between the regions fails.</li><li>Both regions are still running, and customers can reach both of them.</li><li>A customer asks Region B for the price, but Region B still has the old value and cannot contact Region A.</li><li>The update was confirmed, yet a healthy node would return stale data if it answered locally.</li><li>Region B has no way to discover an update it never received while communication stays broken.</li><li>No protocol can make the missing information appear; the system must choose how to behave.</li><li>This is the situation CAP describes: a partition exposes a conflict between freshness and successful responses.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The two choices</h2>
+<p class="lede">Region B has exactly two options when a customer asks for the price.</p>
+<ul><li><strong>Answer locally:</strong> return 50 dollars. The request succeeds, but the customer sees an older price after the update was confirmed.</li><li><strong>Refuse or wait:</strong> do not answer until the current value can be established. The answer is not stale, but the customer gets an error or a delay.</li><li>The first choice keeps the request available and gives up consistency.</li><li>The second keeps consistency and gives up availability for that request.</li><li>The trade-off appears only because the replicas are separated; while the link is healthy, both properties can usually hold.</li><li>The choice can differ by operation: a product description can tolerate staleness, while the last unit in stock cannot.</li><li>An error from a healthy node that cannot coordinate does not count as available under CAP.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Consistency</h2>
+<p class="lede">In CAP, consistency means the system behaves as if there were only one up-to-date copy of the data. It is about replicated reads, not about database constraints.</p>
+<ul><li>Once a write is confirmed, any read that starts afterward must return that value or a newer one.</li><li>A read must not return the old value after the new value was acknowledged.</li><li>One way to achieve this is to copy the write to other replicas before acknowledging the client.</li><li>It does not require every replica to update at the same instant; a lagging replica can coordinate or refuse to serve until it can be consistent.</li><li>A read from Region A after the update returns 60 and is consistent.</li><li>A read from Region B is consistent only once it has caught up; answering 50 before that breaks consistency.</li><li>Refusing to answer because freshness cannot be confirmed preserves consistency, even though the customer gets no value.</li></ul>
+<h3>CAP consistency vs ACID consistency</h3>
+<ul><li>ACID consistency is about preserving database rules and constraints inside one database.</li><li>CAP consistency is about replicated data across nodes behaving like a single current copy.</li><li>A transaction that leaves a negative price violates ACID consistency; a replica returning a value older than a confirmed write violates CAP consistency.</li><li>The two ideas share a word but answer different questions, so do not use them interchangeably in an interview.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>ACID consistency</th><th>CAP consistency</th></tr></thead><tbody><tr><td>Concern</td><td>Rules and constraints in one database</td><td>Replicated data across nodes</td></tr>
+<tr><td>Example</td><td>A price can never be negative</td><td>A read after an update sees the new price</td></tr>
+<tr><td>Violated when</td><td>A transaction leaves data breaking a constraint</td><td>A replica returns a value older than a confirmed write</td></tr></tbody></table></div>
+
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Availability</h2>
+<p class="lede">CAP availability is narrower than the everyday word. It means every request sent to a healthy node eventually gets a valid response, even if replicas cannot coordinate.</p>
+<ul><li>Returning an older local price keeps the system available but gives up strong consistency.</li><li>Returning <em>service unavailable</em> does not satisfy CAP availability for that request.</li><li>The response does not have to be fast; it only has to arrive eventually.</li><li>A stale value from a healthy node counts as available.</li><li>A value that arrives after a long delay also counts.</li><li>An error from a healthy node that could not coordinate does not count.</li><li>A monthly uptime figure such as 99.99% is a different measurement: CAP availability is about individual requests during a partition, not time spent online.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Partition tolerance</h2>
+<p class="lede">A partition happens when groups of nodes can no longer communicate, even though the nodes themselves are still running.</p>
+<ul><li>Causes include a broken network link, a routing problem, a firewall misconfiguration, or an overloaded network device.</li><li>A broken link between data centers leaves both regions running while replication traffic stops.</li><li>A routing issue can send packets down a path that never arrives.</li><li>A firewall change can block the port replication depends on.</li><li>An overloaded device can drop or delay messages until timeouts fire.</li><li>In every case the nodes are fine; the problem is the path between them.</li><li>Partition tolerance means the system has defined behavior during these failures, not that every request will still succeed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Why “pick two” is too simple</h2>
+<p class="lede">CAP is often summarized as <em>pick any two of three</em>. That framing hides the part that matters.</p>
+<ul><li>A distributed system cannot prevent network partitions, so partition tolerance is not a feature you can decline.</li><li>While the network is healthy, a system can often provide both consistency and availability.</li><li>The real trade-off appears when communication breaks, and only for operations that depend on the separated replicas.</li><li>The choice does not have to be uniform: reading a description can use local data, while reserving the last item must stop.</li><li>Calling a whole database CP or AP is therefore imprecise; the label is most useful per operation.</li><li>CAP describes a moment of failure, not the steady-state behavior of the system.</li><li>The practical question is: during a partition, what should this specific operation do?</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Store operation</th><th>During a partition</th><th>Why</th></tr></thead><tbody><tr><td>Read a product description</td><td>Keep serving local data</td><td>A slightly old description harms nobody</td></tr>
+<tr><td>Browse the catalog</td><td>Keep serving local data</td><td>Short delays in updates are tolerable</td></tr>
+<tr><td>Add an item to the cart</td><td>Keep serving, merge later</td><td>Losing the addition is worse than a brief mismatch</td></tr>
+<tr><td>Reserve the last unit in stock</td><td>Stop until coordination is possible</td><td>Two regions must not both sell it</td></tr>
+<tr><td>Check whether an API key is valid</td><td>Stop until the latest state is known</td><td>A revoked key must not keep working</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>CP: preserving consistency</h2>
+<p class="lede">A CP system preserves consistency during a partition, even at the cost of rejecting or delaying affected requests.</p>
+<ul><li>Suppose only one unit of a product is left; a reservation must check inventory and reduce it as one coordinated operation.</li><li>If two separated regions each see one unit and both confirm a sale, the same item is sold twice.</li><li>A CP design routes reservations through a leader or a group of replicas that agrees on the update.</li><li>If a region cannot reach that authority, it waits or rejects the reservation instead of guessing.</li><li>Reads follow the same rule: a replica that cannot prove freshness refuses rather than returning a stale answer.</li><li>Some customers may be unable to check out during the partition, but the system avoids double-selling.</li><li>This is the right default for inventory, payments, locks, and anything where stale data causes real harm.</li></ul>
+
+<div class="flow"><span class="flow-step">Customer reserves the last unit</span><span class="flow-arrow">→</span><span class="flow-step">Request routes to the inventory leader</span><span class="flow-arrow">→</span><span class="flow-step">Leader coordinates the update with a quorum</span><span class="flow-arrow">→</span><span class="flow-step">Reservation is confirmed once the update is agreed</span><span class="flow-arrow">→</span><span class="flow-step">A region that cannot reach the leader rejects or waits</span></div>
+<div class="note">CP is about refusing to guess, not about making the partition disappear.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>AP: preserving availability</h2>
+<p class="lede">An AP system keeps accepting requests on reachable replicas and reconciles divergent copies after communication returns.</p>
+<ul><li>A customer adds a book from a phone through Region A and a notebook from a laptop through Region B.</li><li>The regions are disconnected, but both additions can still succeed if each replica accepts local writes.</li><li>During the partition, the phone may show only the book and the laptop only the notebook.</li><li>When the link returns, the system merges the additions so both views contain both items.</li><li>Combining two cart additions is usually a reasonable merge rule.</li><li>The same strategy would be unsafe for the last unit in stock, because two reservations cannot both succeed.</li><li>Other conflicts, such as two edits to the same description, need a defined winner or version rule.</li><li>The system trades a period of drift for uninterrupted service, and the application owns the reconciliation logic.</li></ul>
+
+<div class="flow"><span class="flow-step">Phone adds a book in Region A</span><span class="flow-arrow">→</span><span class="flow-step">Laptop adds a notebook in Region B</span><span class="flow-arrow">→</span><span class="flow-step">Each replica accepts its local write</span><span class="flow-arrow">→</span><span class="flow-step">Views diverge while the partition lasts</span><span class="flow-arrow">→</span><span class="flow-step">Link returns and the cart is merged</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>CA: consistency and availability</h2>
+<p class="lede">CA means consistency and availability without partition tolerance. It is meaningful only while no partition exists.</p>
+<ul><li>A single-node database can provide both while it is healthy, because there are no replicas to coordinate across a network.</li><li>A distributed system can also provide both while communication is working normally.</li><li>Once replicas can be separated, the system still has to decide what to do during the partition.</li><li>For replicated data, the same choice returns: preserve consistency or keep affected operations available.</li><li>That is why CA is not a useful label for a distributed system that can be split.</li><li>A design that never states its partition behavior has not escaped the trade-off; it has left the answer undefined.</li><li>In an interview, say <em>CA only while there is no partition</em> rather than presenting it as a third viable option.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>PACELC: the trade-off when the network is healthy</h2>
+<p class="lede">Even with a healthy network, coordination takes time. PACELC extends CAP to cover that normal case.</p>
+<ul><li>If there is a <strong>P</strong>artition, choose <strong>A</strong>vailability or <strong>C</strong>onsistency — the original CAP trade-off.</li><li><strong>E</strong>lse, when the network is healthy, choose <strong>L</strong>atency or <strong>C</strong>onsistency.</li><li>Reading from a nearby replica is faster than contacting a leader in another region, but the replica may be slightly behind.</li><li>Waiting for multiple replicas to agree on a write improves consistency but adds latency.</li><li>Stronger consistency generally requires more coordination, which makes requests slower.</li><li>The trade-off applies most of the time, because partitions are rare compared with normal operation.</li><li>The right choice still depends on what each operation needs: a feed read can accept a nearby stale replica, while a balance check may wait for the leader.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Situation</th><th>Trade-off</th><th>Store example</th></tr></thead><tbody><tr><td>Partition</td><td>Availability vs consistency</td><td>Region B serves the old price or refuses</td></tr>
+<tr><td>No partition</td><td>Latency vs consistency</td><td>Read the price from a nearby replica or wait for the leader</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Summary and how to apply it</h2>
+<ul><li>CAP describes what happens to <strong>replicated data during a network partition</strong>, not the general quality of a database.</li><li>When replicas cannot communicate, the system cannot guarantee both a consistent view and a successful response for every affected request.</li><li>Partition tolerance is unavoidable; the meaningful labels are CP and AP for the affected operation.</li><li>CP rejects or waits rather than returning stale data; AP serves local data and reconciles later.</li><li>CA is only meaningful when partitions are not part of the picture.</li><li>PACELC adds the everyday trade-off between latency and consistency when the network is healthy.</li><li>Choose per operation: catalog browsing and cart updates can continue with local data, while reserving the last unit must stop.</li><li>In an interview, name the user impact of each choice — a stale price, a failed checkout, or a duplicated sale — rather than only naming the label.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Term</th><th>Meaning in CAP</th></tr></thead><tbody><tr><td>Consistency</td><td>Replicated data behaves like a single up-to-date copy</td></tr>
+<tr><td>Availability</td><td>Every request to a healthy node eventually gets a valid response</td></tr>
+<tr><td>Partition tolerance</td><td>The system has defined behavior when nodes cannot communicate</td></tr>
+<tr><td>CP</td><td>During a partition, reject or wait rather than return stale data</td></tr>
+<tr><td>AP</td><td>During a partition, keep serving local data and reconcile later</td></tr>
+<tr><td>CA</td><td>Only meaningful when partitions are not part of the picture</td></tr>
+<tr><td>PACELC</td><td>Without a partition, the trade-off is latency vs consistency</td></tr></tbody></table></div>
+
+<div class="note">A useful exercise: pick two operations in a system you know and decide which one can safely continue during a partition and which one must stop.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>CP</strong> prevents stale reads and duplicate side effects but makes affected operations unavailable or slow during a partition.</li><li><strong>AP</strong> keeps serving requests but returns possibly stale data and pushes conflict resolution onto the application.</li><li><strong>Synchronous replication</strong> strengthens consistency but adds write latency and reduces availability when a replica is unreachable.</li><li><strong>Reading from a nearby replica</strong> reduces latency but may return data that is slightly behind the leader.</li><li><strong>Waiting for a quorum</strong> improves consistency but increases latency and can fail when too few replicas are reachable.</li><li><strong>Per-operation CAP choices</strong> match behavior to business risk but make the system harder to reason about and test.</li><li><strong>CA designs</strong> are simple while the network is healthy but leave partition behavior undefined once replicas separate.</li><li><strong>Eventual consistency</strong> improves availability and latency but requires merge rules, versioning, and tolerance for temporary divergence.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What does the CAP theorem state?</summary><div class="answer"><p>When a network partition separates replicas, a distributed system cannot guarantee both strong consistency and availability for the affected requests. It must choose whether to return possibly stale data or refuse/wait. Partition tolerance is not optional, so the practical choice is CP or AP.</p></div></details>
+<details><summary>2. Why is partition tolerance not optional?</summary><div class="answer"><p>Networks fail: links break, routes go wrong, firewalls change, and devices drop messages. A distributed system cannot prevent partitions, so it must define behavior for them. Saying a system <em>chooses CA</em> only means it has not specified what happens when the network splits.</p></div></details>
+<details><summary>3. How is CAP consistency different from ACID consistency?</summary><div class="answer"><p>ACID consistency preserves rules and constraints inside one database, such as a price never being negative. CAP consistency is about replicated data behaving like a single current copy, so a read after a confirmed write does not return an older value. They share a word but describe different guarantees.</p></div></details>
+<details><summary>4. What does availability mean in CAP?</summary><div class="answer"><p>Every request sent to a healthy node eventually gets a valid response, even if replicas cannot coordinate. A stale response counts, and a slow response counts, but an error from a healthy node does not. This is request-level availability during a partition, not a monthly uptime percentage.</p></div></details>
+<details><summary>5. What causes a network partition?</summary><div class="answer"><p>A broken link between data centers, a routing problem, a firewall blocking a replication port, or an overloaded network device dropping messages. The nodes remain healthy; only the path between them fails. That is why the failure is invisible to a simple process health check.</p></div></details>
+<details><summary>6. Why is “pick two” a misleading summary?</summary><div class="answer"><p>It treats partition tolerance as optional, when partitions are unavoidable. It also implies one choice for the whole system, when the trade-off appears only during a partition and can differ per operation. A catalog read can be AP while an inventory reservation is CP.</p></div></details>
+<details><summary>7. Give an example of a CP decision.</summary><div class="answer"><p>Reserving the last unit of stock. Two separated regions must not both confirm the sale, so the reservation goes through a leader or quorum. If a region cannot reach that authority, it rejects or waits. The cost is that some customers cannot check out during the partition.</p></div></details>
+<details><summary>8. Give an example of an AP decision.</summary><div class="answer"><p>Adding items to a shopping cart. A phone in one region and a laptop in another can both accept additions while disconnected, then merge them when the link returns. The cart may be temporarily incomplete, but no addition is lost. The same approach would be unsafe for inventory.</p></div></details>
+<details><summary>9. Why is CA not useful for a distributed system?</summary><div class="answer"><p>CA holds only while there is no partition. A single-node database can provide it, and a distributed system can provide it while the network is healthy, but once replicas separate the system must still choose. CA is a statement about the absence of partitions, not a third behavior during one.</p></div></details>
+<details><summary>10. What does PACELC add to CAP?</summary><div class="answer"><p>PACELC covers normal operation: if there is a partition, choose availability or consistency; else, choose latency or consistency. Reading a nearby replica is fast but may be stale, while waiting for a leader is consistent but slower. Most of the time there is no partition, so this trade-off matters more often than CAP alone suggests.</p></div></details>
+<details><summary>11. Can one system be CP for some operations and AP for others?</summary><div class="answer"><p>Yes, and that is usually the right design. The label applies to the operation's behavior during a partition, not to the entire database. A product description read can serve local data, while a payment or inventory reservation refuses until it can coordinate.</p></div></details>
+<details><summary>12. How do you choose between CP and AP?</summary><div class="answer"><p>Ask what a wrong answer costs. If stale data causes a duplicated sale, lost money, a security breach, or an irreversible action, choose CP for that operation. If availability matters more and conflicts can be merged sensibly, choose AP. Then state the user impact of each choice.</p></div></details>
+<details><summary>13. How do AP systems handle conflicts when the partition heals?</summary><div class="answer"><p>They reconcile divergent copies using a merge rule: union for cart additions, last-writer-wins with a timestamp or version, or application-specific resolution. The rule is part of the design, because some conflicts cannot be merged safely. Eventual consistency means convergence, not the absence of conflicts.</p></div></details>
+<details><summary>14. What is a common CAP mistake in interviews?</summary><div class="answer"><p>Listing databases as dogmatically CP or AP and stopping there. A database's behavior depends on its configuration, replication mode, and the operation being performed. The stronger answer names the operation, describes the partition behavior, and explains the user-visible consequence.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Saying CAP means choosing any two of three, as if partition tolerance were optional.</li><li>Presenting CA as a viable design for a system whose replicas can be separated by a network failure.</li><li>Applying a single CP or AP label to an entire database instead of to specific operations.</li><li>Confusing CAP availability with monthly uptime or confusing CAP consistency with ACID constraints.</li><li>Assuming AP means the system is never consistent, rather than eventually consistent after reconciliation.</li><li>Ignoring the latency-versus-consistency trade-off that exists even when the network is healthy.</li><li>Choosing CP for every operation and making the system unnecessarily unavailable during partitions.</li><li>Forgetting that an AP design still needs a defined, tested merge rule for conflicting writes.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="availability.html"><span>← Previous</span><strong>Availability</strong></a><a class="next" href="consistent-hashing.html"><span>Next →</span><strong>Consistent Hashing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/cap-theorem">AlgoMaster — CAP Theorem</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

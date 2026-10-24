@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Idempotency and Safe Retries — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 12 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Reliability</span></div>
+    <h1>Idempotency and Safe Retries</h1>
+    <p class="dek">Every network call can fail after the work succeeded, so retries are correct client behaviour and duplicates are a design assumption; interviewers want to see how you make the second attempt harmless.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Duplicates are guaranteed, so make the effect idempotent, record the key atomically with the effect, and retry only transient failures with backoff, jitter, and a budget.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Accept retries of the same logical write with a client-supplied Idempotency-Key.</li><li>Return the original response for a completed key instead of executing the work again.</li><li>Reject a reused key that carries a different request payload.</li><li>Deduplicate queue messages by a producer-assigned event ID.</li><li>Retry transient failures with backoff and move poison messages to a dead-letter queue.</li><li>Expose the status of a key and support an audited DLQ replay.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>At most one charge, order, refund, or notification per logical operation.</li><li>API p99 under 300 ms excluding the external provider call; retries must not run synchronously forever.</li><li>Idempotency lookup p99 under 10 ms on the happy path.</li><li>Retain idempotency and dedupe records longer than the maximum retry, redelivery, and replay horizon.</li><li>Fail closed for money movement and fail open for low-value analytics when the dedupe store is unavailable.</li><li>Retry budgets, jitter, and circuit breakers must prevent a retry storm from amplifying an outage.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 500 payment writes/s at peak and a 5% retry rate, so about 25 retries/s arrive alongside new traffic.</li><li>A key record at about 500 bytes for 500 writes/s over 24 hours is about 43M rows and roughly 22 GB hot storage.</li><li>Keeping the same records for 7 days is roughly 150 GB, which is why the hot window is short and older records are archived.</li><li>A provider timeout of 2 s with at most 3 attempts and backoff of 100 ms, 500 ms, and 2 s caps one request's retry time.</li><li>If only failed attempts retry, a 5% failure rate adds about 5.25% attempts rather than multiplying all traffic by three.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">IdempotencyKey</span><span class="fields">scope, key, request_hash, status, response_code, response_body, created_at, expires_at</span></div><div class="entity"><span class="name">Payment</span><span class="fields">payment_id, order_id, amount_cents, currency, status, provider_ref, version, updated_at</span></div><div class="entity"><span class="name">ProcessedMessage</span><span class="fields">consumer_group, message_id, processed_at, result</span></div><div class="entity"><span class="name">OutboxEvent</span><span class="fields">event_id, aggregate_id, type, payload, status, created_at, published_at</span></div><div class="entity"><span class="name">RetryAttempt</span><span class="fields">request_id, attempt_no, error_class, next_at, last_error</span></div><div class="entity"><span class="name">DeadLetter</span><span class="fields">dlq_id, message_id, payload, error_class, attempts, first_seen_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/payments</code></td><td>Create a payment; requires Idempotency-Key, returns the stored result on a replay, and 409 for a payload mismatch.</td></tr><tr><td><code>GET</code></td><td><code>/v1/payments/{id}</code></td><td>Read the current payment state and version.</td></tr><tr><td><code>GET</code></td><td><code>/v1/idempotency/{key}</code></td><td>Inspect whether a key is in progress, completed, or failed, and replay its stored response.</td></tr><tr><td><code>POST</code></td><td><code>/v1/webhooks/provider</code></td><td>Receive provider callbacks; dedupe on the provider event ID and apply a conditional state transition.</td></tr><tr><td><code>POST</code></td><td><code>/internal/dlq/{id}/replay</code></td><td>Replay one dead-lettered message through the same idempotent handler.</td></tr><tr><td><code>GET</code></td><td><code>/internal/retries/stats</code></td><td>Expose retry rate, duplicate-detection rate, DLQ age, and per-operation success after retry.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Key record</td><td>Unique (scope, key) with request_hash, status, and the stored response, inserted in the same transaction as the effect</td><td>A retry either reads a completed record or loses the unique race; it cannot pass the check and execute twice.</td></tr><tr><td>State changes</td><td>Conditional updates such as status = pending to authorized, with a version column</td><td>A transition happens once even when two workers process the same event, and an older update cannot overwrite a newer state.</td></tr><tr><td>Consumer dedupe</td><td>Unique (consumer_group, message_id) written in the same transaction as the business change</td><td>At-least-once delivery becomes effectively-once without a distributed transaction, and acknowledging after commit makes redelivery harmless.</td></tr><tr><td>Event publishing</td><td>Transactional outbox row committed with the payment, then relayed to the broker</td><td>There is no gap where the payment commits but the event is never published, and a retried publish is deduplicated downstream.</td></tr><tr><td>Retention</td><td>24 hours hot in the primary, then partition-archive up to the 7-day replay horizon</td><td>Keeps the lookup table small while still covering client retries, queue retention, and weekend backfills.</td></tr><tr><td>External calls</td><td>Pass an idempotency key to the provider and reconcile its ledger against the local one</td><td>The provider can receive the same charge twice across a timeout; its own key plus reconciliation is the only reliable guard.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> GW[🛡️ API gateway]
+  GW --> PAY[⚙️ Payment service]
+  PAY --> IK[🔑 Idempotency store]
+  PAY --> DB[🗄️ Payments DB]
+  PAY --> PR[💳 Provider]
+  PAY --> OB[📤 Outbox]
+  PR -.->|webhook| PAY
+  OB --> Q[📬 Event bus]
+  Q --> W[👷 Consumer]
+  W --> DM[🔑 Dedupe table]
+  W --> N[📧 Notification]
+  W --> DLQ[🛑 Dead letter]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef bus fill:#ffe8ec,stroke:#b42342,color:#17211f;
+  class C client;
+  class GW edge;
+  class PAY,W svc;
+  class IK,DB,DM,PR store;
+  class OB,Q,N,DLQ bus;</div><div class="diagram-caption">Every write checks a unique key record before acting, commits the effect and its record together, and publishes follow-on work through an outbox with a deduplicating consumer.</div></div>
+        <ul><li>Name the duplicate sources first: client retries, gateway retries, queue redelivery, producer retries, replays, and a crash after the effect but before the acknowledgement.</li><li>Make the operation naturally idempotent where possible, for example an upsert or a status assignment, and use keys where the effect inherently accumulates.</li><li>The key record and the business effect must share one transaction; separating them creates a window for either a duplicate or a lost request.</li><li>The first request wins the unique insert and proceeds; a concurrent retry sees in-progress and either waits or returns a conflict, never starts a second execution.</li><li>Consumers acknowledge only after the effect and the dedupe row commit, so a crash causes redelivery that is now safe.</li><li>Retry only transient classes such as timeouts, connection resets, and 5xx; a 4xx business rejection will not succeed on attempt three.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Idempotency keys</td><td>A retry replays the original result instead of repeating the effect</td><td>A lookup, a stored response, and a retention policy on every write path</td></tr><tr><td>Database-backed dedupe</td><td>Durable and transactional with the effect, so a crash cannot separate them</td><td>Adds write latency and the table grows with every request</td></tr><tr><td>Redis-backed dedupe</td><td>Very fast lookup with native TTL</td><td>Eviction or a cache failure widens the duplicate window, so it cannot be the only record</td></tr><tr><td>Unique constraint</td><td>Race-proof final barrier even when application checks race</td><td>Only works when the business key has a natural uniqueness rule</td></tr><tr><td>Long dedupe window</td><td>Catches late retries, slow replays, and weekend backfills</td><td>More storage, larger indexes, and higher lookup cost</td></tr><tr><td>Short dedupe window</td><td>Small table and cheap lookups</td><td>A slow retry or replay can slip through and duplicate the effect</td></tr><tr><td>Fail-closed dedupe lookup</td><td>Prevents a double charge when the store is unavailable</td><td>Turns a dedupe-store outage into a payment-write outage</td></tr><tr><td>Dead-letter queue</td><td>One poison message cannot block every later event in the partition</td><td>Requires alerting, an audited replay path, and idempotent handlers on replay</td></tr></tbody></table></div>
+        <ul><li>Short-circuit a completed key before parsing the body or calling downstream services.</li><li>Use Redis as a fast negative or completed pre-check, but keep the durable table as the authoritative record.</li><li>Partition the idempotency and dedupe tables by key so they scale with traffic and do not become a single hot spot.</li><li>Store a hash of the request payload plus a compact response rather than the whole body, and compress large responses.</li><li>Schedule retries on a queue with a visible delay instead of sleeping a worker thread.</li><li>Apply exponential backoff with full jitter, a maximum attempt count, and a retry budget per dependency.</li><li>Add a circuit breaker so a failing provider stops receiving traffic instead of accumulating a retry storm.</li><li>Expire and archive dedupe records by partition, and alert on table growth as well as duplicate rate.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why do duplicates happen at all?</strong> A client cannot distinguish a lost request from a lost response, so it retries; queues also redeliver after a crash, making duplicates an expected condition rather than an edge case.</div><div class="followup"><strong>What if the same key arrives with a different payload?</strong> Reject it with a conflict, because the key identifies one logical operation and silently returning the old response would hide a client bug.</div><div class="followup"><strong>Where should the key be stored?</strong> In the same database and transaction as the business effect when correctness matters, so a crash cannot leave one without the other.</div><div class="followup"><strong>How do you handle two concurrent retries?</strong> Use an atomic insert with a unique constraint on the key; one request wins and proceeds, while the other sees in-progress or completed and waits, rejects, or replays.</div><div class="followup"><strong>What happens if the process crashes between the effect and the key record?</strong> That is why the record and the effect share one transaction; if they cannot, the effect must be recoverable from an in-progress state with a lease, and success is never returned before the effect commits.</div><div class="followup"><strong>How long should records live?</strong> Longer than the maximum client retry, queue retention, and replay horizon, then archive or expire them to control storage.</div><div class="followup"><strong>Is exactly-once delivery achievable?</strong> Not end to end over an unreliable network; systems provide effectively-once effects through at-least-once delivery plus idempotent or deduplicated sinks.</div><div class="followup"><strong>How do you dedupe queue messages?</strong> Give each message a stable producer-assigned ID, write it to a processed table in the same transaction as the side effect, and acknowledge only after the commit.</div><div class="followup"><strong>What is a sane retry policy?</strong> Only retry transient errors, use exponential backoff with jitter and a maximum attempt count, cap retries with a budget, and stop calling a failing dependency behind a circuit breaker.</div><div class="followup"><strong>What do you do with a poison message?</strong> Bound the attempts, move it with its payload and error context to a dead-letter queue so the partition continues, alert on the oldest age, and replay through the same idempotent handler.</div><div class="followup"><strong>How do you avoid duplicate third-party charges?</strong> Pass an idempotency key to the provider when it supports one, record the send attempt locally, and reconcile the provider ledger against yours.</div><div class="followup"><strong>What should you monitor?</strong> Duplicate-detection rate by source, unique-constraint violations, retry rate and success after retry, DLQ volume and age, key-store size and eviction, and payment p99.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Checking for a duplicate and then writing in two separate steps, leaving a race between concurrent retries.</li><li>Recording the idempotency key outside the transaction that performs the effect.</li><li>Generating a new key on every retry, which defeats the entire mechanism.</li><li>Deduplicating only at the API and forgetting queue redelivery and replays.</li><li>Claiming exactly-once delivery instead of explaining effectively-once processing.</li><li>Expiring dedupe records before the maximum retry or backfill window has passed.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="database-selection.html"><span>← Previous</span><strong>SQL vs NoSQL / Choose a Database</strong></a><a class="next" href="handle-hot-keys.html"><span>Next →</span><strong>Handle Hot Keys</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

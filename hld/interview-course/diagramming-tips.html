@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diagramming Tips — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+
+<svg class="svg-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker-teal" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker-rose" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Introduction</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Diagramming Tips</h1>
+    <p class="dek">A diagram is a communication tool, not art. It should make the request flow easier to follow and leave a clear record of your decisions.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>1</strong> example diagram</span>
+      <span class="pill">Layout · labels · arrows</span>
+      <span class="pill">Read vs write paths</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/diagramming-tips">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#why">Why the diagram matters</a>
+      <a href="#tool">Know your tool</a>
+      <a href="#layout">Plan the layout</a>
+      <a href="#notes">Keep requirements visible</a>
+      <a href="#labels">Labels and shapes</a>
+      <a href="#arrows">Arrows that explain flow</a>
+      <a href="#request">Build one request at a time</a>
+      <a href="#paths">Separate read and write</a>
+      <a href="#deepdive">Update during deep dives</a>
+      <a href="#omit">Leave out what doesn't matter</a>
+      <a href="#mistakes">Common mistakes</a>
+      <a href="#recap">Recap</a>
+    </nav>
+
+    <main>
+      <div class="one-liner">
+        <span class="label">The rule</span>
+        A good diagram reduces the number of words you need. If the interviewer cannot follow one request through it, the diagram is not finished.
+      </div>
+
+      <dl class="key-terms">
+        <div class="term"><dt>Layout</dt><dd>Where clients, entry points, services, and data stores sit on the canvas.</dd></div>
+        <div class="term"><dt>Legend</dt><dd>A small key for solid vs dashed arrows and shape meanings.</dd></div>
+        <div class="term"><dt>Synchronous call</dt><dd>A direct request where the caller waits for a response; usually a solid arrow.</dd></div>
+        <div class="term"><dt>Asynchronous message</dt><dd>A queued event where the producer does not wait; usually a dashed arrow.</dd></div>
+        <div class="term"><dt>Read path</dt><dd>The flow for serving data to a user.</dd></div>
+        <div class="term"><dt>Write path</dt><dd>The flow for accepting and persisting a change.</dd></div>
+      </dl>
+
+      <section class="section-block" id="why">
+        <h2><span class="n">01</span>Why the diagram matters</h2>
+        <ul>
+          <li>It makes your explanation easier to follow by showing how components fit together.</li>
+          <li>It is a visual record of your decisions; interviewers may refer back to it when evaluating you.</li>
+          <li>It exposes missing pieces early: no entry point, no data store, no async path, no failure handling.</li>
+          <li>It keeps you from repeating yourself; point to the diagram instead of re-describing every box.</li>
+          <li>A clear diagram supports a stronger narrative; a messy one makes a good design look weaker.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="tool">
+        <h2><span class="n">02</span>Get comfortable with the drawing tool</h2>
+        <ul>
+          <li>Virtual interviews often use Excalidraw, Miro, or a company whiteboard; onsites may use a physical board.</li>
+          <li>Ask the recruiter which tool will be used and practise with it beforehand.</li>
+          <li>Know how to create boxes, add labels, connect arrows, move groups, add notes, and change colours.</li>
+          <li>Ten minutes of practice can save you from fumbling with basic controls during the interview.</li>
+          <li>On a physical whiteboard, start small and leave space on the right and bottom for expansion.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “I’ll build the diagram one request at a time and label the paths as I go.”</div>
+      </section>
+
+      <section class="section-block" id="layout">
+        <h2><span class="n">03</span>Plan your layout</h2>
+        <ul>
+          <li><strong>Left:</strong> clients and user entry.</li>
+          <li><strong>Next:</strong> API gateway or load balancer.</li>
+          <li><strong>Middle:</strong> application services.</li>
+          <li><strong>Right:</strong> databases, caches, object storage, and queues.</li>
+          <li>Leave room for a queue between services or a cache in front of a database discovered during the deep dive.</li>
+          <li>Reserve space at the top or side for requirements, traffic estimates, and API definitions.</li>
+        </ul>
+        <div class="note"><strong>Default:</strong> left-to-right follows the natural request flow and is easiest for an interviewer to follow.</div>
+      </section>
+
+      <section class="section-block" id="notes">
+        <h2><span class="n">04</span>Keep requirements and APIs visible</h2>
+        <ul>
+          <li>Write down 2–4 core requirements in short phrases.</li>
+          <li>Note non-functional targets: latency, availability, consistency, scale.</li>
+          <li>List the main APIs next to the diagram: method + path + purpose.</li>
+          <li>Use these notes during the deep dive: “This async fan-out is acceptable because the feed only needs eventual consistency.”</li>
+          <li>At the end, revisit each requirement and confirm the design addresses it.</li>
+        </ul>
+        <div class="note"><strong>Example notes:</strong> “POST /posts”, “GET /feed”, “Feed p99 &lt; 200 ms”, “Eventual consistency allowed”, “100k feed reads/sec”.</div>
+      </section>
+
+      <section class="section-block" id="labels">
+        <h2><span class="n">05</span>Use clear labels and consistent shapes</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Instead of</th><th>Write</th></tr></thead>
+          <tbody>
+            <tr><td>Database</td><td>Posts DB (PostgreSQL)</td></tr>
+            <tr><td>Database</td><td>Feed Cache (Redis)</td></tr>
+            <tr><td>Backend</td><td>Post Service</td></tr>
+            <tr><td>Server</td><td>Feed Service</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li><strong>Specific labels</strong> explain what the component stores or does and which technology it uses.</li>
+          <li><strong>Data stores:</strong> add key fields, e.g. “Posts: post ID, author ID, content, created_at”.</li>
+          <li><strong>Shapes:</strong> rectangles for services, cylinders for databases/caches, solid arrows for synchronous calls, dashed arrows for async.</li>
+          <li><strong>Consistency:</strong> stick to one convention; add a small legend if needed.</li>
+          <li>Do not show the entire schema; show enough to explain the design.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="arrows">
+        <h2><span class="n">06</span>Draw arrows that explain the flow</h2>
+        <ul>
+          <li><strong>Direction:</strong> draw the arrow in the direction of the request; the response is usually implied.</li>
+          <li><strong>Label non-obvious interactions:</strong> “Read feed”, “Publish post event”, “Write post”.</li>
+          <li><strong>Solid vs dashed:</strong> solid for synchronous calls; dashed for asynchronous messages.</li>
+          <li><strong>Number multi-step flows:</strong> 1 request → 2 save → 3 publish → 4 consume → 5 update feed.</li>
+          <li><strong>Avoid crossing arrows</strong> where possible; crossing lines hide the flow.</li>
+          <li>If the line style is not obvious, add a legend.</li>
+        </ul>
+        <div class="note trap"><strong>Trap:</strong> unlabeled arrows between generic “Service” boxes. The interviewer cannot tell whether it is a read, a write, or an event.</div>
+      </section>
+
+      <section class="section-block" id="request">
+        <h2><span class="n">07</span>Build the diagram one request at a time</h2>
+        <ol>
+          <li>Start with the main write API: client → gateway → service → database.</li>
+          <li>Explain each component as you add it: auth, validation, persistence.</li>
+          <li>Move to the read API: client → service → cache → database on miss.</li>
+          <li>Reuse components already on the canvas; do not redraw duplicates.</li>
+          <li>Add async work when the write flow needs it: service → queue → worker → cache.</li>
+          <li>Number the arrows for multi-step flows.</li>
+        </ol>
+        <div class="note"><strong>This narration is the interview:</strong> the diagram is the visual aid; your explanation is the answer.</div>
+      </section>
+
+      <section class="section-block" id="paths">
+        <h2><span class="n">08</span>Show read and write paths separately</h2>
+        <p class="lede">Many systems are read-heavy; showing both paths exposes where the cache sits and which path is asynchronous.</p>
+        <figure class="diagram">
+          <svg viewBox="0 0 900 380" role="img" aria-label="Example news feed diagram with separate write and read paths">
+            <rect x="0" y="0" width="900" height="380" fill="none"/>
+            <text class="svg-label" x="120" y="28">WRITE PATH</text>
+            <text class="svg-label" x="120" y="238">READ PATH</text>
+            <rect class="svg-box blue" x="30" y="55" width="120" height="52" rx="8"/>
+            <text class="svg-text small" x="90" y="81">Client</text>
+            <rect class="svg-box warm" x="210" y="55" width="130" height="52" rx="8"/>
+            <text class="svg-text small" x="275" y="81">API gateway</text>
+            <rect class="svg-box strong" x="400" y="55" width="150" height="52" rx="8"/>
+            <text class="svg-text small" x="475" y="81">Post service</text>
+            <rect class="svg-box blue" x="610" y="55" width="140" height="52" rx="8"/>
+            <text class="svg-text small" x="680" y="81">Posts DB</text>
+            <rect class="svg-box rose" x="400" y="145" width="150" height="50" rx="8"/>
+            <text class="svg-text small" x="475" y="170">Queue</text>
+            <rect class="svg-box strong" x="610" y="145" width="140" height="50" rx="8"/>
+            <text class="svg-text small" x="680" y="170">Fan-out workers</text>
+            <rect class="svg-box violet" x="610" y="245" width="140" height="52" rx="8"/>
+            <text class="svg-text small" x="680" y="271">Feed cache</text>
+
+            <rect class="svg-box blue" x="30" y="265" width="120" height="52" rx="8"/>
+            <text class="svg-text small" x="90" y="291">Client</text>
+            <rect class="svg-box warm" x="210" y="265" width="130" height="52" rx="8"/>
+            <text class="svg-text small" x="275" y="291">API gateway</text>
+            <rect class="svg-box strong" x="400" y="265" width="150" height="52" rx="8"/>
+            <text class="svg-text small" x="475" y="291">Feed service</text>
+
+            <path class="svg-line" d="M150 81 L210 81"/>
+            <path class="svg-line" d="M340 81 L400 81"/>
+            <path class="svg-line" d="M550 81 L610 81"/>
+            <path class="svg-line rose dashed" d="M475 107 L475 145"/>
+            <text class="svg-label" x="500" y="132">publish</text>
+            <path class="svg-line rose" d="M550 170 L610 170"/>
+            <path class="svg-line rose" d="M680 195 L680 245"/>
+            <text class="svg-label" x="730" y="226">update</text>
+
+            <path class="svg-line teal" d="M150 291 L210 291"/>
+            <path class="svg-line teal" d="M340 291 L400 291"/>
+            <path class="svg-line teal" d="M550 291 C590 291 590 271 610 271"/>
+            <text class="svg-label" x="575" y="316">read</text>
+            <path class="svg-line blue dashed" d="M475 317 L475 350 L790 350 L790 81 L750 81"/>
+            <text class="svg-label" x="650" y="344">cache miss → DB</text>
+          </svg>
+          <figcaption>Separate the write path from the read path. Solid arrows are synchronous calls; dashed arrows are asynchronous messages or fallback reads.</figcaption>
+        </figure>
+        <ul>
+          <li>Place the write path on top and the read path below, or use different colours.</li>
+          <li>Show where async work enters: post service → queue → fan-out workers → feed cache.</li>
+          <li>Show the read fallback: feed service → cache; on miss, database.</li>
+          <li>This exposes the key design decision: precomputed feeds vs read-time assembly.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="deepdive">
+        <h2><span class="n">09</span>Update the diagram during deep dives</h2>
+        <ul>
+          <li>Add detail when the interviewer drills into a component: indexes, replication, partitions, retries.</li>
+          <li>Do not redraw the whole system; extend the relevant part.</li>
+          <li>Label the new detail and explain why it exists.</li>
+          <li>Keep the high-level view visible so the interviewer does not lose context.</li>
+          <li>If the design changes, update the diagram instead of describing a contradictory one.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="omit">
+        <h2><span class="n">10</span>Leave out what doesn't matter</h2>
+        <ul>
+          <li>Do not draw login, profile settings, or admin screens unless they are part of the question.</li>
+          <li>Do not add components you cannot explain or defend.</li>
+          <li>Keep notes short; the diagram is not a specification document.</li>
+          <li>Omit implementation details that do not change the architecture.</li>
+          <li>Clarity beats completeness: a smaller, coherent diagram is stronger than a crowded one.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="mistakes">
+        <h2><span class="n">11</span>Two common mistakes</h2>
+        <div class="grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="note trap"><strong>Too many boxes:</strong> the interviewer cannot tell what matters. Start with the main request path and add depth only when needed.</div>
+          <div class="note trap"><strong>No flow:</strong> boxes with unlabeled arrows are not a design. Explain what moves, in which direction, and whether it is synchronous.</div>
+        </div>
+        <ul>
+          <li>Inconsistent shapes: rectangles and cylinders used for the same thing.</li>
+          <li>Unlabeled data stores: “DB” with no indication of what it stores.</li>
+          <li>Arrows crossing through boxes, making the path unreadable.</li>
+          <li>Drawing everything before explaining anything.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="recap">
+        <h2><span class="n">✓</span>Recap</h2>
+        <ul>
+          <li><strong>Layout:</strong> clients left, entry point next, services middle, data right.</li>
+          <li><strong>Notes:</strong> requirements and APIs visible throughout.</li>
+          <li><strong>Labels:</strong> specific; shapes consistent; data stores show key fields.</li>
+          <li><strong>Arrows:</strong> direction of request; label non-obvious flows; solid vs dashed for sync/async.</li>
+          <li><strong>Build one request at a time;</strong> separate read and write paths.</li>
+          <li><strong>Update during deep dives;</strong> omit what does not matter.</li>
+        </ul>
+        <div class="note"><strong>Final check:</strong> can the interviewer trace one write and one read through your diagram without asking where anything goes?</div>
+      </section>
+
+      <nav class="page-nav">
+        <a class="prev" href="expectations-by-level.html"><span>← Previous</span><strong>Expectations by Level</strong></a>
+        <a class="next" href="concepts.html"><span>Next →</span><strong>Core Building Blocks</strong></a>
+      </nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/diagramming-tips">AlgoMaster — Diagramming Tips for System Design Interviews</a>.</p>
+        <p><strong>Course:</strong> System Design Interviews · concept notes.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

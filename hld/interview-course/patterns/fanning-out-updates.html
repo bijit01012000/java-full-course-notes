@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fanning Out Updates — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 06 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Fanning Out Updates</h1>
+    <p class="dek">Interview Patterns · Delivering Content</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/fanout">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: one publish, many recipients</a>
+<a href="#s2">Where this pattern shows up</a>
+<a href="#s3">The two directions</a>
+<a href="#s4">Fan-out on write (push)</a>
+<a href="#s5">Fan-out on read (pull)</a>
+<a href="#s6">Comparing push and pull</a>
+<a href="#s7">The celebrity problem and hybrid fan-out</a>
+<a href="#s8">The fan-out pipeline</a>
+<a href="#s9">Storing and serving the feed</a>
+<a href="#s10">Consistency, ordering, and duplicates</a>
+<a href="#s11">Backfill, new follows, and deletions</a>
+<a href="#s12">Capacity and bottlenecks</a>
+<a href="#s13">Failure modes and monitoring</a>
+<a href="#s14">Interview walkthrough</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Fan-out is the choice between doing the distribution work when content is published and doing it when a reader opens the app, and real systems usually need a <strong>hybrid</strong> because neither extreme survives celebrity accounts.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Fan-out</dt><dd>Distributing one published item to many recipients, followers, or feed owners.</dd></div><div class="term"><dt>Fan-out on write (push)</dt><dd>The publisher's action writes the item into every recipient's feed ahead of time, so reads are cheap.</dd></div><div class="term"><dt>Fan-out on read (pull)</dt><dd>The item is stored once and each reader gathers from the accounts they follow when they open the feed.</dd></div><div class="term"><dt>Write amplification</dt><dd>One logical publish becoming many physical writes, one per recipient or shard.</dd></div><div class="term"><dt>Celebrity problem</dt><dd>A single account with an enormous follower count makes push fan-out disproportionately expensive.</dd></div><div class="term"><dt>Hybrid fan-out</dt><dd>Push for ordinary accounts and pull for high-follower accounts, merging both at read time.</dd></div><div class="term"><dt>Feed cache</dt><dd>A per-user, precomputed list of item ids kept in a fast store so the feed read is a single lookup.</dd></div><div class="term"><dt>Cursor pagination</dt><dd>Paging with a stable position marker instead of an offset, so new items do not shift the page.</dd></div><div class="term"><dt>Backfill</dt><dd>Populating a new or repaired feed with existing items, for example when a user follows someone.</dd></div><div class="term"><dt>Ranking</dt><dd>Ordering feed items by relevance or recency before returning them, often at read time.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: one publish, many recipients</h2>
+<p class="lede">When a user posts, the post may need to appear in the feeds of everyone who follows them. One action creates work proportional to the audience size.</p>
+<ul><li>An ordinary account might have hundreds of followers; a celebrity may have <strong>tens of millions</strong>.</li><li>Doing that work synchronously in the publish request makes posting latency depend on audience size.</li><li>Skipping the work makes every read expensive, because each reader must gather from every account they follow.</li><li>The design question is not whether to fan out, but <strong>when</strong> and <strong>how much</strong> to fan out.</li><li>The same content may also need to reach notifications, search indexes, and email digests, multiplying the work.</li><li>Every approach must answer what a user sees immediately after posting, and what a follower sees seconds later.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Where this pattern shows up</h2>
+<ul><li><strong>News feed</strong> (Twitter, Facebook, Instagram): a post appears in follower timelines.</li><li><strong>Notifications</strong>: one event becomes a push, email, and in-app badge for many users.</li><li><strong>Group chat and channels</strong>: one message is delivered to every member's devices.</li><li><strong>Activity streams</strong>: a comment notifies the author, mentioned users, and watchers.</li><li><strong>Search and recommendation indexes</strong>: a new item must become discoverable for many queries.</li><li><strong>Webhooks and integrations</strong>: one business event is delivered to many subscriber endpoints.</li><li>The shape is identical: one producer, a large and uneven set of consumers, and a latency budget for each.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Problem</th><th>What fans out</th><th>Hard part</th></tr></thead><tbody><tr><td>News feed</td><td>Post to follower timelines</td><td>Celebrities and read latency</td></tr>
+<tr><td>Notifications</td><td>Event to channels and devices</td><td>Duplicates, preferences, retries</td></tr>
+<tr><td>Group chat</td><td>Message to members and devices</td><td>Presence and delivery guarantees</td></tr>
+<tr><td>Search index</td><td>Item to shards and inverted index</td><td>Freshness and reindexing</td></tr>
+<tr><td>Webhooks</td><td>Event to subscriber endpoints</td><td>Slow and failing consumers</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The two directions</h2>
+<p class="lede">There are two pure strategies, and the choice decides where the expensive work lives.</p>
+<ul><li><strong>Fan-out on write:</strong> when an item is published, write it into every recipient's precomputed feed.</li><li><strong>Fan-out on read:</strong> store the item once, then merge the followees' items when a reader requests a feed.</li><li>Push makes reads a cheap lookup and writes expensive and bursty.</li><li>Pull makes writes cheap and reads expensive and dependent on how many accounts a user follows.</li><li>The right choice depends on the read/write ratio, audience-size distribution, and freshness requirement.</li><li>Most large social systems use both, applying each where it is cheapest.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Fan-out on write (push)</h2>
+<p class="lede">The publisher's request enqueues work, and workers insert the new item id into each follower's feed list.</p>
+<ul><li>The publish path saves the item and enqueues a fan-out job instead of writing every feed inline.</li><li>Workers read the follower list, often in pages, and append the item id to each follower's feed cache or table.</li><li>Reads become a single lookup of a bounded list, so opening the feed has predictable latency.</li><li>Writes amplify: one post becomes as many writes as there are followers, plus index and cache updates.</li><li>The approach fails badly for accounts with very large audiences, because one post can saturate the worker fleet.</li><li>It works best when follower counts are moderate and feeds are read far more often than they are written.</li><li>Feeds must be capped or trimmed; otherwise storage grows without bound as users keep posting.</li></ul>
+
+<div class="flow"><span class="flow-step">Author publishes</span><span class="flow-arrow">→</span><span class="flow-step">Save item</span><span class="flow-arrow">→</span><span class="flow-step">Enqueue fan-out job</span><span class="flow-arrow">→</span><span class="flow-step">Workers page follower list</span><span class="flow-arrow">→</span><span class="flow-step">Append item id to each feed</span><span class="flow-arrow">→</span><span class="flow-step">Reader fetches precomputed feed</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Fan-out on read (pull)</h2>
+<p class="lede">The item is written once, and the reader's request merges recent items from the accounts they follow.</p>
+<ul><li>Storage cost is minimal because each item exists in one place, plus its indexes.</li><li>The write path is fast and independent of audience size, which handles celebrities naturally.</li><li>The read path must fetch candidate items from many followees and merge them by time or rank.</li><li>A user following thousands of accounts makes each feed load expensive and tail-latency sensitive.</li><li>Caching the merged result helps, but invalidating it when any followee posts is difficult.</li><li>It is a good fit for users who follow few accounts, or for content that is expensive to duplicate.</li><li>Pagination is harder because the merged view must be stable across pages.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Comparing push and pull</h2>
+<ul><li>Push optimizes the common case, reading, and pays on the rarer case, publishing.</li><li>Pull optimizes publishing and pays on every read, especially for users with large follow graphs.</li><li>Push duplicates storage per recipient; pull duplicates work per read.</li><li>Push makes ranking and filtering possible ahead of time; pull can rank only what it gathers at request time.</li><li>Push handles a deleted or edited post by updating many copies; pull updates one source of truth.</li><li>Push has a clear freshness story, while pull freshness depends on how quickly followees' items are visible.</li><li>Neither is universally correct, which is why production systems blend them.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Fan-out on write</th><th>Fan-out on read</th></tr></thead><tbody><tr><td>Work happens</td><td>At publish time</td><td>At read time</td></tr>
+<tr><td>Read cost</td><td>One lookup</td><td>Merge across followees</td></tr>
+<tr><td>Write cost</td><td>Proportional to followers</td><td>One write</td></tr>
+<tr><td>Celebrity account</td><td>Very expensive</td><td>Handled naturally</td></tr>
+<tr><td>Storage</td><td>Duplicated per recipient</td><td>Stored once</td></tr>
+<tr><td>Freshness</td><td>Visible once fan-out completes</td><td>Visible on next read</td></tr>
+<tr><td>Deletes and edits</td><td>Must touch every copy</td><td>Single source of truth</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The celebrity problem and hybrid fan-out</h2>
+<p class="lede">A single account with an enormous audience breaks pure push, and pure pull breaks users who follow many accounts. The standard answer is a hybrid.</p>
+<ul><li>Mark accounts above a follower threshold as <strong>high-fan-out</strong> and do not push their posts into follower feeds.</li><li>Push posts from ordinary accounts into follower feeds as usual.</li><li>At read time, merge the precomputed feed with recent posts pulled from the high-fan-out accounts the user follows.</li><li>The threshold is a tunable product and cost decision, not a fixed rule of nature.</li><li>Hybrid keeps the read path fast for the majority while bounding the work a single publish can create.</li><li>The merged read must deduplicate items that arrived through both paths, usually by item id.</li><li>Ranking then happens over the merged candidate set, so the two sources must produce comparable metadata.</li></ul>
+
+<div class="flow"><span class="flow-step">Post published</span><span class="flow-arrow">→</span><span class="flow-step">Author above threshold?</span><span class="flow-arrow">→</span><span class="flow-step">Yes: store once, skip push</span><span class="flow-arrow">→</span><span class="flow-step">No: push to follower feeds</span><span class="flow-arrow">→</span><span class="flow-step">Reader loads feed</span><span class="flow-arrow">→</span><span class="flow-step">Merge pushed feed with pulled celebrity posts</span><span class="flow-arrow">→</span><span class="flow-step">Rank and deduplicate</span><span class="flow-arrow">→</span><span class="flow-step">Return page</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>The fan-out pipeline</h2>
+<p class="lede">Push fan-out should be asynchronous, batched, and retryable.</p>
+<ul><li>The publish request persists the item and publishes an event, then returns; it does not wait for fan-out.</li><li>A queue absorbs bursts and lets worker capacity scale independently of API servers.</li><li>Workers page through the follower list rather than loading it entirely, which bounds memory per job.</li><li>Batching writes per storage shard reduces round trips and improves throughput.</li><li>Jobs must be <strong>idempotent</strong>, because queues deliver at least once and workers retry after timeouts.</li><li>A dead-letter queue plus a repair job handles followers whose feed write repeatedly failed.</li><li>Progress should be checkpointed so a failed job resumes instead of restarting from the first follower.</li></ul>
+
+<div class="flow"><span class="flow-step">Publish API</span><span class="flow-arrow">→</span><span class="flow-step">Durable event log</span><span class="flow-arrow">→</span><span class="flow-step">Fan-out queue</span><span class="flow-arrow">→</span><span class="flow-step">Partitioned workers</span><span class="flow-arrow">→</span><span class="flow-step">Feed store shards</span><span class="flow-arrow">→</span><span class="flow-step">Checkpoint and retry</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Storing and serving the feed</h2>
+<ul><li>Store per-user feeds as an ordered list of item ids in a fast store, with the item bodies fetched separately.</li><li>This keeps the hot structure small and lets item metadata be cached once and shared by all readers.</li><li>Cap feed length and trim old entries; feeds are a recent window, not a permanent archive.</li><li>Shard feeds by user id so one user's list lives on one node and reads stay single-shard.</li><li>Use <strong>cursor pagination</strong> anchored to the last item seen, because offsets shift as new items arrive.</li><li>Hydrate ids into full items with a batched multi-get, and tolerate missing items if content was deleted.</li><li>Return enough metadata for ranking and rendering in one round trip to avoid a second fan-out at read time.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Consistency, ordering, and duplicates</h2>
+<ul><li>Fan-out is eventually consistent: a follower may see a post seconds after it is published.</li><li>The author should see their own post immediately, which usually means a read-your-writes path or merging their own items at read time.</li><li>Workers may process the same job twice, so feed insertion must be idempotent by item id.</li><li>Ordering by event time is usually enough, but ties and clock skew need a deterministic tiebreaker.</li><li>Edited or deleted items must be filtered at hydration time even if stale ids remain in feeds.</li><li>A feed may briefly contain an id whose body is not yet readable; skip or retry rather than failing the whole page.</li><li>Cross-region replication adds lag, so freshness expectations must be stated per region.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Backfill, new follows, and deletions</h2>
+<ul><li>When a user follows a new account, the feed can be backfilled with that account's recent items, or left to fill naturally.</li><li>Backfilling is a bounded read of the followee's recent items, not a full history scan.</li><li>Unfollowing requires removing that account's items from the precomputed feed or filtering them at read time.</li><li>Account deletion must remove items from many feeds, so many systems filter by author status instead of rewriting every feed.</li><li>Editing a post is best handled by updating one item body rather than rewriting every feed entry.</li><li>Repair jobs should be able to rebuild a feed from the follow graph and item store when data drifts.</li><li>Backfill work must be rate-limited so a popular new follow does not create a spike.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Capacity and bottlenecks</h2>
+<ul><li>The dominant cost of push is <strong>write amplification</strong>: follower count multiplied by publish rate.</li><li>Queue depth and worker lag reveal whether fan-out is keeping up with publishing.</li><li>The follower-list read is often the hidden bottleneck, especially for accounts with millions of followers.</li><li>Feed storage grows with users multiplied by feed length, so trimming policy is a capacity decision.</li><li>Read capacity is driven by daily active users and feed refresh rate, not by total registered users.</li><li>Hot items and hot authors create skewed load; partitioning by follower id spreads feed writes.</li><li>Measure p99 time from publish to visible in a follower feed, not just worker throughput.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Cost driver</th><th>Push</th><th>Pull</th></tr></thead><tbody><tr><td>Per publish</td><td>Follower count</td><td>Constant</td></tr>
+<tr><td>Per read</td><td>Constant lookup</td><td>Followee count</td></tr>
+<tr><td>Storage</td><td>Users times feed length</td><td>One copy per item</td></tr>
+<tr><td>Main bottleneck</td><td>Worker fleet and write throughput</td><td>Merge latency and cache misses</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Failure modes and monitoring</h2>
+<ul><li>A worker crash mid-job leaves some followers without the item; checkpointing and retry fix it.</li><li>A queue backlog delays feeds, so the product must tolerate or surface staleness.</li><li>A celebrity post can monopolize workers; isolate high-fan-out jobs or route them to the pull path.</li><li>A feed-store outage makes home timelines unavailable even though the item store is healthy.</li><li>Duplicate feed entries appear when retries are not idempotent, producing repeated posts in a timeline.</li><li>Poison messages should go to a dead-letter queue with alerting rather than blocking a partition.</li><li>Monitor fan-out lag, failure rate per partition, feed read latency, duplicate rate, and storage growth.</li><li>Load-shedding non-critical fan-out, such as notification digests, protects the core feed path during incidents.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Interview walkthrough</h2>
+<p class="lede">Lead with the two strategies, then show why the real design is a hybrid.</p>
+<ul><li>Clarify the follow model, whether feeds are chronological or ranked, and the acceptable delay.</li><li>Estimate publish rate, average and maximum follower counts, and feed reads per user per day.</li><li>Start with fan-out on write for ordinary accounts and explain the read path it enables.</li><li>Introduce the celebrity case and switch those accounts to pull at read time.</li><li>Describe the asynchronous pipeline: durable event, queue, partitioned workers, idempotent writes, checkpoints.</li><li>Explain feed storage: ids only, per-user shard, capped length, cursor pagination, batched hydration.</li><li>Cover deletes, edits, new follows, and retries, since these are where naive designs break.</li><li>Close with bottlenecks and monitoring: write amplification, worker lag, read p99, and storage growth.</li></ul>
+
+<div class="flow"><span class="flow-step">Clarify model and freshness</span><span class="flow-arrow">→</span><span class="flow-step">Estimate publish and read load</span><span class="flow-arrow">→</span><span class="flow-step">Choose push or pull per account class</span><span class="flow-arrow">→</span><span class="flow-step">Design async pipeline</span><span class="flow-arrow">→</span><span class="flow-step">Design feed store and read path</span><span class="flow-arrow">→</span><span class="flow-step">Handle failure and skew</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Fan-out on write</strong> makes reads a single fast lookup but multiplies storage and write work by follower count.</li><li><strong>Fan-out on read</strong> keeps writes cheap and handles celebrities, but makes feed loads expensive for users who follow many accounts.</li><li><strong>Hybrid fan-out</strong> bounds both extremes, at the cost of merging, deduplicating, and ranking two sources at read time.</li><li><strong>Asynchronous fan-out</strong> keeps publish latency low and absorbs bursts, but followers see posts after a delay and the queue must be monitored.</li><li><strong>Precomputed feeds</strong> give predictable read latency, but stale ids and deleted content must be filtered later.</li><li><strong>Capped feed length</strong> bounds storage and read cost, but users lose access to older items through the feed.</li><li><strong>Ranking at read time</strong> is flexible and fresher, but costs CPU per request; ranking at write time is cheaper to serve but rigid.</li><li><strong>Backfilling on follow</strong> improves the first experience, but creates bursty reads for popular accounts.</li><li><strong>Filtering deleted authors at read time</strong> avoids rewriting millions of feeds, but leaves dead entries consuming space until trimmed.</li><li><strong>Per-user feed sharding</strong> keeps reads single-shard, but makes cross-user analytics and rebalancing harder.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is fan-out?</summary><div class="answer"><p>Distributing one published item to many recipients. In a feed system it means getting a post into the timelines of everyone who should see it, either when it is published or when a reader asks for their feed.</p></div></details>
+<details><summary>2. Compare fan-out on write and fan-out on read.</summary><div class="answer"><p>Push writes the item into every recipient's feed, so reads are one lookup but writes scale with followers. Pull stores the item once and merges followees at read time, so writes are cheap but reads scale with how many accounts a user follows.</p></div></details>
+<details><summary>3. Why does pure push fail for celebrities?</summary><div class="answer"><p>One post from an account with tens of millions of followers becomes tens of millions of feed writes. That single action can saturate the worker fleet and delay fan-out for everyone else.</p></div></details>
+<details><summary>4. How does hybrid fan-out work?</summary><div class="answer"><p>Ordinary accounts are pushed into follower feeds. High-follower accounts are stored once and pulled at read time, then merged with the precomputed feed, deduplicated, and ranked.</p></div></details>
+<details><summary>5. How do you choose the celebrity threshold?</summary><div class="answer"><p>It is a cost trade-off: the point where pushing to all followers costs more than merging that account at read time. The right value depends on worker capacity, read volume, and how many users follow those accounts.</p></div></details>
+<details><summary>6. Why should fan-out be asynchronous?</summary><div class="answer"><p>Publish latency should not depend on audience size, and traffic is bursty. Persisting the item and enqueueing a job lets workers scale independently and absorbs spikes, at the cost of eventual visibility.</p></div></details>
+<details><summary>7. How do you make fan-out idempotent?</summary><div class="answer"><p>Key each feed insertion by user id plus item id and make writes upserts. Retries and at-least-once delivery then cannot create duplicate entries.</p></div></details>
+<details><summary>8. How do you store a feed?</summary><div class="answer"><p>Keep an ordered list of item ids per user in a fast store, sharded by user, capped to a recent window, and paginated with a cursor. Hydrate item bodies with a batched multi-get and filter deleted content.</p></div></details>
+<details><summary>9. Why cursor pagination instead of offsets?</summary><div class="answer"><p>New items constantly arrive at the top, so offsets shift and users see duplicates or skip items. A cursor anchored to the last item seen gives a stable page.</p></div></details>
+<details><summary>10. What happens when a user follows someone new?</summary><div class="answer"><p>Either backfill the feed with that account's recent items or let it fill naturally. Backfill should read a bounded recent window and be rate-limited so popular accounts do not create a spike.</p></div></details>
+<details><summary>11. How do you handle deletes and edits?</summary><div class="answer"><p>Keep one source of truth for the item body, filter deleted or unauthorized items at hydration time, and update the body in place for edits rather than rewriting every feed copy.</p></div></details>
+<details><summary>12. What are the main bottlenecks?</summary><div class="answer"><p>Write amplification and worker capacity for push, merge latency and fan-out of followees for pull, feed storage growth, and skew from hot authors. Measure publish-to-visible lag and feed read p99.</p></div></details>
+<details><summary>13. How do you handle a queue backlog?</summary><div class="answer"><p>Prioritize ordinary posts, isolate or skip high-fan-out jobs, scale workers, and surface staleness. During incidents, shed low-value fan-out such as digest notifications before the core feed path.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Choosing pure push or pure pull without discussing the celebrity case.</li><li>Doing fan-out synchronously inside the publish request so posting latency scales with follower count.</li><li>Forgetting write amplification when estimating capacity.</li><li>Making feed insertion non-idempotent, so retries duplicate posts in timelines.</li><li>Using offset pagination on a feed that changes constantly.</li><li>Forgetting that deletes, edits, and unfollows must be reflected in precomputed feeds.</li><li>Treating fan-out as reliable without checkpoints, retries, or a dead-letter path.</li><li>Ignoring feed storage growth and never trimming old entries.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="pushing-real-time-updates.html"><span>← Previous</span><strong>Pushing Real-time Updates</strong></a><a class="next" href="uploading-serving-large-files.html"><span>Next →</span><strong>Uploading and Serving Large Files</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/fanout">AlgoMaster — Fanning Out Updates</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

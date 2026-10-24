@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design a Notification Service — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 05 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Product design</span></div>
+    <h1>Design a Notification Service</h1>
+    <p class="dek">It looks simple until you add multiple channels, provider limits, retries, and user preferences, so it tests asynchronous pipeline design and duplicate control.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">7 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Accept a notification request idempotently, persist it with an outbox, route it through per-channel queues with preference and rate-limit checks, and retry provider calls with backoff into a dead-letter queue.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Accept notification requests from internal services and deliver over push, email, SMS, and in-app channels.</li><li>Render localized templates with per-user variables and support scheduling for a future time.</li><li>Respect user preferences, channel opt-outs, category subscriptions, and quiet hours.</li><li>Deduplicate and collapse repeated notifications, for example ten likes becoming one 'and 9 others' message.</li><li>Retry transient provider failures, fail over where possible, and expose per-notification delivery status.</li><li>Provide a dead-letter queue and a replay path for notifications that exhaust retries.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Accept and enqueue a request in under about 100ms at p99; actual delivery is asynchronous.</li><li>Guarantee at-least-once delivery and make duplicate arrivals harmless to the user.</li><li>Isolate channels so a slow email provider cannot block push notifications.</li><li>Sustain roughly 1B notifications per day with a peak several times the average.</li><li>Respect provider rate limits and back off instead of hammering a failing downstream.</li><li>Keep an auditable record of what was sent, through which provider, and what happened.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 100M users and 1B notifications per day: about 12k per second average and 50k per second at peak.</li><li>Assume 70 percent push, 20 percent email, and 10 percent SMS; each channel has different latency, cost, and provider quotas.</li><li>At an average payload of 1KB, raw notification records are about 1TB per day before indexes and retention, so partition by time and archive old rows.</li><li>A user with 5 devices needs 5 push attempts for one logical notification, so device fan-out multiplies provider calls even when the notification count does not change.</li><li>Retries can multiply traffic during a provider incident; cap attempts, use jitter, and route to a fallback only for critical categories.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Notification</span><span class="fields">notification_id, user_id, category, template_id, channel, priority, variables, idempotency_key, scheduled_at, status, created_at</span></div><div class="entity"><span class="name">Template</span><span class="fields">template_id, version, channel, locale, subject, body, variables_schema, active</span></div><div class="entity"><span class="name">Preference</span><span class="fields">user_id, category, channel, enabled, quiet_hours_start, quiet_hours_end, timezone, updated_at</span></div><div class="entity"><span class="name">DeliveryAttempt</span><span class="fields">attempt_id, notification_id, channel, provider, device_id, status, provider_message_id, error_code, attempted_at</span></div><div class="entity"><span class="name">DeviceToken</span><span class="fields">user_id, device_id, platform, push_token, app_version, last_seen_at, valid</span></div><div class="entity"><span class="name">ProviderRoute</span><span class="fields">channel, provider, priority, rate_limit, enabled, credentials_ref, failover_order</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/notifications</code></td><td>Submit one notification with an idempotency key; validates the request, persists it, and returns 202 with a notification id.</td></tr><tr><td><code>POST</code></td><td><code>/v1/notifications/batch</code></td><td>Submit a bounded batch for segment or campaign fan-out without one HTTP call per recipient.</td></tr><tr><td><code>GET</code></td><td><code>/v1/notifications/{id}</code></td><td>Return the notification status and per-channel attempt history for support and debugging.</td></tr><tr><td><code>GET</code></td><td><code>/v1/users/{user_id}/preferences</code></td><td>Read channel and category preferences plus quiet hours for a user.</td></tr><tr><td><code>PUT</code></td><td><code>/v1/users/{user_id}/preferences</code></td><td>Update opt-outs, category subscriptions, and quiet hours.</td></tr><tr><td><code>POST</code></td><td><code>/v1/webhooks/providers/{provider}</code></td><td>Receive delivery, bounce, and complaint callbacks from a provider, verify the signature, and update attempt status idempotently.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Notification record and outbox</td><td>A notification table partitioned by created_at with a unique idempotency_key, plus an outbox row written in the same transaction; a relay publishes outbox rows and marks them sent.</td><td>Time partitioning keeps the hot table small, the unique key makes producer retries safe, and the outbox prevents a committed notification from being lost when the queue publish fails.</td></tr><tr><td>Queue layout</td><td>Separate queues per channel, and within a channel separate high and low priority. Partition by user_id for per-user ordering where needed.</td><td>A slow or rate-limited provider then affects only its own channel, and priority keeps password resets ahead of marketing email.</td></tr><tr><td>Preferences</td><td>A compact per-user preference row keyed by user and category, cached in Redis with a version, and checked before enqueue and again before send.</td><td>Preferences change rarely but are read on every notification; a cached read keeps the accept path fast while the send-time check catches recent opt-outs.</td></tr><tr><td>Dedupe and collapse</td><td>A Redis key per user, category, and time window with a short TTL, plus a collapse key for notifications that can be merged.</td><td>Most duplicates arrive within seconds; a TTL window catches retries and event storms without an unbounded permanent table, and collapse prevents notification fatigue.</td></tr><tr><td>Attempt history</td><td>Append one delivery_attempt row per provider call and keep the provider message id and error code.</td><td>Support needs to prove whether a message was sent, which provider handled it, and why it failed; an append-only record also supports reconciliation with provider reports.</td></tr><tr><td>Scheduling</td><td>Store scheduled_at in UTC and use a durable delayed-job store plus a poller; do not rely on an in-process timer.</td><td>A reminder may be hours or days away and must survive deploys and crashes, so the schedule has to live outside the process.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  P[⚙️ Producer Services] --> API[🛡️ Notification API]
+  API --> PD[🧭 Preference and Dedupe]
+  PD --> DB[(🗄️ Notification DB)]
+  DB --> OB[📤 Outbox Relay and Router]
+  OB --> QP[📬 Push Queue]
+  OB --> QE[📬 Email Queue]
+  OB --> QS[📬 SMS Queue]
+  QP --> W[👷 Channel Workers]
+  QE --> W
+  QS --> W
+  W --> PR[🌐 External Providers]
+  PR -.->|receipts| WH[📥 Webhook Handler]
+  WH --> DB
+  W --> DLQ[☠️ Dead Letter Queue]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef svc fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef store fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  class P client;
+  class API edge;
+  class PD,OB,W,WH svc;
+  class DB,QP,QE,QS,PR,DLQ store;</div><div class="diagram-caption">Requests are checked against preferences and dedupe, stored with an outbox, then routed into per-channel queues whose workers call providers and record every attempt; provider callbacks close the status loop.</div></div>
+        <ul><li>Return 202 as soon as the notification is durably stored. Delivery latency is a provider concern; making the producer wait couples its availability to email and SMS vendors.</li><li>Check preferences before enqueue for fast rejection, and check again before send because a user may opt out while the notification sits in a queue or waits for quiet hours to end.</li><li>Use one queue per channel and priority. A single shared queue lets an email provider outage back up password-reset pushes behind marketing campaigns.</li><li>Workers must be idempotent: persist the attempt id, pass a stable idempotency key to the provider where supported, and treat a provider duplicate response as success for the same attempt.</li><li>Retry only transient failures such as timeouts, 429s, and 5xx responses. Do not retry invalid tokens, hard bounces, or malformed templates; send those to a terminal state or the DLQ.</li><li>Use exponential backoff with jitter and a maximum attempt count. A provider outage should reduce traffic, not create a retry storm that keeps it down.</li><li>Provider webhooks are at-least-once and can arrive out of order. Verify the signature, dedupe by provider event id, and apply status transitions only when they move forward.</li><li>Quiet hours defer non-critical notifications to the user's local morning; critical security and transactional messages should have an explicit override policy.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Fully asynchronous pipeline</td><td>Producers are decoupled from provider latency and outages, and bursts are absorbed by bounded queues.</td><td>Status is eventually consistent, retries and dedupe become necessary, and the user may wait seconds longer for a message.</td></tr><tr><td>Per-channel queues</td><td>Failure isolation and independent scaling for push, email, and SMS, with channel-specific rate limits.</td><td>More queues and workers to operate, and a single notification that needs multiple channels requires coordination across them.</td></tr><tr><td>At-least-once delivery</td><td>A crash or timeout does not silently drop a notification, which is the more visible failure for transactional messages.</td><td>Users can receive duplicates, so every send path needs an idempotency key or a dedupe window.</td></tr><tr><td>Short dedupe window in Redis</td><td>Fast and cheap protection against retries and event storms without an ever-growing database table.</td><td>A duplicate arriving after the TTL is not caught, and Redis loss temporarily widens the duplicate window.</td></tr><tr><td>Immediate send for transactional categories</td><td>Password resets and payment alerts arrive while they are still useful.</td><td>It ignores quiet hours and can wake users, so the policy must distinguish critical from marketing messages.</td></tr><tr><td>Provider abstraction with failover</td><td>A single vendor outage does not stop a channel, and routing can optimize for cost or deliverability.</td><td>Templates and status codes differ across providers, and failover can send a duplicate if the first attempt actually succeeded.</td></tr><tr><td>Persist every delivery attempt</td><td>Auditable status, easier support, and a basis for reconciling provider invoices and complaints.</td><td>Write volume grows with retries and devices, so retention and partitioning are mandatory.</td></tr></tbody></table></div>
+        <ul><li>Batch and pipeline provider calls where the provider supports it, rather than one HTTP request per recipient.</li><li>Cache templates, preferences, and device tokens so the worker path does not make several database reads per send.</li><li>Collapse high-frequency categories into a digest or a single grouped notification to reduce volume and user fatigue.</li><li>Route by cost and reliability: push before SMS, primary provider before fallback, and cheap channels for low-priority categories.</li><li>Use token buckets per provider and per channel so rate limits are respected globally rather than discovered through 429 responses.</li><li>Partition the notification table by day and archive completed rows; keep only recent status lookups hot.</li><li>Precompute segment membership for campaigns and enqueue in chunks, so a large campaign does not create one giant transaction.</li><li>Track delivery, bounce, and complaint rates per provider and switch traffic away from a degrading provider before it fails completely.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>How do you prevent duplicate notifications?</strong> Require an idempotency key per logical notification, enforce it with a unique constraint, and add a short per-user category dedupe window for event storms.</div><div class="followup"><strong>What happens when a provider is down?</strong> Retries back off with jitter, the circuit breaker opens, and only critical categories fail over to a secondary provider while everything else queues or dead-letters.</div><div class="followup"><strong>How do you respect provider rate limits?</strong> Use a shared token bucket per provider and channel, and let workers pull at the permitted rate instead of discovering the limit through 429 responses.</div><div class="followup"><strong>Does notification ordering matter?</strong> Rarely globally, but per user and category it can: partition those queues by user_id so a 'resolved' message does not overtake the alert it refers to.</div><div class="followup"><strong>How do quiet hours work?</strong> Store the user's timezone and preferred window, defer non-critical sends until the window opens, and allow an explicit override for security and transactional messages.</div><div class="followup"><strong>What do you do with a permanently invalid push token?</strong> Mark the device token invalid from the provider response, stop using it, and prompt the app to register a fresh token on next launch.</div><div class="followup"><strong>How do you fan out a campaign to 10M users?</strong> Resolve the segment in pages, enqueue bounded batches, and let channel workers drain at provider rate rather than creating 10M synchronous sends.</div><div class="followup"><strong>How is delivery status tracked?</strong> Each attempt records its provider message id, and signed provider webhooks update the attempt and notification state with deduplication by event id.</div><div class="followup"><strong>What happens after retries are exhausted?</strong> The notification goes to a dead-letter queue with its error context, alerts fire if the rate is abnormal, and an operator can replay it after the provider recovers.</div><div class="followup"><strong>How do users unsubscribe?</strong> A preference update disables the category or channel immediately, and the send path rechecks it so queued messages do not bypass the choice.</div><div class="followup"><strong>Push or email for a critical alert?</strong> Push first for immediacy, then fall back to email or SMS when the push is not delivered within a short deadline and the category is marked critical.</div><div class="followup"><strong>How do you avoid a notification storm during an incident?</strong> Aggregate related alerts, rate-limit per user and category, suppress duplicates, and have a global kill switch per category.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Publishing to the queue before the database commit, which can lose a notification when the publish succeeds and the commit fails, or vice versa.</li><li>Retrying every error, including invalid device tokens and hard bounces, which wastes provider quota and never succeeds.</li><li>Using one shared queue for all channels, so a slow email vendor blocks urgent push and SMS traffic.</li><li>Checking preferences only at enqueue time, then sending a queued message after the user has opted out.</li><li>Claiming exactly-once delivery across an external provider, which is not achievable; the correct claim is effectively once via idempotency and dedupe.</li><li>Letting retries run without a cap or jitter during a provider outage, turning a vendor incident into a self-inflicted traffic spike.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="design-chat.html"><span>← Previous</span><strong>Design a Chat Application</strong></a><a class="next" href="design-ticket-booking.html"><span>Next →</span><strong>Design Ticket Booking</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

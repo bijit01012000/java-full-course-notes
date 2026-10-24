@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TLS and mTLS — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 24 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · Security</span></div>
+    <h1>TLS and mTLS</h1>
+    <p class="dek">TLS questions separate people who know the handshake from people who know how certificates fail in production. mTLS is the usual follow-up for service-to-service identity and zero-trust designs.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Terminate TLS at the edge with automated certificates, re-encrypt inside the network, and use mTLS with attested, short-lived workload identities for service-to-service authentication.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Encrypt all client-to-edge and service-to-service traffic with TLS 1.3 or a correctly configured TLS 1.2.</li><li>Authenticate servers to clients with a certificate chain, hostname or SAN, and a valid date window.</li><li>Authenticate internal workloads to each other with mTLS certificates bound to a workload identity.</li><li>Issue, rotate, revoke, and inventory certificates without manual steps.</li><li>Support edge termination with re-encryption, and passthrough only where true end-to-end encryption is required.</li><li>Redirect HTTP to HTTPS and enforce HSTS after every subdomain is ready.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>A full TLS 1.3 handshake is one round trip, and session resumption keeps repeat connections cheap.</li><li>Every session uses ephemeral key exchange so forward secrecy holds.</li><li>Certificate expiry is alerted with enough lead time, and renewal is automated.</li><li>Internal mTLS certificates are short-lived and rotated automatically, and an issuance outage must not become a site outage.</li><li>No plaintext internal hop is described as end-to-end encrypted.</li><li>Handshake and certificate errors are observable by hostname rather than hidden behind a generic 502.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 50k concurrent edge connections and 10k new TLS handshakes/s at peak; resumption and keep-alive decide the CPU bill.</li><li>TLS 1.3 saves one round trip over TLS 1.2, worth tens of milliseconds on a cross-continent connection.</li><li>Public certificates can be valid for 90 days and internal workload certificates for hours to a day; both require automation, not a calendar reminder.</li><li>A 4 KB certificate chain is negligible next to handshake CPU on a warm connection but matters at high new-connection rates.</li><li>Assume hundreds of internal services; a manual certificate inventory stops working well before that scale.</li><li>A single expired edge certificate can fail 100 percent of traffic for that hostname, so renewal is an availability control.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Certificate</span><span class="fields">cert_id, subject, sans, issuer, serial, not_before, not_after, key_alg, status</span></div><div class="entity"><span class="name">PrivateKey</span><span class="fields">key_id, cert_id, storage, created_at, rotated_at</span></div><div class="entity"><span class="name">TrustBundle</span><span class="fields">bundle_id, roots, intermediates, version, published_at</span></div><div class="entity"><span class="name">WorkloadIdentity</span><span class="fields">spiffe_id, namespace, attestation_selector, allowed_scopes</span></div><div class="entity"><span class="name">TlsPolicy</span><span class="fields">hostname, min_version, cipher_suites, termination_mode, hsts_max_age</span></div><div class="entity"><span class="name">RotationJob</span><span class="fields">job_id, cert_id, state, started_at, completed_at, error</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/internal/v1/pki/issue</code></td><td>Issue a short-lived certificate after verifying workload attestation.</td></tr><tr><td><code>POST</code></td><td><code>/internal/v1/pki/rotate</code></td><td>Rotate a certificate and hot-reload listeners without dropping connections.</td></tr><tr><td><code>POST</code></td><td><code>/internal/v1/pki/revoke</code></td><td>Revoke a compromised certificate and publish the updated revocation data.</td></tr><tr><td><code>GET</code></td><td><code>/internal/v1/pki/certs/{id}</code></td><td>Inspect the chain, SANs, expiry, and revocation status.</td></tr><tr><td><code>GET</code></td><td><code>/internal/v1/pki/trust-bundle</code></td><td>Fetch the current versioned roots and intermediates for verifiers.</td></tr><tr><td><code>GET</code></td><td><code>/.well-known/acme-challenge/{token}</code></td><td>Prove domain control so a public CA can issue or renew an edge certificate.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Public edge certificate lifecycle</td><td>A 90-day domain-validated certificate per hostname, obtained through ACME and renewed automatically before two-thirds of its life</td><td>Short validity limits exposure and forces automation, while the SAN list must cover every hostname the listener serves.</td></tr><tr><td>Internal workload identity</td><td>Short-lived certificates whose SAN carries a SPIFFE-style workload identity, issued only after attestation</td><td>Identity is tied to what the workload is rather than its IP, and a stolen certificate expires quickly instead of remaining valid for a year.</td></tr><tr><td>Private key custody</td><td>Keys generated in or stored by an HSM or KMS, never committed to a repository, image, or shared config</td><td>A leaked key plus a valid certificate allows undetectable impersonation, so the key must be non-exportable where possible.</td></tr><tr><td>Trust bundle distribution</td><td>A versioned bundle of roots and intermediates, cached by verifiers and refreshed on rotation</td><td>The server sends the leaf and intermediates while clients supply the root, and a version lets operators diagnose an incomplete or stale chain.</td></tr><tr><td>Termination boundary</td><td>Terminate at the edge for L7 routing and WAF, then re-encrypt to the service; passthrough only when end-to-end encryption outweighs edge features</td><td>Termination centralizes certificates, but without re-encryption the internal hop is plaintext and the system is not end-to-end encrypted.</td></tr><tr><td>Protocol and cipher policy</td><td>Prefer TLS 1.3, require TLS 1.2 as the floor, allow only AEAD suites and ephemeral key exchange, and enable HSTS with a staged max-age</td><td>The policy removes downgrade paths and legacy ciphers while keeping compatibility with clients that cannot yet use TLS 1.3.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  U[📱 Client] -->|TLS 1.3| E[🛡️ Edge CDN and LB]
+  E -->|re-encrypt| S[⚙️ Service A]
+  S -->|mTLS| T[⚙️ Service B]
+  S --> P[🔐 Policy Check]
+  ACME[📜 ACME and Public CA] -->|90-day cert| E
+  CA[🏛️ Internal CA] -->|short-lived cert| S
+  CA -->|short-lived cert| T
+  HSM[🗝️ HSM and KMS] --> CA
+  MON[📊 Expiry and Chain Monitor] --> E
+  MON --> CA
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef service fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef data fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef ops fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class U client;
+  class E,ACME edge;
+  class S,T,P,CA service;
+  class HSM data;
+  class MON ops;</div><div class="diagram-caption">The edge presents a public certificate and re-encrypts to the backend, while internal services authenticate each other with short-lived mTLS certificates issued by an attested internal CA.</div></div>
+        <ul><li>TLS gives confidentiality, integrity, and authentication; encryption without authentication just encrypts traffic to an attacker.</li><li>The server sends the leaf and intermediates while the client supplies the root from its trust store, so a missing intermediate breaks non-browser clients.</li><li>Certificate identity is checked against the SAN and the requested hostname, not the legacy Common Name field.</li><li>mTLS authenticates the connection but does not authorize the action; pair it with RBAC or a policy engine.</li><li>TLS protects data in transit only; data at rest, logs, and a compromised endpoint need separate controls.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Edge termination</td><td>Central certificate management, crypto offload, and L7 routing, WAF, and caching.</td><td>Traffic is plaintext inside the network unless it is re-encrypted.</td></tr><tr><td>Termination plus re-encryption</td><td>Edge controls and an encrypted internal hop.</td><td>Double cryptographic work and more certificates and debugging complexity.</td></tr><tr><td>Passthrough</td><td>True end-to-end encryption to the backend.</td><td>No L7 routing, WAF, caching, or host-based inspection at the edge.</td></tr><tr><td>mTLS for service identity</td><td>Cryptographic workload authentication independent of network location.</td><td>A CA, attestation, automatic rotation, and separate authorization logic.</td></tr><tr><td>TLS 1.3 only</td><td>One-round-trip handshake, AEAD only, mandatory forward secrecy, and a smaller misconfiguration surface.</td><td>Old clients may be locked out, and some passive inspection becomes harder.</td></tr><tr><td>Short-lived certificates</td><td>A small compromise window and no long-lived stale credentials.</td><td>An automation failure becomes a site-wide outage.</td></tr><tr><td>HSTS with preload</td><td>Downgrade and stripping attacks are blocked after the first visit.</td><td>It is slow to undo and can lock users out of a misconfigured subdomain.</td></tr><tr><td>OCSP or CRL revocation</td><td>Compromised certificates can be rejected before expiry.</td><td>Availability, privacy, and soft-fail ambiguity, which is why short lifetimes are also needed.</td></tr></tbody></table></div>
+        <ul><li>Prefer TLS 1.3 and enable session resumption, keeping TLS 1.2 only for clients that need it.</li><li>Terminate at the edge for certificate centralization and L7 controls, then re-encrypt to the backend.</li><li>Automate ACME issuance and renewal, and alert on expiry independently of the application.</li><li>Use short-lived mTLS certificates with automatic rotation and workload attestation.</li><li>Serve OCSP-stapled responses and distribute a versioned trust bundle so rotation and revocation propagate.</li><li>Enable HSTS with a short max-age first, then raise it and preload only after every subdomain supports HTTPS.</li><li>Limit 0-RTT early data to idempotent requests because it is replayable.</li><li>Cache the trust bundle, but refresh on an unknown issuer or key id with rate limiting.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>What three problems does TLS solve?</strong> Confidentiality, integrity, and authentication, and confidentiality without authentication is worthless because you could be encrypting to an impersonator.</div><div class="followup"><strong>Walk me through the TLS handshake.</strong> The client sends a ClientHello, the server returns its parameters, key share, and certificate chain, the client validates the chain and hostname, both sides derive session keys, and Finished messages confirm the transcript before application data flows.</div><div class="followup"><strong>How does a certificate prove a server's identity?</strong> It binds a public key to a hostname and is signed by a CA, so the client builds a chain to a trusted root and checks the SAN and validity window.</div><div class="followup"><strong>What is the chain of trust?</strong> The path from the server's leaf through intermediates to a root CA the client already trusts, with the server sending the leaf and intermediates.</div><div class="followup"><strong>What is forward secrecy and why does it matter?</strong> Ephemeral key exchange means a later compromise of the server's long-term key cannot decrypt previously recorded sessions.</div><div class="followup"><strong>TLS 1.2 versus TLS 1.3?</strong> TLS 1.3 removes legacy ciphers, mandates forward secrecy, encrypts more of the handshake, and saves a round trip, while TLS 1.2 can be secure only with deliberate configuration.</div><div class="followup"><strong>Where should TLS terminate in a system design?</strong> Commonly at the edge for certificate centralization and L7 controls, followed by re-encryption to the backend, with passthrough when true end-to-end encryption is required.</div><div class="followup"><strong>What is the difference between termination and re-encryption?</strong> Termination decrypts at the edge and forwards plaintext, while re-encryption opens a second TLS connection from the edge to the service.</div><div class="followup"><strong>What is mTLS and when would you use it?</strong> Mutual TLS has both client and server present certificates, which is useful for service-to-service identity in zero-trust networks, internal APIs, and device authentication.</div><div class="followup"><strong>Does mTLS authorize an action?</strong> No, it authenticates the connection only, so authorization still requires RBAC or a policy decision on top of the verified identity.</div><div class="followup"><strong>What does HSTS do?</strong> It tells the browser to use HTTPS only for a host for a period, preventing downgrade attacks after the first visit, and preload extends that to the whole domain.</div><div class="followup"><strong>A service works in the browser but fails from a Java client, why?</strong> The most likely cause is an incomplete certificate chain, because browsers fetch or cache the intermediate while the Java trust store does not, so check the presented chain with openssl s_client.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Saying TLS provides confidentiality and forgetting authentication.</li><li>Calling the design end-to-end encrypted while the backend hop is plaintext.</li><li>Deploying a leaf certificate without the intermediate chain.</li><li>Assuming mTLS authorizes an action rather than only authenticating the connection.</li><li>Enabling HSTS preload before every subdomain supports HTTPS.</li><li>Keeping TLS 1.0, TLS 1.1, or CBC cipher suites for compatibility and calling the deployment secure.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="jwt-vs-sessions.html"><span>← Previous</span><strong>JWT vs Server-side Sessions</strong></a><a class="next" href="observability.html"><span>Next →</span><strong>Design Observability</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

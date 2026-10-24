@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Message Queues — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 29 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Message Queues</h1>
+    <p class="dek">Asynchronous Communications · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/message-queues">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: slow work in the request path</a>
+<a href="#s2">The core model</a>
+<a href="#s3">The life of a message</a>
+<a href="#s4">Crashes, visibility timeouts, and redelivery</a>
+<a href="#s5">Duplicates and idempotency</a>
+<a href="#s6">Scaling with competing consumers</a>
+<a href="#s7">Queue depth, prefetch, and autoscaling</a>
+<a href="#s8">Absorbing traffic spikes</a>
+<a href="#s9">The limits of buffering and backpressure</a>
+<a href="#s10">Poison messages and dead-letter queues</a>
+<a href="#s11">Message ordering</a>
+<a href="#s12">Designing messages</a>
+<a href="#s13">Choosing a queue — and when not to use one</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A message queue is a durable buffer between producers and consumers that turns slow, bursty, failure-prone work into independent background tasks — at the price of duplicates, retries, and eventual completion.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Broker</dt><dd>The system that stores messages, delivers them to consumers, and tracks which ones have been acknowledged.</dd></div><div class="term"><dt>Visibility timeout</dt><dd>The period after delivery during which a message is hidden from other consumers; if it expires without an ack, the message becomes visible again.</dd></div><div class="term"><dt>Acknowledgment and redelivery</dt><dd>The consumer signals completion with an ack (SQS delete, RabbitMQ ack); without it, the broker redelivers the message after a timeout or connection loss.</dd></div><div class="term"><dt>Competing consumers</dt><dd>Multiple workers reading from the same queue so each message is processed by exactly one of them.</dd></div><div class="term"><dt>Prefetch</dt><dd>How many messages a consumer fetches or buffers at once; too high causes uneven load and long visibility timeouts.</dd></div><div class="term"><dt>Queue depth</dt><dd>The number of messages waiting to be processed; the usual autoscaling signal.</dd></div><div class="term"><dt>Age of the oldest message</dt><dd>How long the oldest pending message has waited; often a better health signal than depth alone.</dd></div><div class="term"><dt>Poison message</dt><dd>A message that fails every attempt to process it, usually because of corrupt data or a missing referenced entity.</dd></div><div class="term"><dt>Dead-letter queue (DLQ)</dt><dd>A separate queue that receives messages after a configured number of failed deliveries so they stop blocking normal work.</dd></div><div class="term"><dt>Message group ID</dt><dd>A FIFO queue attribute that keeps messages with the same group key in order while different groups process in parallel.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: slow work in the request path</h2>
+<p class="lede">A video upload triggers transcoding into several resolutions, thumbnail generation, and a content check. Transcoding alone can take minutes.</p>
+<ul><li>If the upload request waits for all of that work, the user stares at a spinner and the request may time out before processing finishes.</li><li>A hundred simultaneous uploads make the servers attempt a hundred transcodes at once, exhausting CPU and memory.</li><li>If transcoding fails halfway, the whole upload request fails even though the file was stored successfully.</li><li>The root cause is that slow, resource-intensive work is tied directly to the user's synchronous request.</li><li>The fix is to accept the upload quickly, record the work to be done, and let separate workers process it at their own pace.</li><li>That record is a message, and the buffer that holds it is a queue.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The core model</h2>
+<ul><li><strong>Producers</strong> create work and publish a message describing a task, such as "transcode video 456".</li><li><strong>Consumers</strong> take a message, do the work, and tell the queue it is finished.</li><li>The <strong>broker</strong> stores messages durably, hands them out, and tracks acknowledgments.</li><li>The defining property is <strong>one message, one consumer</strong>: ten workers on the same queue means each message goes to only one of them.</li><li>That is what separates a queue from pub/sub, where every subscriber gets its own copy.</li><li>With a queue in place, the upload service stores the file, enqueues the task, and immediately returns "processing" to the user.</li><li>The producer and consumers scale independently: producers can burst while consumers stay at a sustainable rate.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The life of a message</h2>
+<ul><li><strong>Send:</strong> the producer publishes to the queue, which writes the message durably — typically to disk and often to replicas — before confirming.</li><li>The confirmation lets the producer move on knowing the message will survive a broker failure.</li><li><strong>Deliver:</strong> a consumer receives the message, but the queue does not delete it; it hides it from other consumers for the visibility timeout.</li><li>While hidden, the message is "in flight": another worker cannot take it, so duplicate concurrent processing is avoided by default.</li><li><strong>Acknowledge:</strong> when the work finishes, the consumer acks (SQS deletes it; RabbitMQ sends an ack), and the broker removes it from the pending set.</li><li>The ack is a statement about completed work, not about receipt — which is why it must come after the side effect, not before it.</li><li>Until the ack, the broker must assume the work might still fail.</li></ul>
+
+<div class="flow"><span class="flow-step">Producer sends the message</span><span class="flow-arrow">→</span><span class="flow-step">Broker stores it durably and confirms receipt</span><span class="flow-arrow">→</span><span class="flow-step">Broker delivers it to one consumer and hides it for the visibility timeout</span><span class="flow-arrow">→</span><span class="flow-step">Consumer performs the work</span><span class="flow-arrow">→</span><span class="flow-step">Consumer acknowledges (or deletes) the message</span><span class="flow-arrow">→</span><span class="flow-step">Broker removes it from the queue</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Crashes, visibility timeouts, and redelivery</h2>
+<ul><li>If the consumer crashes before acking, the message is still in the queue, so the work is not lost.</li><li>In SQS, the visibility timeout expires and the message becomes visible to another consumer.</li><li>In RabbitMQ, the broker notices the consumer's connection closed and requeues any unacknowledged deliveries.</li><li>This is the core reliability mechanism: the broker never assumes success without an explicit ack.</li><li>The visibility timeout must be longer than normal processing time; too short causes a second worker to start the same job while the first is still running.</li><li>Too long a timeout delays recovery, because a crashed consumer's message stays invisible until the timeout expires.</li><li>Long jobs often extend the timeout with periodic heartbeats rather than setting one huge value.</li><li>A message that is redelivered many times without progress is heading for a poison-message problem.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Duplicates and idempotency</h2>
+<ul><li>The safety net creates duplicates: a consumer that finishes the work but crashes before acking gets the message again and the work runs twice.</li><li>Network partitions, broker failover, and client retries after a lost publish confirmation can also duplicate a message.</li><li>Most queues therefore provide <strong>at-least-once</strong> delivery, not exactly-once.</li><li>Consumers must be <strong>idempotent</strong>: record processed message IDs, or use a conditional write keyed by message ID.</li><li>Prefer idempotent state transitions ("set status to processed") over increments ("add one credit") that double-apply.</li><li>Deduplication state needs its own retention window; too short and a late duplicate slips through.</li><li>For external side effects such as payments or emails, pass an idempotency key to the downstream API so it can reject the repeat.</li><li>Exactly-once delivery, where offered, is usually scoped to the broker and a transactional consumer — not to arbitrary third parties.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Scaling with competing consumers</h2>
+<ul><li>Add more consumers to the same queue and each worker picks up available messages; this is the <strong>competing consumers</strong> pattern.</li><li>Throughput scales roughly with worker count until a shared dependency becomes the bottleneck.</li><li>If every worker calls the same database or third-party API, that dependency saturates and more workers just add contention and retries.</li><li>Workers should be stateless and pull work rather than being assigned specific messages, so any worker can handle any task.</li><li>Uneven task duration causes imbalance: one worker may hold a long job while others idle, so monitor per-worker utilization.</li><li>Scaling down should drain in-flight work before termination, or the message returns after the visibility timeout and runs again.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Queue depth, prefetch, and autoscaling</h2>
+<ul><li>Autoscaling commonly uses <strong>queue depth</strong>: a growing backlog adds workers, a near-empty queue scales them down.</li><li>Depth alone can mislead, because message sizes and processing times differ; pair it with the age of the oldest message.</li><li><strong>Prefetch</strong> controls how many messages a consumer buffers, reducing network round trips when several are fetched at once.</li><li>A large prefetch can let one worker grab a hundred messages while others sit idle, which is bad for long-running tasks.</li><li>A small prefetch spreads work evenly but increases round trips, which hurts throughput for tiny, fast tasks.</li><li>Choose prefetch from task duration: small for video transcoding, larger for lightweight notifications.</li><li>Scale-in should be slower than scale-out, because terminating a worker mid-task only creates redelivery and duplicate work.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Absorbing traffic spikes</h2>
+<p class="lede">A flash sale takes orders from 100 per second to 5,000 per second for ten minutes, while fulfillment can handle only 1,000 per second.</p>
+<ul><li>Without a queue, fulfillment is overwhelmed in seconds, requests fail, and failures propagate back to the order service.</li><li>With a queue between them, the extra orders wait while workers keep processing at a steady, sustainable rate.</li><li>The backlog clears after traffic returns to normal; this smoothing is called <strong>load leveling</strong>.</li><li>It works only because fulfillment can happen minutes later — a queue cannot make a synchronous requirement disappear.</li><li>The user experience must reflect that delay: show "processing" and notify on completion rather than pretending the work is done.</li><li>The queue also decouples availability: if fulfillment is down for maintenance, orders keep being accepted rather than failing.</li><li>Spikes that are sustained rather than temporary do not get absorbed; they require real capacity, not a bigger buffer.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>The limits of buffering and backpressure</h2>
+<ul><li>A queue is a buffer, not infinite capacity; if arrival consistently exceeds processing, the backlog grows without bound.</li><li>Growing backlog means longer waits for users and eventually a full queue that rejects new messages or loses retention.</li><li>Queue depth tells you how many messages are waiting; age of the oldest message tells you how bad the wait actually is.</li><li>A queue with only a hundred messages is unhealthy if the oldest has waited an hour — depth and age answer different questions.</li><li>Backpressure must reach the producer eventually: reject with a clear error, shed low-priority work, or slow intake.</li><li>Retention limits are a hard boundary — messages older than the retention window can be dropped, silently losing work.</li><li>Monitoring should alert on both backlog growth rate and oldest-message age, not just a static depth threshold.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Poison messages and dead-letter queues</h2>
+<ul><li>A message that always fails — a corrupt video, a deleted user account, an unparseable payload — is a <strong>poison message</strong>.</li><li>Without a retry limit, it returns to the queue after every failure and is picked up again by another worker indefinitely.</li><li>That cycle wastes capacity and delays every healthy message behind it.</li><li>The standard fix is a delivery-attempt limit such as SQS <code>maxReceiveCount</code>: after that many receives, the message moves to a <strong>dead-letter queue</strong>.</li><li>The DLQ isolates the bad message so normal processing continues, and preserves it for investigation instead of discarding it.</li><li>Operationally you need a DLQ alarm, an owner, a documented inspection procedure, and a safe way to redrive after a fix.</li><li>Redriving must be idempotent too, because some of those messages may have partially succeeded before failing.</li><li>A DLQ that nobody watches is just a slower way to lose messages.</li></ul>
+
+<div class="flow"><span class="flow-step">Consumer fails to process the message</span><span class="flow-arrow">→</span><span class="flow-step">Message returns to the queue</span><span class="flow-arrow">→</span><span class="flow-step">Received fewer than maxReceiveCount times? If yes, retry</span><span class="flow-arrow">→</span><span class="flow-step">Attempt limit reached: move the message to the DLQ</span><span class="flow-arrow">→</span><span class="flow-step">Inspect the cause, fix it, then redrive deliberately</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Message ordering</h2>
+<ul><li>"Queue" suggests first in, first out, but standard queues generally do not guarantee order.</li><li>Even in-order delivery breaks when consumers run in parallel: worker 1 takes the first message, stalls on a slow call, and worker 2 finishes the second first.</li><li>Retries reorder further, because a failed message may be retried after newer ones have completed.</li><li>For independent tasks such as transcoding two different videos, order does not matter and parallelism is more valuable.</li><li>For dependent operations it does: if "ship order" is processed before "update address", the package goes to the wrong place.</li><li>The usual solution is ordering <strong>within a group</strong>, via a message group ID or partition key, so messages for one order stay in order.</li><li>Different groups still process in parallel, which keeps throughput without forcing the entire queue through one worker.</li><li>Strict global ordering on a busy queue rarely scales; if you truly need it, you probably need a log with a single partition and a very good reason.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Queue type</th><th>Ordering</th><th>Throughput</th><th>Use when</th></tr></thead><tbody><tr><td>Standard</td><td>Best effort, no guarantee</td><td>Very high, no limits on in-flight groups</td><td>Independent tasks where order is irrelevant</td></tr>
+<tr><td>FIFO with message groups</td><td>Ordered per group</td><td>Limited by group concurrency</td><td>Events for the same entity must apply in order</td></tr>
+<tr><td>Single consumer</td><td>Total order</td><td>Lowest</td><td>Rare cases where global order is unavoidable</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Designing messages</h2>
+<ul><li>Keep messages small; queues are built for many small messages and impose a size limit.</li><li>Store large payloads in object storage and put only a reference in the message: the video ID and its location, not the video.</li><li>Include a unique message ID so consumers can deduplicate.</li><li>Include a message type so a consumer knows what kind of task it received, especially when a queue carries several types.</li><li>Include a schema version so the format can change without breaking consumers that still expect the old shape.</li><li>Add correlation or trace IDs so a task can be followed across producer, broker, and worker in logs and tracing.</li><li>Do not put secrets or full personal data in messages, because queue contents are often visible to more operators than the database.</li><li>Design the message as a self-contained instruction: the consumer should not need to call back to the producer to understand it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Choosing a queue — and when not to use one</h2>
+<ul><li>Queues fit slow, resource-intensive, or retryable work that does not need to finish before the user gets a response.</li><li>Common examples: video and image processing, email and notifications, report generation, background payment workflows, and webhook events.</li><li>They also fit when one service produces faster than another can consume, or when a downstream failure should be retried rather than lost.</li><li>Use a queue when one worker should do a task; use pub/sub when several independent services should each react to an event.</li><li>Use a log or stream when consumers need replay, ordering per partition, or multiple independent readers of the same history.</li><li>Do not use a queue when the caller needs an immediate result — password verification during login is simpler as a direct call.</li><li>Do not use a queue to hide a permanently undersized consumer; sustained overload needs capacity or admission control, not more buffer.</li><li>Every queue you add is another component to monitor, secure, and drain during incidents.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Pattern</th><th>Delivery</th><th>Best for</th></tr></thead><tbody><tr><td>Message queue</td><td>One consumer per message</td><td>Task distribution and load leveling</td></tr>
+<tr><td>Pub/sub topic</td><td>Every subscriber gets a copy</td><td>Broadcasting events to many services</td></tr>
+<tr><td>Append-only log</td><td>Ordered per partition, replayable</td><td>Stream processing, event sourcing, multiple readers</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Asynchronous processing</strong> keeps the request fast and isolates failures, but the user gets eventual completion rather than an immediate result.</li><li><strong>A durable buffer</strong> absorbs spikes and survives broker failures, but adds storage cost, retention limits, and another critical dependency.</li><li><strong>At-least-once delivery</strong> avoids silent loss, but forces every consumer to be idempotent because duplicates are normal.</li><li><strong>Competing consumers</strong> scale throughput easily, but stop helping once a shared database or third-party API saturates.</li><li><strong>Large prefetch</strong> improves throughput for tiny tasks but causes uneven load and long visibility timeouts for slow ones.</li><li><strong>FIFO ordering</strong> makes dependent operations safe, but limits concurrency and can make a hot message group the bottleneck.</li><li><strong>Dead-letter queues</strong> stop poison messages from blocking the queue, but require alarms, ownership, and a deliberate redrive process.</li><li><strong>Long visibility timeouts</strong> reduce accidental double processing of slow jobs, but delay recovery when a consumer actually dies.</li><li><strong>Autoscaling on queue depth</strong> reacts to backlog quickly, but can add workers that only pile pressure on an already saturated dependency.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a message queue and what problem does it solve?</summary><div class="answer"><p>It is a durable buffer between producers that create work and consumers that perform it. It decouples the request from slow processing, absorbs bursts, and lets failed work be retried instead of lost. The user gets an accepted response while the work happens asynchronously.</p></div></details>
+<details><summary>2. How is a queue different from pub/sub?</summary><div class="answer"><p>A queue delivers each message to exactly one consumer, which is how work is spread across workers. Pub/sub delivers a copy to every subscriber, which is how one event reaches many independent services. Many systems combine the two, with a topic fanning out into per-service queues.</p></div></details>
+<details><summary>3. Walk through a message from send to acknowledgment.</summary><div class="answer"><p>The producer sends it and the broker stores it durably before confirming. A consumer receives it, and the broker hides it for the visibility timeout. On success the consumer acks or deletes it. If the consumer dies first, the timeout expires or the connection closes, and the message is redelivered to another worker.</p></div></details>
+<details><summary>4. What happens if a consumer crashes mid-processing?</summary><div class="answer"><p>Because it never acked, the message is still the broker's responsibility. After the visibility timeout, or when the connection loss is detected, the message becomes available again and another consumer retries it. That is why consumers must tolerate processing the same message twice.</p></div></details>
+<details><summary>5. Why do queues produce duplicates?</summary><div class="answer"><p>Delivery is at-least-once. A consumer can finish the work and crash before acking, a producer can retry after a lost confirmation, or the broker can redeliver after failover. The fix is idempotent consumers using a message ID or an idempotency key at the downstream service.</p></div></details>
+<details><summary>6. How do you scale consumers?</summary><div class="answer"><p>Add workers to the same queue so they compete for messages. Throughput rises until a shared dependency saturates. Then optimize that dependency or split the queue by workload rather than adding more workers that only increase contention.</p></div></details>
+<details><summary>7. What is prefetch and how do you set it?</summary><div class="answer"><p>Prefetch is how many messages a consumer buffers at once. A large value cuts round trips for fast tasks but lets one worker hoard work. A small value spreads long-running jobs evenly. Set it based on task duration and the cost of an idle worker.</p></div></details>
+<details><summary>8. Which metrics matter for a queue?</summary><div class="answer"><p>Queue depth, age of the oldest message, arrival versus processing rate, redelivery count, DLQ size, and consumer utilization. Depth alone can look fine while the oldest message has waited an hour, so track both depth and age.</p></div></details>
+<details><summary>9. How does a queue absorb a traffic spike?</summary><div class="answer"><p>Producers write at the higher rate while consumers keep processing at a sustainable rate, and the difference waits as backlog. This is load leveling. It only works if the work can be delayed; a sustained overload just grows the backlog until retention or capacity fails.</p></div></details>
+<details><summary>10. What is a poison message and how do you handle it?</summary><div class="answer"><p>A message that fails every attempt, usually due to corrupt data or a missing referenced entity. Cap delivery attempts with something like <code>maxReceiveCount</code> and route exhausted messages to a dead-letter queue. Then alarm on the DLQ, investigate, fix, and redrive carefully.</p></div></details>
+<details><summary>11. Does a queue guarantee ordering?</summary><div class="answer"><p>Standard queues do not. Even ordered delivery breaks with parallel consumers and retries. FIFO queues with message groups preserve order per group while different groups run in parallel, which covers most business needs without serializing the entire queue.</p></div></details>
+<details><summary>12. How do you design a good message?</summary><div class="answer"><p>Keep it small, store large payloads in object storage and reference them, and include a unique ID, type, schema version, and trace ID. Avoid secrets and unnecessary personal data. A consumer should understand the task from the message alone.</p></div></details>
+<details><summary>13. When should you not use a queue?</summary><div class="answer"><p>When the caller needs the result immediately, such as authenticating a login or confirming a payment before proceeding. A direct call is simpler. Also avoid a queue as a substitute for capacity: if consumers are permanently too slow, the backlog only grows.</p></div></details>
+<details><summary>14. How do you avoid double processing during deploys?</summary><div class="answer"><p>Stop accepting new messages, let in-flight work finish within the visibility timeout, then ack and exit. If a worker is killed mid-task, the message is redelivered and the work repeats, so idempotency and a sensible timeout are still required.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Acking the message before the side effect completes, so a crash loses the work permanently.</li><li>Setting the visibility timeout shorter than normal processing time and silently running every job twice.</li><li>Assuming a queue gives exactly-once delivery and skipping idempotency.</li><li>Adding workers when the real bottleneck is a shared database or third-party API.</li><li>Scaling workers purely on queue depth while the age of the oldest message keeps climbing.</li><li>Leaving a dead-letter queue unwatched, so failures accumulate invisibly until messages expire.</li><li>Putting the video or large file in the message instead of a reference to object storage.</li><li>Relying on order in a standard queue with many competing consumers, or using one global FIFO group that serializes everything.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="pub-sub.html"><span>← Previous</span><strong>Pub/Sub</strong></a><a class="next" href="service-discovery.html"><span>Next →</span><strong>Service Discovery</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/message-queues">AlgoMaster — Message Queues</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

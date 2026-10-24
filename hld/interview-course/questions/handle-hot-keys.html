@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Handle Hot Keys — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 13 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · Scaling</span></div>
+    <h1>Handle Hot Keys</h1>
+    <p class="dek">Interviewers ask it to see whether you can tell a per-key concentration problem from a general capacity problem, and whether you know that adding nodes never splits a single key.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">7 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>A hot key saturates one node while the rest of the fleet is idle, so spread reads with a local cache and N key copies, spread writes with split counters, and protect the origin with coalescing, negative caching, and a per-key limit.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Detect which keys receive a disproportionate share of reads or writes.</li><li>Serve a viral read key without saturating the one node that owns it.</li><li>Accept write-heavy updates to one logical counter or inventory row.</li><li>Invalidate or refresh every copy when the underlying value changes.</li><li>Degrade to a cached or stale value instead of failing all requests for that key.</li><li>Apply per-key policy: copy count, TTL, and request ceiling.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Hot-key reads stay at cache latency; no request fans out to more than a bounded number of copies.</li><li>No single cache node, shard, or queue partition stays above roughly 70 to 80 percent utilisation because of one key.</li><li>Staleness is stated per data type: seconds for counters, minutes for descriptions.</li><li>Invalidation completes in bounded time, and any missed copy still expires by TTL.</li><li>Detection uses per-key and per-node metrics, not service-wide averages.</li><li>The mitigation must be reversible and measurable; skew should visibly move after the change.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume a viral item gets 1M reads per second while one cache node safely serves about 100k ops per second, so the key needs roughly 10 copies or a per-instance local cache.</li><li>Assume a top item's like counter takes 200k writes per second; one row absorbs about 2k writes per second, so split it into roughly 100 sub-counters.</li><li>A local cache holding the top 1,000 keys at about 2 KB each is roughly 2 MB per application instance, which is cheap next to the traffic it removes.</li><li>With N = 10 key copies, every write becomes 10 invalidation messages, so a 2k writes-per-second hot value produces 20k invalidations per second at peak.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">KeyPolicy</span><span class="fields">key_pattern, read_strategy, copy_count, local_ttl, write_strategy, max_qps</span></div><div class="entity"><span class="name">CacheEntry</span><span class="fields">key, value, version, ttl, copy_index</span></div><div class="entity"><span class="name">CounterShard</span><span class="fields">logical_key, shard_id, value, updated_at, bucket</span></div><div class="entity"><span class="name">InvalidationEvent</span><span class="fields">key, version, issued_at, copies_acked, source</span></div><div class="entity"><span class="name">HotKeyStat</span><span class="fields">key, window, request_count, p99_ms, owner_node, skew_ratio</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/kv/{key}</code></td><td>Read path: local cache, then a shared-cache copy, then the origin. Returns the value plus its version.</td></tr><tr><td><code>PUT</code></td><td><code>/kv/{key}</code></td><td>Write path: stores a new version and publishes an invalidation for every copy.</td></tr><tr><td><code>POST</code></td><td><code>/counters/{key}/increment</code></td><td>Adds a delta to a randomly chosen sub-counter; the body carries an operation id for dedupe.</td></tr><tr><td><code>GET</code></td><td><code>/counters/{key}</code></td><td>Returns the summed total, normally served from a short-lived cached aggregate.</td></tr><tr><td><code>GET</code></td><td><code>/admin/hotkeys?window=5m</code></td><td>Lists top keys by request rate, latency, and skew ratio, with the node that owns each one.</td></tr><tr><td><code>PUT</code></td><td><code>/admin/keys/{key}/policy</code></td><td>Pins a copy count, local TTL, or QPS ceiling for one key during an incident or a known event.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Read layout for a hot value</td><td>post:123:copy0 through post:123:copyN-1, with one copy picked at random per request</td><td>The suffixed keys hash to different cache nodes, so a single logical key stops mapping to a single machine.</td></tr><tr><td>Closest cache layer</td><td>Bounded in-process LRU with a 1 to 5 second TTL</td><td>Removes the network hop entirely for the hottest values; the short TTL caps how long a stale copy can live.</td></tr><tr><td>Write layout for a hot counter</td><td>N sub-counter rows, one updated per event, summed on read and cached</td><td>Turns one serialised row into N parallel rows; readers pay an aggregation that is almost always cached.</td></tr><tr><td>Invalidation correctness</td><td>Version number on the value; readers and copies reject older versions</td><td>A late or reordered delete cannot resurrect stale data, which is the usual failure mode of replicated keys.</td></tr><tr><td>Detection data</td><td>Sampled per-key counters in a ring buffer or count-min sketch, aggregated every minute</td><td>Per-key visibility without logging every access, which would itself become the bottleneck.</td></tr><tr><td>Missing keys</td><td>Negative cache entry for 30 to 60 seconds, keyed separately from real values</td><td>Repeated requests for a deleted or invented key stop reaching the origin without hiding a newly created record for long.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> G[🛡️ API gateway]
+  G --> A[⚙️ App tier + L1 cache]
+  A --> S[⚡ Shared cache: N key copies]
+  S --> O[🗄️ Origin shard]
+  A --> K[🧮 Counter service]
+  K --> D[🔢 Split sub-counters]
+  D --> O
+  W[✍️ Writer] --> I[📬 Invalidation bus]
+  I --> S
+  I --> A
+  A --> M[📊 Per-key metrics]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef cache fill:#fff2d6,stroke:#b26a08,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#6d3fc4,color:#17211f;
+  classDef bus fill:#ffe8ec,stroke:#b42342,color:#17211f;
+  classDef obs fill:#eef3f0,stroke:#5d6a66,color:#17211f;
+  class C client;
+  class G,A,K svc;
+  class S,D cache;
+  class O store;
+  class W,I bus;
+  class M obs;</div><div class="diagram-caption">Reads are absorbed by the per-instance L1 cache and the N shared-cache copies; writes go to split sub-counters, and every write fans out an invalidation to all copies.</div></div>
+        <ul><li>Start with detection: the signature is one node or shard saturated while its peers are nearly idle, plus a hot-to-median request ratio that jumps.</li><li>Split the remedy by direction. Reads get a local cache, then key copies; writes get split counters, then batching or aggregation.</li><li>The invalidation path is the real cost of replication: every copy must be updated or deleted, and a missed copy serves stale data until its TTL fires.</li><li>Distinguish a hot key from a hot shard. A hot key is one record; a hot shard is usually a bad partition key such as a timestamp or a tenant id.</li><li>Protect the origin as well as the cache: single-flight on a miss, TTL jitter, negative caching, and a per-key QPS ceiling.</li><li>Keep the copy and sub-counter counts stable. Changing them later requires reconciling totals or draining old copies.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Local in-process cache</td><td>Lowest possible read latency and near-zero shared-cache traffic for the hot key</td><td>Per-instance copies that cannot be purged precisely; staleness is bounded only by the TTL</td></tr><tr><td>Key replication (N copies)</td><td>Spreads reads across N cache nodes without changing the read API</td><td>Storage multiplies by N and every write must invalidate all N copies</td></tr><tr><td>Request coalescing</td><td>One origin read per key per miss instead of a stampede</td><td>Requests that lose the race wait for the leader, adding tail latency</td></tr><tr><td>Split counters</td><td>Restores write parallelism on one logical aggregate</td><td>Reads become a sum of N values, and exact reconciliation is harder</td></tr><tr><td>Aggregating writes</td><td>Large reduction in write volume for counters and views</td><td>Delayed visibility and possible loss of the last few seconds of updates</td></tr><tr><td>Per-key rate limiting</td><td>Stops one key from starving the rest of the service</td><td>Rejects or delays legitimate users during a genuine surge</td></tr><tr><td>Bounded local cache with short TTL</td><td>Predictable memory use and fast expiry of stale data</td><td>More origin reads than an unbounded cache, and visible staleness for a few seconds</td></tr></tbody></table></div>
+        <ul><li>Add a small in-process LRU cache for the top keys so most reads never leave the application process.</li><li>Replicate a read-hot key into N suffixed copies and choose one per request with a cheap local random pick.</li><li>Coalesce misses per key with a single-flight lock, so an expiry triggers one rebuild instead of thousands.</li><li>Refresh ahead: keep serving the previous value while one background worker rebuilds it.</li><li>Split a write-hot counter into N sub-counters and cache the summed total for a short window.</li><li>Buffer increments in a stream processor and write one aggregated delta per interval when per-event detail is not needed.</li><li>Set a per-key QPS ceiling with priority so a viral key cannot consume the capacity of everything else.</li><li>Negative-cache missing keys briefly and add TTL jitter to every related key.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why does adding cache nodes not fix a hot key?</strong> A distributed cache maps each key to exactly one node, so extra nodes spread the other keys and leave the hot one where it was.</div><div class="followup"><strong>How do you tell a read-hot key from a write-hot key?</strong> Compare per-key read and write rates and the latency of the owning node: reads saturate CPU and network on the cache, writes serialise on one row or partition.</div><div class="followup"><strong>How do you invalidate N copies?</strong> Publish one invalidation per copy with a version, delete or overwrite all of them, and rely on a short TTL to clean up any copy that was missed.</div><div class="followup"><strong>What TTL would you set on the local cache?</strong> One to five seconds for values that must feel fresh, with a documented staleness budget; longer only for data that rarely changes.</div><div class="followup"><strong>How do you pick the number of copies or sub-counters?</strong> From the per-key load divided by what one node or row can safely handle, not from total system traffic, and then keep the number stable.</div><div class="followup"><strong>What is a cache stampede and how do you stop it?</strong> Many simultaneous misses for the same expired key; a per-key single-flight lock, background refresh, and TTL jitter prevent it.</div><div class="followup"><strong>Hot key versus hot shard?</strong> A hot key is one record with extreme traffic, while a hot shard is a partition receiving too much traffic, often from a bad partition key, and they need different fixes.</div><div class="followup"><strong>When is the partition key itself the bug?</strong> When skew comes from a monotonic key such as a timestamp or an auto-increment id that sends all new writes to the newest partition; fix the key instead of masking it.</div><div class="followup"><strong>What do you monitor after applying a fix?</strong> Per-key request rate and p99, per-node and per-shard load, cache hit ratio, invalidation failures, and the hot-to-median skew ratio.</div><div class="followup"><strong>Can you serve stale data during an incident?</strong> Yes for descriptions and counters if you state the window and label the response; never for inventory, prices, or anything that must be exact.</div><div class="followup"><strong>How do you protect against requests for keys that do not exist?</strong> Negative-cache the not-found result for a short time so invented or deleted keys cannot reach the origin repeatedly.</div><div class="followup"><strong>What is the hidden cost of split counters?</strong> Every read becomes an aggregation and changing the shard count later forces a reconciliation of old and new totals, so the count must be chosen deliberately.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Answering a viral post with more cache servers or shards instead of splitting or replicating the key.</li><li>Replicating a key but invalidating only one copy on write, so readers see stale values until TTL.</li><li>Using a local cache with a long TTL and serving visibly stale data to everyone on one instance.</li><li>Splitting a counter into sub-counters and then reading only one of them.</li><li>Sharding time-series data by timestamp, creating a hot partition and calling it a traffic spike.</li><li>Applying a mitigation without per-key metrics, so you cannot prove the skew moved rather than moved elsewhere.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="idempotency-retries.html"><span>← Previous</span><strong>Idempotency and Safe Retries</strong></a><a class="next" href="absorb-traffic-spikes.html"><span>Next →</span><strong>Absorb Traffic Spikes</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

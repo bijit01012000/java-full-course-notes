@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finding and Tracking Locations — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 18 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Finding and Tracking Locations</h1>
+    <p class="dek">Interview Patterns · Specialized Data</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/handling-location-data">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Where this pattern shows up</a>
+<a href="#s3">Query types and requirements</a>
+<a href="#s4">Modeling location and why a one-dimensional index fails</a>
+<a href="#s5">Geohash</a>
+<a href="#s6">Quadtrees, R-trees, and modern cell systems</a>
+<a href="#s7">Spatial databases and in-memory stores</a>
+<a href="#s8">Ingesting live location updates</a>
+<a href="#s9">The nearby query path</a>
+<a href="#s10">Live tracking and subscriptions</a>
+<a href="#s11">Geofencing</a>
+<a href="#s12">Partitioning and scaling</a>
+<a href="#s13">Accuracy, privacy, and failure handling</a>
+<a href="#s14">How to approach it in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Location systems answer <strong>proximity</strong> questions that a one-dimensional index cannot: nearby drivers, restaurants, or places. The core move is to map two-dimensional geography onto cells or tree nodes so the database can prune most of the world before computing exact distances.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Geohash</dt><dd>A string encoding of latitude and longitude produced by interleaving bits; a shared prefix identifies a rectangular cell, so proximity becomes a prefix lookup.</dd></div><div class="term"><dt>Quadtree</dt><dd>A tree that recursively divides a region into four children, subdividing only where data is dense.</dd></div><div class="term"><dt>R-tree</dt><dd>A balanced tree of nested bounding boxes used by many spatial databases to prune candidates before exact geometry tests.</dd></div><div class="term"><dt>S2 / H3</dt><dd>Cell systems that map the sphere to hierarchical cells (S2 on a Hilbert curve, H3 as hexagons) for coverage and neighbor queries.</dd></div><div class="term"><dt>Haversine distance</dt><dd>A great-circle distance formula between two latitude/longitude points; more accurate than treating degrees as a flat plane.</dd></div><div class="term"><dt>Bounding box</dt><dd>A rectangle expressed by min/max latitude and longitude, used as a cheap first-pass filter before exact distance checks.</dd></div><div class="term"><dt>Geofence</dt><dd>A virtual polygon or region that triggers an event when an object enters, exits, or dwells inside it.</dd></div><div class="term"><dt>Point-in-polygon</dt><dd>A test that determines whether a coordinate lies inside a polygon, commonly by ray casting or winding number.</dd></div><div class="term"><dt>Spatial index</dt><dd>An index structure (geohash, R-tree, cell grid) that makes proximity and containment queries sublinear.</dd></div><div class="term"><dt>TTL / heartbeat</dt><dd>A freshness mechanism where a location record expires unless the device keeps reporting, preventing ghost drivers.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">A user opens an app and asks which drivers, restaurants, or stores are close to them. The naive answer is to compute the distance from the user to every row and sort. That is correct but does not scale, and it gets worse as the number of tracked objects grows and as locations change every few seconds.</p>
+<ul><li>The query is inherently two-dimensional, while ordinary indexes are built for one-dimensional ordering.</li><li>Distance is not a simple equality or range predicate; a radius search cuts across both latitude and longitude.</li><li>Live objects move constantly, creating a high-write workload that competes with read queries.</li><li>Results must often combine distance with availability, rating, ETA, or business rules.</li><li>The system must handle the edges of the coordinate system, including the antimeridian and the poles.</li><li>Stale locations can send a rider to a driver who left minutes ago, so freshness is part of correctness.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Where this pattern shows up</h2>
+<ul><li>Ride-hailing: match a rider to nearby available drivers and track the trip in real time.</li><li>Food delivery: find nearby restaurants and couriers, then track the order's progress.</li><li>Local search and store locators: show the closest branches that match a query.</li><li>Maps and navigation: search along a route, within a viewport, or inside a region.</li><li>Social and dating apps: discover people within a distance, usually with coarse or fuzzed locations.</li><li>Asset and fleet tracking: monitor vehicles, containers, or devices and alert on geofence events.</li><li>Any interview problem that starts with 'find the nearest' or 'show what is around me'.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Query types and requirements</h2>
+<ul><li>Nearest-k: return the k closest objects, often with a hard radius cap.</li><li>Radius search: return everything within a distance, possibly paginated.</li><li>Bounding-box or viewport search: return what is visible on a map, which is cheaper and easier to cache.</li><li>Polygon or route search: return objects inside an area or corridor, needed for delivery zones and along-route pickup.</li><li>Live tracking: stream a moving object's position to subscribers with low delay.</li><li>Geofence events: detect enter, exit, and dwell transitions rather than just current proximity.</li><li>Clarify read/write ratio, update frequency, acceptable staleness, and whether exact distance or approximate ranking is enough.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Query</th><th>Typical structure</th><th>Main cost</th></tr></thead><tbody><tr><td>Nearest-k</td><td>Cell lookup + exact distance sort</td><td>Candidate explosion in dense areas</td></tr>
+<tr><td>Radius</td><td>Bounding box then distance filter</td><td>Boundary and antimeridian handling</td></tr>
+<tr><td>Viewport</td><td>Range scan over tiles or cells</td><td>Many small result sets to merge</td></tr>
+<tr><td>Polygon</td><td>Spatial index + point-in-polygon</td><td>Complex geometry and many vertices</td></tr>
+<tr><td>Live tracking</td><td>Pub/sub plus latest-position cache</td><td>Fan-out and update frequency</td></tr>
+<tr><td>Geofence</td><td>Indexed polygons plus event stream</td><td>Edge transitions and duplicate events</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Modeling location and why a one-dimensional index fails</h2>
+<ul><li>Store latitude and longitude as numeric coordinates with an explicit coordinate reference system such as WGS84.</li><li>A B-tree on latitude alone narrows one dimension, but the matching longitude range is scattered across the whole index.</li><li>A composite index on (latitude, longitude) still cannot prune a two-dimensional radius efficiently.</li><li>Distance must be computed with a great-circle formula such as <strong>haversine</strong>; treating degrees as a flat grid distorts results, especially at high latitudes.</li><li>For small areas, a locally projected planar approximation is faster and accurate enough, but it does not generalize globally.</li><li>Store accuracy, heading, speed, and timestamp alongside the point; they matter for matching and for detecting stale data.</li><li>Normalize longitude handling around the antimeridian and guard against invalid coordinates before they enter the index.</li></ul>
+
+
+<div class="note">Latitude and longitude are not interchangeable with x and y. Longitude degrees shrink with latitude, so a degree box is not a square on the ground.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Geohash</h2>
+<p class="lede">A geohash encodes a coordinate into a short string. It works by interleaving longitude and latitude bits, then encoding the result in a base32 alphabet. Because each added character refines the cell, strings that share a prefix are geographically close.</p>
+<ul><li>A <strong>prefix lookup</strong> returns every object in one rectangular cell, which turns proximity into an index range scan.</li><li>Longer geohashes mean smaller cells and more precise candidates; shorter geohashes mean fewer cells but more false positives.</li><li>A radius query must also query the <strong>eight neighboring cells</strong>, because the circle crosses cell boundaries.</li><li>Cells are rectangles, not circles, so results still need an exact distance filter and a sort.</li><li>Geohash cells become narrow and distorted at high latitudes, and the encoding has discontinuities at the antimeridian and poles.</li><li>Choosing precision is a density trade-off: too coarse produces huge candidate sets, too fine produces many cell lookups.</li><li>Geohash is excellent for proximity and cheap indexing, but it is not a routing or polygon geometry format.</li></ul>
+
+<div class="flow"><span class="flow-step">Encode user point</span><span class="flow-arrow">→</span><span class="flow-step">Choose precision from radius</span><span class="flow-arrow">→</span><span class="flow-step">Read cell and eight neighbors</span><span class="flow-arrow">→</span><span class="flow-step">Fetch candidates</span><span class="flow-arrow">→</span><span class="flow-step">Compute exact distance</span><span class="flow-arrow">→</span><span class="flow-step">Filter, rank, and limit</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Quadtrees, R-trees, and modern cell systems</h2>
+<ul><li>A <strong>quadtree</strong> recursively splits a region into four children and subdivides only dense areas, adapting to skewed population.</li><li>Quadtrees are usually in-memory and must be updated as objects move; frequent updates can cause rebalancing and lock contention.</li><li>An <strong>R-tree</strong> groups nearby objects into nested bounding rectangles, which suits disk-based indexes and arbitrary shapes.</li><li>Spatial databases commonly expose R-tree-style indexes through GiST or similar structures.</li><li><strong>S2</strong> maps the sphere onto a Hilbert curve, giving hierarchical cells with better locality and less distortion than geohash.</li><li><strong>H3</strong> uses hexagonal cells, which have uniform neighbor distance and are convenient for coverage and aggregation.</li><li>Tree indexes shine for arbitrary polygons and variable density; cell indexes shine for simple nearby lookups and easy sharding.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Structure</th><th>Shape handling</th><th>Update cost</th><th>Good fit</th></tr></thead><tbody><tr><td>Geohash grid</td><td>Rectangles, prefix lookup</td><td>Low, overwrite cell entry</td><td>Simple nearby and shard keys</td></tr>
+<tr><td>Quadtree</td><td>Adaptive rectangles</td><td>Can require splits and merges</td><td>In-memory, uneven density</td></tr>
+<tr><td>R-tree</td><td>Arbitrary bounding boxes</td><td>Rebalancing on insert/delete</td><td>Disk-backed spatial databases</td></tr>
+<tr><td>S2</td><td>Hierarchical sphere cells</td><td>Moderate</td><td>Global coverage and region coverings</td></tr>
+<tr><td>H3</td><td>Hexagonal cells</td><td>Moderate</td><td>Neighbor analysis and aggregation</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Spatial databases and in-memory stores</h2>
+<ul><li>PostGIS adds geometry and geography types, spatial indexes, and functions such as distance-within and intersection tests.</li><li>MySQL and PostgreSQL spatial extensions handle simpler proximity queries but are less rich than a dedicated spatial database.</li><li>Redis GEO stores members in a geohash-ordered sorted set and supports radius and box searches in memory.</li><li>Elasticsearch and similar engines support geo-point and geo-shape fields with distance filters and geo aggregations.</li><li>MongoDB offers geospatial indexes and query operators for proximity and containment.</li><li>A transactional spatial database is a good source of truth for places and polygons; an in-memory store is a good index for fast-moving objects.</li><li>Do not assume a general-purpose database will automatically use a spatial index; check the query plan and the actual predicate.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Ingesting live location updates</h2>
+<ul><li>Driver and courier apps send periodic heartbeats; each update overwrites the previous position rather than appending an unbounded history in the hot path.</li><li>Writes are batched and coalesced per device so a burst of pings does not produce a burst of database round trips.</li><li>The latest-position store is usually in memory with a <strong>TTL</strong>; if heartbeats stop, the object disappears from availability.</li><li>A durable event stream can retain the raw trail for auditing, ETA models, and replay without making every read hit it.</li><li>Updates should carry a device timestamp and a sequence number so out-of-order or duplicated pings can be ignored.</li><li>When a driver goes offline, explicitly remove or mark the record rather than waiting for expiry, so riders do not see a ghost.</li><li>Validate and clamp coordinates, reject impossible jumps, and rate-limit devices that report too often.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>The nearby query path</h2>
+<p class="lede">The fast path is a funnel: cheap spatial pruning first, exact geometry second, expensive business ranking last.</p>
+<ul><li>Resolve the user's location from the request or their last known position, with a fallback if the coordinate is missing.</li><li>Compute the cell or tile at a precision matched to the requested radius, then include neighbors for boundary coverage.</li><li>Fetch candidate IDs and lightweight attributes from the spatial index; never fetch full documents for the whole cell.</li><li>Apply an exact distance or polygon filter to remove false positives from rectangular cells.</li><li>Filter by availability, status, capacity, and eligibility before ranking.</li><li>Rank by distance, ETA, rating, or marketplace balance, then return only the top results.</li><li>Cache results briefly for viewport and popular pickup points, but keep live availability out of long-lived caches.</li></ul>
+
+<div class="flow"><span class="flow-step">Resolve location</span><span class="flow-arrow">→</span><span class="flow-step">Select cell precision</span><span class="flow-arrow">→</span><span class="flow-step">Fetch cell plus neighbors</span><span class="flow-arrow">→</span><span class="flow-step">Exact distance filter</span><span class="flow-arrow">→</span><span class="flow-step">Eligibility filter</span><span class="flow-arrow">→</span><span class="flow-step">Rank and limit</span><span class="flow-arrow">→</span><span class="flow-step">Return with freshness metadata</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Live tracking and subscriptions</h2>
+<ul><li>The tracker publishes position updates to a channel keyed by trip, driver, or user; subscribers receive only what they are allowed to see.</li><li>A WebSocket or similar persistent connection is a better fit than polling for continuous updates, with a polling fallback for restrictive networks.</li><li>On connect, send a snapshot of the latest position and then incremental updates with sequence numbers.</li><li>Throttle and sample updates for display; sending every raw ping to every viewer wastes bandwidth and can make the marker jitter.</li><li>Interpolate between updates on the client so the marker moves smoothly without inventing server-side positions.</li><li>On reconnect, resubscribe and request a fresh snapshot; do not assume the missed stream can be replayed indefinitely.</li><li>Fan-out for a popular trip or fleet view can be large, so isolate channels and apply per-connection backpressure.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Geofencing</h2>
+<ul><li>Represent each fence as a polygon with a stable ID, plus metadata such as type, priority, and whether it is active.</li><li>Index the polygon's bounding box so most candidate fences are rejected before the expensive point-in-polygon test.</li><li>Detect transitions, not just containment: inside-to-outside is an exit, outside-to-inside is an entry, and repeated pings inside are not new entries.</li><li>Keep per-object fence state with a version or last-seen timestamp so duplicate and out-of-order events do not fire twice.</li><li>Deliver events through a queue with idempotency keys, because downstream notifications and billing cannot tolerate duplicates.</li><li>Handle fences that overlap, nest, or share borders explicitly; a point can be inside several fences at once.</li><li>Late or batched pings can cross a fence between samples; decide whether to interpolate the path or accept delayed detection.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Partitioning and scaling</h2>
+<ul><li>Shard by geography, city, or cell so nearby queries stay within one partition and do not fan out globally.</li><li>Hot cities and stadiums concentrate both reads and writes; split dense cells or add replicas for those partitions.</li><li>A query near a shard boundary needs neighbor data, so either duplicate border cells or query adjacent shards and merge.</li><li>In-memory location stores scale horizontally but need a routing layer that maps a coordinate to the owning node.</li><li>Read replicas help viewport and search traffic; the live-position write path usually needs its own scalable store.</li><li>Rebalancing cells when a city grows is operationally tricky; consistent hashing or a directory service reduces movement.</li><li>Keep historical trails in a separate time-partitioned store so the live index stays small and fast.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Accuracy, privacy, and failure handling</h2>
+<ul><li>GPS noise, indoor positioning errors, and spoofing can place an object far from reality; use accuracy radius and plausibility checks.</li><li>Fuzz or coarsen location for public or social features, and never expose exact coordinates without a product need.</li><li>Define retention for raw trails, restrict access, and honor consent and deletion requirements.</li><li>If the spatial index is unavailable, fall back to a coarser cached result or a bounded database query rather than scanning everything.</li><li>If location updates lag, mark results as stale and widen the ETA rather than pretending the data is fresh.</li><li>Monitor query latency by cell, candidate counts, stale-record rate, heartbeat gaps, and geofence event duplication.</li><li>Watch for hot-cell skew and for devices that flood the ingest path; both look like capacity problems but need different fixes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>How to approach it in an interview</h2>
+<ul><li>Clarify whether the problem is static places, moving objects, or both, and list the exact query shapes.</li><li>Estimate the number of objects, update frequency, read rate, and acceptable staleness before choosing a store.</li><li>Start with the naive distance scan, then explain why a spatial index is needed and how it prunes candidates.</li><li>Pick geohash for a simple cell-based design, a quadtree for adaptive in-memory density, or PostGIS for rich polygon queries, and justify the choice.</li><li>Describe the write path for live locations separately from the read path for nearby search.</li><li>Cover boundary handling, hot cells, stale data, and what happens when the index or stream fails.</li><li>Close with the metrics you would monitor and the privacy constraints you would enforce.</li></ul>
+
+
+<div class="note">The interviewer is usually testing whether you understand that proximity is a two-dimensional pruning problem, not whether you can name a specific database.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Geohash cells</strong> are simple to index and shard but rectangular, distorted at high latitudes, and require neighbor queries.</li><li><strong>Quadtrees</strong> adapt to uneven density but need in-memory maintenance and rebalancing as objects move.</li><li><strong>R-trees</strong> handle arbitrary shapes well but have more complex update and storage behavior than a flat cell grid.</li><li><strong>In-memory location stores</strong> give low latency for live objects but trade durability and complicate recovery.</li><li><strong>Frequent heartbeats</strong> improve freshness but increase write load, battery use, and duplicate processing.</li><li><strong>Coarser location precision</strong> protects privacy and reduces index size but weakens matching and distance ranking.</li><li><strong>Geographic sharding</strong> keeps nearby queries local but creates hot partitions and cross-boundary queries.</li><li><strong>Caching nearby results</strong> reduces load but goes stale quickly when availability or traffic changes.</li><li><strong>Exact distance and polygon tests</strong> improve correctness but add CPU cost after the index has already pruned candidates.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why can't a normal B-tree index answer a nearby query?</summary><div class="answer"><p>A B-tree orders one dimension. A radius predicate constrains both latitude and longitude, and the matching longitude values are scattered across the latitude ordering. A spatial index maps both dimensions into cells or bounding boxes so most of the data can be pruned before exact distance is computed.</p></div></details>
+<details><summary>2. How does a geohash work?</summary><div class="answer"><p>It interleaves longitude and latitude bits and encodes them in base32. A shared prefix identifies the same rectangular cell, so a prefix range scan retrieves candidates. Longer prefixes mean smaller cells and more precision.</p></div></details>
+<details><summary>3. Why do you need to query neighboring geohash cells?</summary><div class="answer"><p>A radius is a circle, while a geohash is a rectangle. Points within the radius can fall just outside the user's cell, so the eight adjacent cells must be included before applying an exact distance filter.</p></div></details>
+<details><summary>4. How do you choose geohash precision?</summary><div class="answer"><p>Match cell size to the query radius and the local density. Too coarse returns too many candidates; too fine requires many cell lookups. Dense cities may need finer cells or a different structure than rural areas.</p></div></details>
+<details><summary>5. When would you use a quadtree instead of a geohash?</summary><div class="answer"><p>When density is highly uneven, when you need adaptive subdivision, and when the index can live in memory. A quadtree subdivides crowded regions further, but moving objects force splits, merges, and synchronization.</p></div></details>
+<details><summary>6. How do you store live driver locations?</summary><div class="answer"><p>Use a fast in-memory spatial store keyed by driver, overwrite the latest position on each heartbeat, set a TTL so silent drivers disappear, and batch updates. Keep a durable event stream separately for history, replay, and analytics.</p></div></details>
+<details><summary>7. How do you avoid showing a driver who has gone offline?</summary><div class="answer"><p>Expire records via TTL, explicitly remove drivers on disconnect, and check a recent heartbeat timestamp at read time. Return the freshness or last-seen time so the client does not present stale data as current.</p></div></details>
+<details><summary>8. How would you design live trip tracking?</summary><div class="answer"><p>Publish location updates to a channel keyed by trip, send a snapshot on subscribe, then stream incremental updates with sequence numbers over a persistent connection. Throttle updates, interpolate on the client, and resnapshot on reconnect.</p></div></details>
+<details><summary>9. How do geofence events avoid duplicates?</summary><div class="answer"><p>Store per-object fence state, detect only transitions, attach event IDs, and make downstream consumers idempotent. Out-of-order pings need timestamp or sequence checks before changing state.</p></div></details>
+<details><summary>10. How do you handle the antimeridian and the poles?</summary><div class="answer"><p>Normalize longitude wrapping and split queries that cross the antimeridian into two ranges. Near the poles, rectangular cells distort badly, so use a spherical cell system or explicit great-circle logic.</p></div></details>
+<details><summary>11. How do you scale a location system across cities?</summary><div class="answer"><p>Shard by city or cell so nearby queries stay local, replicate hot partitions, and handle border queries by duplicating edge cells or querying adjacent shards. Keep historical trails out of the live index.</p></div></details>
+<details><summary>12. What are the privacy concerns?</summary><div class="answer"><p>Exact coordinates can reveal home, work, and routines. Coarsen or fuzz public locations, restrict access, set retention limits, obtain consent, and keep raw trails out of broad analytical access.</p></div></details>
+<details><summary>13. What would you monitor?</summary><div class="answer"><p>Query latency by cell, candidate-set size, stale or missing heartbeats, hot-cell skew, update lag, geofence duplicate rate, ingest errors, and the percentage of queries falling back to a degraded path.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Computing distance to every row and assuming it will scale because the dataset is small today.</li><li>Using a geohash prefix query without checking neighbor cells.</li><li>Treating latitude and longitude as a flat Cartesian grid everywhere.</li><li>Indexing only latitude and expecting the longitude predicate to be efficient.</li><li>Keeping stale drivers visible because no TTL or disconnect cleanup exists.</li><li>Sending raw GPS pings to every viewer and calling it real-time tracking.</li><li>Firing geofence events on every ping instead of only on transitions.</li><li>Sharding by geography without planning for hot cities and cross-boundary queries.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="search-and-typeahead.html"><span>← Previous</span><strong>Search and Typeahead</strong></a><a class="next" href="generating-unique-ids.html"><span>Next →</span><strong>Generating Unique IDs</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/handling-location-data">AlgoMaster — Finding and Tracking Locations</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

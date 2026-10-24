@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Indexing — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 21 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Indexing</h1>
+    <p class="dek">Database Scaling Techniques · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/indexing">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What is a database index?</a>
+<a href="#s2">Why indexes are faster</a>
+<a href="#s3">How a B-tree index works</a>
+<a href="#s4">Indexes and range queries</a>
+<a href="#s5">Single-column and composite indexes</a>
+<a href="#s6">The leftmost prefix rule</a>
+<a href="#s7">Covering indexes</a>
+<a href="#s8">Indexes are not free</a>
+<a href="#s9">Selectivity matters</a>
+<a href="#s10">Why the database might ignore an index</a>
+<a href="#s11">Primary keys and unique indexes</a>
+<a href="#s12">When to add an index</a>
+<a href="#s13">Too many indexes</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>An index is a small, sorted structure that turns a full table scan into a few page reads — but each one adds write cost, storage, and memory pressure, so the goal is the <strong>smallest set of indexes that supports the real query patterns</strong>.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Index</dt><dd>A separate data structure holding values from one or more columns in lookup order, plus a reference to each row.</dd></div><div class="term"><dt>Full table scan</dt><dd>Reading every row of a table and testing the predicate, because no usable access path exists.</dd></div><div class="term"><dt>B-tree</dt><dd>A balanced tree with wide nodes; each page holds many sorted keys, so the tree stays shallow at large scale.</dd></div><div class="term"><dt>Page (block)</dt><dd>The unit of database I/O; an index page holds many keys, which is why one read eliminates a large part of the search space.</dd></div><div class="term"><dt>Composite index</dt><dd>An index over several columns, ordered first by the leading column and then by the next within each group.</dd></div><div class="term"><dt>Leftmost prefix rule</dt><dd>A composite index can serve filters on a prefix of its columns; skipping the leading column usually loses the benefit.</dd></div><div class="term"><dt>Covering index</dt><dd>An index containing every column a query needs, so the engine can answer from the index without fetching table rows.</dd></div><div class="term"><dt>Selectivity</dt><dd>How well a column distinguishes rows; high selectivity narrows the result set far more and benefits more from an index.</dd></div><div class="term"><dt>Unique index</dt><dd>An index that enforces uniqueness of the indexed column values while also serving lookups.</dd></div><div class="term"><dt>EXPLAIN</dt><dd>Shows the plan the optimizer chose, including whether it used an index or a sequential scan.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What is a database index?</h2>
+<p class="lede">Suppose a <code>users</code> table has millions of rows and we want one user by email. Without an index, the database may examine rows one by one until it finds the match — a full table scan.</p>
+<ul><li>An index is a <strong>separate structure</strong> built to make certain lookups fast; the table still holds the full rows.</li><li>It stores the indexed column values in sorted order along with a reference to the row that owns each value.</li><li>The table rows themselves are in no particular order — only the index is sorted.</li><li>A lookup is two steps: search the index for the value, then follow the row reference to fetch the row.</li><li>The second step is skipped when the index already contains everything the query needs.</li><li>Creating one is a single statement, but building it reads the table and sorts the key values.</li><li>An index does not change query results; it changes how quickly the engine can find them.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Index entry (sorted)</th><th>Row</th></tr></thead><tbody><tr><td>alice@example.com</td><td>row 7</td></tr>
+<tr><td>bob@example.com</td><td>row 3</td></tr>
+<tr><td>carol@example.com</td><td>row 9</td></tr>
+<tr><td>dave@example.com</td><td>row 1</td></tr></tbody></table></div>
+
+<pre class="code"><code>CREATE INDEX idx_users_email ON users (email);
+
+SELECT id, name FROM users WHERE email = &#x27;alice@example.com&#x27;;</code></pre>
+<div class="note">Rows 7, 3, 9, 1 are in insertion order; only the index is ordered by email.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why indexes are faster</h2>
+<ul><li>A search at each tree level decides which branch could contain the value and skips the rest of the tree.</li><li>Each level eliminates most remaining candidates, so the number of steps grows with the logarithm of the row count.</li><li>A full scan on a 10-million-row table can examine up to 10 million rows; a B-tree lookup reads a few pages and then one row.</li><li>The gain comes from reading <strong>pages</strong>, not bytes: one page brings many keys into memory at once.</li><li>The index is usually far smaller than the table, so more of it stays cached.</li><li>You do not need to reason about tree traversal when writing SQL; what matters is which queries an index can serve.</li><li>The database chooses between the index and a scan by estimating cost, so an index is an option, not a command.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>How a B-tree index works</h2>
+<p class="lede">A database B-tree is not a binary tree. Each node is a page that holds many keys, which keeps the tree shallow even for enormous tables.</p>
+<ul><li>The <strong>root</strong> page holds separator keys that divide the value space into ranges.</li><li>An internal page points to child pages covering narrower ranges, and each child repeats the split.</li><li><strong>Leaf pages</strong> hold the actual key entries and row references, and are linked so the engine can walk them in order.</li><li>To find a value, compare at the root, descend into the matching child, and repeat until a leaf is reached.</li><li>Pages that cannot contain the value are never read, so most of the tree is untouched.</li><li>Wide pages mean high <strong>fanout</strong>: hundreds of keys per page, so only a few levels cover millions of rows.</li><li>The tree stays balanced through splits and merges, which keeps worst-case lookup depth predictable.</li><li>This is why B-trees are the default index for most <code>CREATE INDEX</code> statements in relational databases.</li></ul>
+
+<div class="flow"><span class="flow-step">Root [300K | 700K]</span><span class="flow-arrow">→</span><span class="flow-step">500K falls in the middle range</span><span class="flow-arrow">→</span><span class="flow-step">Child [450K | 550K]</span><span class="flow-arrow">→</span><span class="flow-step">Leaf containing 500K</span><span class="flow-arrow">→</span><span class="flow-step">Row reference</span></div>
+<div class="note">The example uses two keys per page for clarity. Real pages hold far more, which is exactly why the depth stays small.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Indexes and range queries</h2>
+<p class="lede">Because keys are stored in order, an index also accelerates ranges and ordering — not just equality.</p>
+<ul><li>For <code>created_at BETWEEN a AND b</code>, the engine seeks to the first matching key then reads neighboring leaves in order.</li><li>Only <strong>one tree search</strong> is needed; the matching entries are physically adjacent.</li><li>Works for <code>=</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code>, and <code>BETWEEN</code>.</li><li>Supports <code>ORDER BY</code>: reading an index already ordered by <code>created_at</code> avoids sorting a large result set.</li><li>With <code>ORDER BY ... LIMIT</code>, the engine can read a few entries from one end and stop.</li><li>Prefix matches such as <code>name LIKE 'Al%'</code> can use the index; a leading wildcard <code>%Al</code> usually cannot.</li><li>A range on a later column is far more efficient when the leading columns are fixed by equality.</li><li>Reading many scattered rows via an index can still lose to a sequential scan when the range is broad.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Query shape</th><th>Index behavior</th></tr></thead><tbody><tr><td><code>email = ?</code></td><td>Single seek to one leaf entry</td></tr>
+<tr><td><code>created_at &gt;= ?</code></td><td>Seek then sequential leaf scan</td></tr>
+<tr><td><code>ORDER BY created_at DESC</code></td><td>Read leaves backwards, no sort</td></tr>
+<tr><td><code>LIKE 'Al%'</code></td><td>Seek to prefix, then scan matching keys</td></tr>
+<tr><td><code>LIKE '%Al'</code></td><td>Cannot seek; usually a full scan</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Seek to start of range</span><span class="flow-arrow">→</span><span class="flow-step">Read leaf entries in order</span><span class="flow-arrow">→</span><span class="flow-step">Follow row references</span><span class="flow-arrow">→</span><span class="flow-step">Stop at end of range</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Single-column and composite indexes</h2>
+<p class="lede">A composite index spans multiple columns. Conceptually it is sorted by the first column, then by the second within each group of equal first values, and so on.</p>
+<ul><li>An index on <code>(customer_id, created_at)</code> finds a customer's orders and reads them already in timestamp order, with no separate sort.</li><li>Column order is part of the definition: <code>(customer_id, created_at)</code> is not the same index as <code>(created_at, customer_id)</code>.</li><li>In the reversed index, one customer's orders are scattered across the whole structure.</li><li>A useful rule of thumb: <strong>equality filters first, range filters next, ordering columns last</strong>.</li><li>The same index can serve queries that filter on just the leading column, so it may replace a narrower index.</li><li>The rule is a starting point, not a law; verify with the actual plan because engines and data distributions differ.</li><li>Adding a column to an index widens every entry, increasing storage and write cost.</li><li>A composite index is not a substitute for two independent access paths; a query on only the second column may not use it.</li></ul>
+
+
+<pre class="code"><code>CREATE INDEX idx_orders_customer_created
+  ON orders (customer_id, created_at DESC);
+
+SELECT id, total
+FROM orders
+WHERE customer_id = 123
+ORDER BY created_at DESC
+LIMIT 20;</code></pre>
+<div class="note">Matching the index's sort direction to the query's avoids a backward scan or an explicit sort in some engines.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>The leftmost prefix rule</h2>
+<p class="lede">With an index on <code>(country, city, created_at)</code>, entries are grouped by country, then by city inside each country, then by time inside each city. That physical ordering decides which filters the index can serve.</p>
+<ul><li>Filter on <code>country</code> alone: uses the index well, because it is the leading column.</li><li>Filter on <code>country</code> and <code>city</code>: uses the first two columns in order.</li><li>Filter on all three: uses the full index, including the range on time.</li><li>Filter on <code>city</code> only: usually no efficient use, because entries for one city are spread across every country.</li><li>Filter on <code>city</code> and <code>created_at</code>, skipping country: the leading column is missing, so the index ordering does not line up.</li><li>Some engines can use a skip scan in limited cases, but it is not a guarantee and depends on the leading column's cardinality.</li><li>Consequence: design composite indexes from real queries rather than from columns that merely seem related.</li><li>A query that filters on the leading column and sorts by the second gets ordering and filtering from one structure.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Query filters on</th><th>Uses the index well?</th><th>Why</th></tr></thead><tbody><tr><td>country</td><td>Yes</td><td>Leading column</td></tr>
+<tr><td>country, city</td><td>Yes</td><td>First two columns, in order</td></tr>
+<tr><td>country, city, created_at</td><td>Yes</td><td>All three columns, in order</td></tr>
+<tr><td>city only</td><td>Usually not</td><td>Skips the leading column</td></tr>
+<tr><td>city, created_at</td><td>Usually not</td><td>Ordering does not match the prefix</td></tr>
+<tr><td>created_at only</td><td>No</td><td>Skips two leading columns</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Covering indexes</h2>
+<ul><li>An index <strong>covers</strong> a query when it contains every column the query reads.</li><li>The engine can then return results directly from the index and skip the table lookup entirely.</li><li>For a query selecting email and signup date by id, an index on <code>(id, email, signup_date)</code> can cover it.</li><li>PostgreSQL reports this as an <strong>index-only scan</strong> when its visibility rules allow it.</li><li>PostgreSQL also supports <code>INCLUDE</code> to add payload columns without making them part of the sort key.</li><li>Covering a query removes random row fetches, which is the dominant cost when many rows match.</li><li>The cost is a wider index: more storage, more write work, and fewer entries per page.</li><li>Use covering indexes for important, frequently executed queries where you have measured the benefit.</li></ul>
+
+
+<pre class="code"><code>CREATE INDEX idx_users_id_email_signup
+  ON users (id) INCLUDE (email, signup_date);
+
+SELECT email, signup_date FROM users WHERE id = 42;</code></pre>
+<div class="note">An index-only scan still needs a visibility check in some engines; very recent writes can force heap access, so the win is largest on stable data.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Indexes are not free</h2>
+<p class="lede">Indexes trade read speed for write work. Inserting one row into a table with several indexes updates every affected index.</p>
+<ul><li>One logical insert becomes several physical writes: the table row plus one entry in each index.</li><li>Deletes must remove entries from every index; updates touch indexes for changed columns and sometimes migrate entries.</li><li>Each index consumes disk and grows backup size and restore time.</li><li>Index pages compete with table pages for the buffer cache, so extra indexes can push useful data out of memory.</li><li>Building an index on a large table takes time and I/O, and a non-concurrent build may block writes.</li><li>Every additional index gives the planner more alternatives to cost, increasing planning work.</li><li>Write-heavy tables suffer most, which is why over-indexing is a common cause of unexplained write latency.</li><li>The trade is only worth it when the read pattern is frequent enough to justify the permanent write tax.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Cost</th><th>Why it matters</th></tr></thead><tbody><tr><td>Slower writes</td><td>Every insert, update, and delete must maintain each affected index</td></tr>
+<tr><td>Storage</td><td>Indexes can be large, especially wide multi-column indexes</td></tr>
+<tr><td>Memory</td><td>Hot indexes compete with table data for the cache</td></tr>
+<tr><td>Migration time</td><td>Creating indexes on large tables takes time and resources</td></tr>
+<tr><td>Planning work</td><td>Extra indexes give the optimizer more choices to evaluate</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">INSERT one user</span><span class="flow-arrow">→</span><span class="flow-step">Write table row</span><span class="flow-arrow">→</span><span class="flow-step">Update idx_email</span><span class="flow-arrow">→</span><span class="flow-step">Update idx_signup_date</span><span class="flow-arrow">→</span><span class="flow-step">Update idx_country_city</span></div>
+<div class="note">This is why adding indexes everywhere is not a strategy: each one optimizes a specific read at a permanent cost to every write.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Selectivity matters</h2>
+<p class="lede">Selectivity describes how well a column distinguishes rows. In plain terms: how much does this filter narrow the search?</p>
+<ul><li>An email column is highly selective because one value usually matches one row.</li><li>A status column with a handful of values is weakly selective; filtering on the common value still matches most of the table.</li><li>An index on a column that matches millions of rows forces millions of row lookups, which can be slower than one sequential scan.</li><li>The optimizer estimates selectivity from statistics such as distinct counts and histograms.</li><li>Low-selectivity columns can still be useful as part of a composite index where another column does the narrowing.</li><li>An index on a boolean alone is usually weak, because half the table matches either value.</li><li>Selectivity is about the <em>query</em>, not just the column: a rare status value is more selective than a common one.</li><li>Indexes pay off when they reduce the candidate set enough that random row fetches beat sequential reading.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Column</th><th>Example</th><th>Selectivity</th><th>Index usefulness</th></tr></thead><tbody><tr><td>email</td><td>Unique per user</td><td>High</td><td>Usually very useful</td></tr>
+<tr><td>customer_id on orders</td><td>Many rows per customer, still narrows</td><td>Medium to high</td><td>Often useful</td></tr>
+<tr><td>account_status</td><td>active, inactive</td><td>Low</td><td>Sometimes useful with another column</td></tr>
+<tr><td>is_deleted</td><td>true, false</td><td>Very low</td><td>Usually weak alone</td></tr>
+<tr><td>created_at</td><td>Spread over years</td><td>High for a narrow range</td><td>Useful for time-window queries</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Why the database might ignore an index</h2>
+<ul><li>The optimizer compares the estimated cost of an index access with a sequential scan and may choose the scan.</li><li>If the filter matches a large percentage of the table, scanning in order is cheaper than scattered row fetches.</li><li>On a very small table, the extra index lookup costs more than reading the whole table.</li><li>If the index does not match the query shape — wrong leading column, function on the column, leading wildcard — it cannot be used efficiently.</li><li><strong>Stale statistics</strong> make the cost estimates wrong, so the optimizer misjudges both options.</li><li>Type mismatches and implicit casts can prevent the comparison from using the indexed ordering.</li><li>A query that needs most columns may still use the index for filtering but then fetch so many rows that a scan wins.</li><li>The existence of an index is not a guarantee of use; <code>EXPLAIN</code> shows what was actually chosen.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Plan shows</th><th>Likely cause</th><th>Next step</th></tr></thead><tbody><tr><td>Seq scan on a large table</td><td>Filter matches too many rows</td><td>Check selectivity; consider a composite or covering index</td></tr>
+<tr><td>Seq scan on a filtered table</td><td>Index shape does not match</td><td>Align leading columns with the predicate</td></tr>
+<tr><td>Index scan with many row fetches</td><td>Index not covering, many matches</td><td>Add included columns or rethink the predicate</td></tr>
+<tr><td>Plan changed overnight</td><td>Statistics stale or data grew</td><td>Refresh statistics; re-check estimates versus actuals</td></tr></tbody></table></div>
+
+<div class="note">Use <code>EXPLAIN</code> and, where safe, <code>EXPLAIN ANALYZE</code> to compare estimates with reality before adding or dropping anything.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Primary keys and unique indexes</h2>
+<ul><li>Most relational databases automatically create an index to enforce a primary key and make lookups by it efficient.</li><li>A primary key index is also the target of foreign key references, so joins on it are fast by default.</li><li>A unique constraint is usually implemented as a <strong>unique index</strong>, serving lookups and enforcement at once.</li><li>On insert, the database checks the unique index for an existing entry instead of scanning the table.</li><li>Uniqueness enforcement means the index must be updated inside the write, adding cost to every insert.</li><li>A surrogate key such as a sequence id is compact and keeps secondary index entries small.</li><li>A natural key such as email can be unique and useful, but it is wider and harder to change.</li><li>Do not add a redundant index on a column that already has a unique or primary key index.</li></ul>
+
+
+<pre class="code"><code>ALTER TABLE users ADD CONSTRAINT users_email_unique UNIQUE (email);
+-- implemented as a unique index: fast lookup plus uniqueness enforcement</code></pre>
+<div class="note">On a unique index, a duplicate insert fails rather than returning a second row; application code must handle that error path.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When to add an index</h2>
+<ul><li>Start from real query patterns, not from the column list.</li><li>Index columns that appear frequently in <code>WHERE</code> clauses, join conditions, <code>ORDER BY</code>, and range predicates.</li><li>Common candidates: foreign keys, lookup identifiers such as email or order id, and timestamps used for recent-item queries.</li><li>Ask how often the query runs, how many rows it returns, how expensive it is today, and how often the table is written.</li><li>Ask whether an existing index already supports the query, which is how redundant indexes creep in.</li><li>Put equality columns first, then the range or sort column, and confirm with <code>EXPLAIN</code>.</li><li>A composite index on <code>(customer_id, created_at)</code> can replace a single-column index on <code>customer_id</code>.</li><li>Measure before and after; an index that is never chosen is pure write cost.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Question</th><th>Why it decides the index</th></tr></thead><tbody><tr><td>How often does this query run?</td><td>Frequency determines whether the write tax pays off</td></tr>
+<tr><td>How many rows does it return?</td><td>Low selectivity means the index may be ignored anyway</td></tr>
+<tr><td>How expensive is it today?</td><td>Optimize measured pain, not hypothetical queries</td></tr>
+<tr><td>How often is the table written?</td><td>Write-heavy tables punish every extra index</td></tr>
+<tr><td>Does an existing index already cover it?</td><td>Avoids a duplicate structure with no new benefit</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Collect slow queries</span><span class="flow-arrow">→</span><span class="flow-step">Check the plan</span><span class="flow-arrow">→</span><span class="flow-step">Check existing indexes</span><span class="flow-arrow">→</span><span class="flow-step">Design the smallest index</span><span class="flow-arrow">→</span><span class="flow-step">Measure before and after</span></div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Too many indexes</h2>
+<ul><li>A table with an index on almost every column pays write cost for structures that are rarely or never read.</li><li>Storage grows, backups grow, and restore and migration times grow with every index.</li><li>More index pages compete for cache, so the indexes that do matter may become slower.</li><li>Some indexes duplicate the leading columns of a wider composite index and add nothing.</li><li>Most databases report index usage counts, which makes unused and redundant indexes findable.</li><li>Review indexes over time, not only when adding them; query patterns change and old indexes linger.</li><li>Drop unused indexes deliberately after confirming no reporting job or failover path depends on them.</li><li>The goal is the smallest useful set of indexes that supports the important query patterns.</li></ul>
+
+
+<div class="note">Index hygiene is a recurring maintenance task: add for measured reads, remove for measured waste.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Adding an index</strong> speeds the targeted read but adds a write to every insert, update, and delete.</li><li><strong>Composite indexes</strong> serve filter-plus-sort queries in one structure but only help when the leading columns match.</li><li><strong>Covering indexes</strong> remove table lookups but widen the index and increase storage and maintenance cost.</li><li><strong>High selectivity</strong> makes an index decisive, while low selectivity can make it slower than a sequential scan.</li><li><strong>More indexes</strong> give the optimizer more options but increase planning time, storage, and cache pressure.</li><li><strong>Unique indexes</strong> enforce correctness and speed lookups but add a constraint check to every write.</li><li><strong>Wide indexes</strong> avoid sorts and fetches but reduce fanout, deepen the tree, and slow maintenance.</li><li><strong>Dropping unused indexes</strong> improves write throughput and storage but risks a hidden reporting query that relied on them.</li><li><strong>Index-only scans</strong> are fastest on stable data because visibility checks can still require table access on recent writes.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a database index?</summary><div class="answer"><p>A separate data structure that stores values from one or more columns in sorted order with a reference to each row. The table still holds the data; the index is an extra path that avoids scanning every row.</p></div></details>
+<details><summary>2. Why is a B-tree index fast on a huge table?</summary><div class="answer"><p>Each page holds many keys, so the tree has high fanout and stays only a few levels deep even for millions of rows. A lookup reads a handful of pages along one path and ignores the rest of the tree.</p></div></details>
+<details><summary>3. Why does an index help a range query and not just equality?</summary><div class="answer"><p>Keys are stored in order, so the engine seeks once to the start of the range and then reads adjacent leaf entries until the range ends. The same ordering can also satisfy <code>ORDER BY</code> and avoid a sort.</p></div></details>
+<details><summary>4. What is a composite index?</summary><div class="answer"><p>An index over multiple columns, sorted by the first column, then by the second within each equal first value, and so on. It is what lets one structure satisfy a filter on one column and an ordering on another.</p></div></details>
+<details><summary>5. Explain the leftmost prefix rule.</summary><div class="answer"><p>A composite index can be used efficiently when the query filters on a prefix of its columns starting from the left. With <code>(country, city, created_at)</code>, a query on city alone skips the leading column, so entries for one city are scattered across every country and the ordering is useless.</p></div></details>
+<details><summary>6. What is a covering index?</summary><div class="answer"><p>An index that contains every column the query needs, so the engine answers from the index without fetching table rows. It removes random row lookups but makes the index wider and more expensive to maintain, so reserve it for measured, frequent queries.</p></div></details>
+<details><summary>7. What does an index cost on writes?</summary><div class="answer"><p>Every insert, update, and delete must maintain each affected index. One logical write becomes one table write plus one entry update per index, plus WAL and page splits. Indexes also consume storage, cache, and backup capacity.</p></div></details>
+<details><summary>8. What is selectivity?</summary><div class="answer"><p>How well a column distinguishes rows — how much a filter on it narrows the result. Email is highly selective; a boolean or status column is not. An index on a low-selectivity column may be ignored because fetching millions of matching rows costs more than scanning.</p></div></details>
+<details><summary>9. Why would the optimizer ignore an existing index?</summary><div class="answer"><p>Because the estimated cost is higher than a sequential scan: the filter matches a large fraction of the table, the table is small, the index does not match the query shape, or statistics are stale and mislead the estimate. Existence is not the same as usefulness.</p></div></details>
+<details><summary>10. How do you decide which columns to index?</summary><div class="answer"><p>Look at real queries: frequent <code>WHERE</code>, join, <code>ORDER BY</code>, and range predicates. Check how many rows the query returns, how often it runs, how heavily the table is written, and whether an existing index already supports it. Then confirm with the plan.</p></div></details>
+<details><summary>11. In what order should columns go in a composite index?</summary><div class="answer"><p>A practical rule is equality columns first, then range columns, then columns used for ordering. The leading column must be the one queries filter on most. Verify with the real plan, because distribution and engine behavior can change the answer.</p></div></details>
+<details><summary>12. Can an index make a query slower?</summary><div class="answer"><p>Yes. If a filter matches most of the table, using the index means many random row fetches instead of one ordered scan. Extra indexes also slow all writes and compete for cache, so an unused index is a net loss.</p></div></details>
+<details><summary>13. How do you find unused indexes?</summary><div class="answer"><p>Most databases expose per-index usage counters and sizes. Combine low usage with a check for indexes whose leading columns are duplicated by a wider composite index, then verify no reporting or failover workload depends on them before dropping.</p></div></details>
+<details><summary>14. How would you index a query that filters by customer and sorts by date?</summary><div class="answer"><p>Create a composite index on <code>(customer_id, created_at)</code>. The equality on customer positions the seek, and the date ordering inside that customer satisfies the sort, so the engine can read the newest entries and stop at the limit.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Indexing every column and calling it optimization; writes, storage, and cache all pay for it.</li><li>Building a composite index in the wrong column order and then blaming the database for ignoring it.</li><li>Indexing a low-selectivity column such as a boolean or status and expecting a large speedup.</li><li>Forgetting that <code>LIKE '%term%'</code> and functions on the indexed column defeat a normal B-tree.</li><li>Adding a duplicate index on a column already covered by a unique or composite index.</li><li>Trusting that an index exists means it is used, without checking the plan.</li><li>Optimizing for a rare query while the frequent query still scans the table.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="query-optimization.html"><span>← Previous</span><strong>Query Optimization</strong></a><a class="next" href="sharding.html"><span>Next →</span><strong>Sharding</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/indexing">AlgoMaster — Indexing</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

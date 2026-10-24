@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Service Discovery — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 30 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Service Discovery</h1>
+    <p class="dek">Microservices · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/service-discovery">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with fixed addresses</a>
+<a href="#s2">What service discovery is</a>
+<a href="#s3">The service registry</a>
+<a href="#s4">Self-registration</a>
+<a href="#s5">Third-party registration</a>
+<a href="#s6">Health checks</a>
+<a href="#s7">Client-side discovery</a>
+<a href="#s8">Server-side discovery</a>
+<a href="#s9">DNS-based discovery</a>
+<a href="#s10">Service discovery in Kubernetes</a>
+<a href="#s11">The registry must stay available</a>
+<a href="#s12">Stale results, retries, and graceful shutdown</a>
+<a href="#s13">Service discovery and service mesh</a>
+<a href="#s14">Comparing approaches and when you need discovery</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Service discovery lets a caller find a service by name and receive its currently healthy instances, so addresses can change with autoscaling, crashes, and deploys without anyone editing configuration.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Service registry</dt><dd>A database of service instances that maps each service name to its current addresses, ports, and routing metadata.</dd></div><div class="term"><dt>Service discovery</dt><dd>The process of automatically finding the network locations of healthy service instances instead of hardcoding addresses.</dd></div><div class="term"><dt>Self-registration</dt><dd>A model where each instance registers itself with the registry and sends heartbeats, usually through a client library.</dd></div><div class="term"><dt>Third-party registration</dt><dd>A model where a separate registrar or the deployment platform adds and removes instances on the application's behalf.</dd></div><div class="term"><dt>Readiness check</dt><dd>A probe answering "can this instance accept new traffic right now?"; failing it removes the instance from discovery results.</dd></div><div class="term"><dt>Liveness check</dt><dd>A probe answering "is this process stuck beyond recovery?"; failing it causes a restart, not just traffic removal.</dd></div><div class="term"><dt>Client-side discovery</dt><dd>The caller queries the registry, chooses an instance, and calls it directly, with no extra network hop.</dd></div><div class="term"><dt>Server-side discovery</dt><dd>The caller sends requests to a load balancer at a stable address, and the load balancer resolves and forwards to a healthy instance.</dd></div><div class="term"><dt>Headless service</dt><dd>A Kubernetes Service without a virtual IP that returns pod IPs directly, used when the client must choose specific pods.</dd></div><div class="term"><dt>Graceful shutdown</dt><dd>Deregistering or failing readiness first, then draining in-flight requests before the process exits.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with fixed addresses</h2>
+<ul><li>In a monolith, one component calls another in the same process; in microservices, that becomes a network call to an address that can change at any time.</li><li>Autoscaling changes the instance count: five payment instances today might be twenty tomorrow.</li><li>A crashed instance is replaced with a new IP, and a deployment replaces old instances with new ones.</li><li>On a container platform this churn happens many times a day, sometimes without any human involved.</li><li>A hardcoded list goes stale immediately: callers keep hitting dead addresses and never discover the new ones.</li><li>The result is failed requests during scale-out, traffic to removed instances during scale-in, and errors on every deployment.</li><li>Configuration management can distribute a list, but it cannot keep up with per-minute changes or react to a single crash.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Scenario</th><th>What breaks with fixed addresses</th></tr></thead><tbody><tr><td>Scale out</td><td>New instances never receive traffic</td></tr>
+<tr><td>Scale in</td><td>Callers keep calling removed instances</td></tr>
+<tr><td>Instance crash</td><td>The replacement comes up on an IP nobody knows</td></tr>
+<tr><td>Deployment</td><td>Old addresses disappear and new ones appear</td></tr>
+<tr><td>Multi-region failover</td><td>The fixed list points at the failed region</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What service discovery is</h2>
+<ul><li>Service discovery is the process of automatically finding the network locations of service instances.</li><li>A caller asks for <code>payment</code> by name and receives the healthy instances it can call right now.</li><li>Think of a phone book that keeps itself up to date: people move, but searching by name returns the current number.</li><li>It has two parts: a <strong>registry</strong> that tracks where instances are running, and a <strong>discovery mechanism</strong> that lets callers look them up.</li><li>The registry is the source of truth; the mechanism is how that truth reaches the caller — a client library, a load balancer, DNS, or a sidecar proxy.</li><li>Discovery answers "which instances exist and are healthy", not "which one is best for this request"; routing policy is layered on top.</li><li>The service name becomes the stable contract, and instance addresses become an implementation detail.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The service registry</h2>
+<ul><li>A registry is essentially a database of available instances, keyed by service name.</li><li>Each entry normally holds the IP address, port, and metadata such as version, zone, region, or weight.</li><li>For example, <code>payment</code> might currently map to three instances, each with an address and a zone tag.</li><li>As instances start, stop, or fail, the list changes continuously.</li><li>Metadata enables smarter routing: prefer the caller's own zone to cut latency and cross-zone data transfer, or send only a small share of traffic to a new version during a canary.</li><li>Keep metadata to keys that routing or operations actually use, and document each one; unused metadata rots.</li><li>Common registries include Consul, etcd, ZooKeeper, and Eureka; Kubernetes maintains its own internal view of running services.</li><li>The registry itself must be highly available, because if it is unreachable, new instances cannot be found.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Self-registration</h2>
+<ul><li>With <strong>self-registration</strong>, each instance is responsible for adding itself to the registry on startup.</li><li>It sends its service name, address, and port, and on a clean shutdown it sends a request to remove itself.</li><li>Services do not always shut down cleanly, so instances also send periodic heartbeats — for example every ten seconds.</li><li>If the registry stops receiving heartbeats for long enough, it assumes the instance is gone and removes it.</li><li>The advantage is that the application controls its own lifecycle and can register rich metadata directly.</li><li>The downside is that every service needs registration logic, usually through a registry-specific client library.</li><li>That couples application code to the discovery system and means every language needs a correct client that handles startup, heartbeats, and shutdown.</li><li>A bug in that library — a missed heartbeat, a registration before the port is listening — becomes a service-wide outage pattern.</li></ul>
+
+<div class="flow"><span class="flow-step">Instance starts and registers payment, 10.0.1.5:8080</span><span class="flow-arrow">→</span><span class="flow-step">Registry acknowledges</span><span class="flow-arrow">→</span><span class="flow-step">Instance sends a heartbeat every 10 seconds</span><span class="flow-arrow">→</span><span class="flow-step">Instance crashes; heartbeats stop</span><span class="flow-arrow">→</span><span class="flow-step">Registry removes the instance after the timeout window</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Third-party registration</h2>
+<ul><li>With <strong>third-party registration</strong>, the application does not register itself; a separate component, the registrar, watches the environment and updates the registry.</li><li>When the platform starts a new payment container, the registrar notices it and adds it; when the container stops, the registrar removes it.</li><li>Kubernetes works this way: the application does not need to know a registry exists, because the platform tracks running containers and keeps endpoints current.</li><li>Registration logic stays out of application code, so behavior is consistent across services written in different languages.</li><li>The trade-off is that the registrar or platform becomes another critical piece of infrastructure that must be reliable.</li><li>The application must still expose health signals the platform can interpret; third-party registration removes the client library, not the need for readiness.</li><li>If the registrar's view of the world is wrong — a stuck controller, a broken watch — the registry inherits that error.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Self-registration</th><th>Third-party registration</th></tr></thead><tbody><tr><td>Who registers the instance</td><td>The instance itself</td><td>A registrar or the platform</td></tr>
+<tr><td>Code in each service</td><td>Registry client and heartbeats</td><td>None</td></tr>
+<tr><td>Behavior across languages</td><td>Can differ by library</td><td>Consistent</td></tr>
+<tr><td>Extra infrastructure</td><td>None beyond the registry</td><td>The registrar must be reliable</td></tr>
+<tr><td>Example</td><td>Spring services with Eureka</td><td>Kubernetes</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Health checks</h2>
+<ul><li>Knowing an instance exists is not enough; a process can be running while unable to serve requests.</li><li>Discovery therefore tracks <strong>health</strong>, not just presence.</li><li>With heartbeats, the instance reports that it is alive; with active checks, the registry calls <code>/health</code> every few seconds.</li><li>After several consecutive failures the instance is marked unhealthy and removed from results; requiring multiple failures avoids reacting to one brief hiccup.</li><li>A useful check reflects whether the instance can actually serve: a payment service that lost its database connection pool should report not ready.</li><li>Kubernetes splits the question into readiness (should this instance get traffic?), liveness (should it be restarted?), and startup (has initialization finished?).</li><li>Keep liveness checks simple: if liveness fails whenever a downstream database is slow, every instance restarts at once and turns a degradation into an outage.</li><li>Use readiness to take an instance out of rotation and liveness only for a genuinely stuck process.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Check</th><th>Question</th><th>What happens when it fails</th></tr></thead><tbody><tr><td>Readiness</td><td>Can this instance accept new traffic?</td><td>Removed from discovery results until it passes</td></tr>
+<tr><td>Liveness</td><td>Is the process stuck and unable to recover?</td><td>The process is restarted</td></tr>
+<tr><td>Startup</td><td>Is the instance still starting?</td><td>Other checks wait until startup completes</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Client-side discovery</h2>
+<ul><li>In <strong>client-side discovery</strong>, the calling service talks to the registry directly.</li><li>The order service asks the registry for healthy payment instances, receives three addresses, chooses one, and sends the request straight to it.</li><li>The choice can be round robin, fewest active requests, same-zone preference, or consistent hashing so a key usually lands on the same instance.</li><li>There is no extra network hop, and the caller can apply routing logic the platform does not know about.</li><li>The cost is that every service needs discovery and load-balancing logic, implemented and maintained in each language.</li><li>Netflix popularized this style with Eureka plus a client library that combined discovery and load balancing inside each service.</li><li>Client-side discovery fits when application teams need fine control over routing decisions.</li><li>It also means every caller must cache the instance list and refresh it sensibly, or the registry becomes a per-request dependency.</li></ul>
+
+<div class="flow"><span class="flow-step">Order service queries the registry for payment</span><span class="flow-arrow">→</span><span class="flow-step">Registry returns healthy instances with addresses</span><span class="flow-arrow">→</span><span class="flow-step">Client-side load balancer picks one</span><span class="flow-arrow">→</span><span class="flow-step">Order service calls that instance directly</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Server-side discovery</h2>
+<ul><li>In <strong>server-side discovery</strong>, the client does not query the registry; it sends requests to a load balancer or router at a stable, well-known address.</li><li>The load balancer looks up healthy instances, chooses one, and forwards the request.</li><li>From the caller's point of view, the payment service has one stable address and everything behind it is invisible.</li><li>AWS load balancers work this way: instances register with a target group, and clients only talk to the load balancer.</li><li>Clients stay simple — any service, in any language, makes a normal network call with no discovery library.</li><li>The cost is an extra network hop and a critical component that must be highly available and sized for the full traffic volume.</li><li>It also centralizes routing policy, which is good for consistency and bad when a team needs per-request control.</li><li>Server-side discovery is a natural fit when a platform team owns routing.</li></ul>
+
+<div class="flow"><span class="flow-step">Order service calls the load balancer's stable address</span><span class="flow-arrow">→</span><span class="flow-step">Load balancer looks up healthy payment instances in the registry</span><span class="flow-arrow">→</span><span class="flow-step">Load balancer selects an instance</span><span class="flow-arrow">→</span><span class="flow-step">Load balancer forwards the request</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>DNS-based discovery</h2>
+<ul><li>DNS already maps names to addresses, so the caller can use <code>payment.internal</code> instead of a hardcoded IP.</li><li>The DNS server returns the addresses of current instances; Consul, for example, exposes its registry as names like <code>payment.service.consul</code>.</li><li>The advantage is compatibility: almost every language and operating system understands DNS, so no special client library is needed.</li><li>The challenge is caching: answers live for a TTL, and some clients or operating systems hold them longer than expected.</li><li>A stale answer means a client keeps sending requests to an address that no longer exists.</li><li>A very short TTL shrinks that window but multiplies DNS lookups and load on the DNS servers.</li><li>Long-lived connections are a related problem: HTTP keep-alive, HTTP/2, and gRPC may resolve once and reuse the same instance for hours.</li><li>Those clients need periodic connection recycling, or they will ignore DNS changes entirely.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Service discovery in Kubernetes</h2>
+<ul><li>A Kubernetes <strong>Service</strong> gets a stable name and a stable virtual IP, so other services call <code>payment</code> by name.</li><li>Cluster DNS resolves the name to the Service's virtual IP rather than to individual pods.</li><li>Kubernetes tracks which pods belong to the Service and keeps the ready pod list current, usually in EndpointSlices.</li><li>Forwarding from the virtual IP to a pod is done by kube-proxy (iptables or IPVS) or by an eBPF layer such as Cilium.</li><li>This combines all three ideas: third-party registration from the platform, DNS for lookup, and server-side-style routing because the app sees one stable address.</li><li>Most clusters use CoreDNS for name resolution.</li><li>A <strong>headless Service</strong> skips the virtual IP and returns pod IPs directly, which is useful when the client must reach specific pods, such as members of a database cluster.</li><li>Because discovery is built in, teams on Kubernetes often do not need a separate registry such as Consul or Eureka.</li></ul>
+
+<div class="flow"><span class="flow-step">Order pod looks up payment in cluster DNS</span><span class="flow-arrow">→</span><span class="flow-step">CoreDNS returns the Service virtual IP</span><span class="flow-arrow">→</span><span class="flow-step">Order pod sends the request to the virtual IP</span><span class="flow-arrow">→</span><span class="flow-step">Node networking forwards it to a ready payment pod</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>The registry must stay available</h2>
+<ul><li>Once discovery is central to communication, the registry becomes a critical dependency: if services cannot find each other, they cannot talk.</li><li>Registries are therefore deployed as multi-node clusters, not as a single server.</li><li>Consensus-based registries such as Consul, etcd, and ZooKeeper favor consistency; a node that cannot reach a majority may stop serving some operations.</li><li>Eureka favors availability and keeps serving its last known view during a network problem, even if some of it is stale.</li><li>For discovery, slight staleness is often acceptable because the caller can retry another instance.</li><li>Clients commonly cache discovery results locally, so a short registry outage does not stop traffic.</li><li>When the registry recovers, clients must not all refresh at the same instant; adding jitter to refresh intervals prevents a thundering herd.</li><li>An unavailable registry should degrade discovery, not take down every existing connection.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Registry</th><th>Approach</th><th>During a network problem</th></tr></thead><tbody><tr><td>Consul, etcd, ZooKeeper</td><td>Consensus, favors consistency</td><td>A node without a majority may stop serving some operations</td></tr>
+<tr><td>Eureka</td><td>Favors availability</td><td>Keeps serving its last known information, possibly stale</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Stale results, retries, and graceful shutdown</h2>
+<ul><li>Discovery data is never perfectly current: there is always a delay between an instance failing and the registry noticing.</li><li>During that window, callers can still receive a failed instance, so they must never assume every discovered address works.</li><li>Calls need timeouts so a dead instance cannot hold a request open indefinitely.</li><li>Failed requests may be retried against another instance, but only operations that are safe to repeat — reads or requests carrying an idempotency key.</li><li>Retrying a payment without an idempotency key can charge a customer twice.</li><li>Load balancers can eject an instance after repeated failures even before the registry updates, which shortens the bad window.</li><li>On shutdown, an instance should first deregister or fail readiness so new traffic stops arriving, then wait for in-flight requests to finish before exiting.</li><li>That graceful shutdown avoids an error burst on every deployment, when instances are replaced quickly.</li></ul>
+
+<div class="flow"><span class="flow-step">Shutdown signal received</span><span class="flow-arrow">→</span><span class="flow-step">Deregister or fail readiness</span><span class="flow-arrow">→</span><span class="flow-step">New traffic stops arriving</span><span class="flow-arrow">→</span><span class="flow-step">Finish requests already in flight</span><span class="flow-arrow">→</span><span class="flow-step">Process exits</span></div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Service discovery and service mesh</h2>
+<ul><li>In a service mesh, discovery and routing move out of the application and into a sidecar proxy such as Envoy.</li><li>A request from the order service first goes to its local sidecar, which gets the healthy payment instances from the mesh control plane.</li><li>The sidecar chooses an instance and forwards the request; the application contains no discovery code.</li><li>This resembles client-side discovery because the decision happens next to the caller, with no central load balancer in the request path.</li><li>The proxy also handles retries, timeouts, and service-to-service encryption, giving consistent behavior across languages.</li><li>The cost is another control plane and data plane to run, upgrade, and debug, plus latency and resource overhead per pod.</li><li>Many microservice systems work well without a mesh; adopt one when consistent traffic policy across many services justifies the operational burden.</li><li>The mesh does not remove stale data — the control plane still learns about failures after a delay, so timeouts and retries remain necessary.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Comparing approaches and when you need discovery</h2>
+<ul><li>The approaches differ mainly in <strong>who picks the instance</strong> and <strong>where the routing decision lives</strong>.</li><li>Client-side discovery puts control in the caller; server-side puts it in a load balancer; DNS puts it in the resolver; a mesh puts it in a sidecar.</li><li>The choice often comes down to ownership: platform teams tend toward server-side, Kubernetes Services, or a mesh; application teams wanting per-key routing tend toward client-side.</li><li>Adopt dedicated discovery when instances change frequently — autoscaling, containers, frequent deploys — or when many services must find each other.</li><li>On Kubernetes or a similar platform, use the built-in discovery instead of adding another registry.</li><li>Services on virtual machines across several environments may justify a tool such as Consul.</li><li>A small application with a handful of rarely changing servers may need nothing more than a load balancer with a stable address.</li><li>Discovery adds a critical dependency; if addresses are genuinely static, it is complexity without benefit.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Client-side</th><th>Server-side</th><th>DNS</th><th>Service mesh</th></tr></thead><tbody><tr><td>Who picks the instance</td><td>The calling service</td><td>A load balancer</td><td>The client, from the DNS answer</td><td>The caller's sidecar proxy</td></tr>
+<tr><td>Discovery code in the app</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
+<tr><td>Extra network hop</td><td>No</td><td>Yes</td><td>No</td><td>Through local proxies</td></tr>
+<tr><td>Main risk</td><td>Logic repeated in every language</td><td>Load balancer is critical</td><td>Stale cached answers</td><td>More infrastructure to operate</td></tr>
+<tr><td>Example</td><td>Eureka with a client library</td><td>AWS load balancer and target groups</td><td>Consul DNS</td><td>Istio with Envoy</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Service discovery</strong> removes hardcoded addresses and supports autoscaling, but adds a registry and a lookup path that must themselves be highly available.</li><li><strong>Self-registration</strong> keeps lifecycle control in the service but couples every language to a registry client library and its bugs.</li><li><strong>Third-party registration</strong> keeps application code clean and consistent, but makes the platform or registrar a critical dependency.</li><li><strong>Client-side discovery</strong> avoids an extra hop and enables fine-grained routing, but duplicates discovery and load-balancing logic in every service.</li><li><strong>Server-side discovery</strong> keeps clients simple but inserts a critical, high-traffic load balancer and an extra network hop.</li><li><strong>DNS-based discovery</strong> works everywhere with no library, but TTL caching and long-lived connections make results stale.</li><li><strong>A consistency-first registry</strong> avoids serving conflicting data but may refuse operations during a partition; an availability-first registry keeps serving but can return stale instances.</li><li><strong>A service mesh</strong> gives consistent retries, timeouts, encryption, and discovery across languages, at the cost of a control plane, sidecars, and harder debugging.</li><li><strong>Graceful shutdown</strong> prevents error bursts during deploys but lengthens rollout time and requires drain logic in every service.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why do microservices need service discovery?</summary><div class="answer"><p>Because instance addresses change constantly with autoscaling, crashes, and deployments, especially on container platforms. Discovery lets a caller ask for a service by name and receive the currently healthy instances, instead of maintaining a configuration list that is stale within minutes.</p></div></details>
+<details><summary>2. What are the two main parts of service discovery?</summary><div class="answer"><p>A service registry that tracks where instances are running and whether they are healthy, and a discovery mechanism that gets that information to callers — through a client library, a load balancer, DNS, or a sidecar proxy.</p></div></details>
+<details><summary>3. Self-registration versus third-party registration?</summary><div class="answer"><p>Self-registration has each instance register itself and send heartbeats, often through a client library; it puts logic in every service and can differ by language. Third-party registration has a registrar or platform track instances and update the registry, as Kubernetes does; code stays clean but the platform becomes critical infrastructure.</p></div></details>
+<details><summary>4. Why are heartbeats not enough on their own?</summary><div class="answer"><p>A heartbeat only shows the process is alive, not that it can serve requests. An instance may have lost its database connection or be stuck in a bad state. Active readiness checks against a meaningful health endpoint catch failures that heartbeats miss.</p></div></details>
+<details><summary>5. What is the difference between readiness and liveness?</summary><div class="answer"><p>Readiness answers "should this instance receive traffic?" and failing it removes the instance from discovery. Liveness answers "is the process stuck beyond recovery?" and failing it restarts the process. Confusing them causes restart storms and outages.</p></div></details>
+<details><summary>6. How does client-side discovery work?</summary><div class="answer"><p>The caller queries the registry, gets the healthy instances, picks one with its own load-balancing policy, and calls it directly. There is no extra hop and routing can be sophisticated, but every service needs discovery and balancing logic in its language.</p></div></details>
+<details><summary>7. How does server-side discovery work?</summary><div class="answer"><p>The caller sends requests to a load balancer at a stable address. The load balancer resolves healthy instances from the registry and forwards the request. Clients stay simple and language-agnostic, but the load balancer is a critical component and adds a hop.</p></div></details>
+<details><summary>8. What are the problems with DNS-based discovery?</summary><div class="answer"><p>DNS answers are cached for a TTL that clients may exceed, so callers can keep using a dead address. Very short TTLs increase lookup volume. Long-lived HTTP/2 or gRPC connections resolve once and may never notice a change unless connections are recycled.</p></div></details>
+<details><summary>9. How does discovery work in Kubernetes?</summary><div class="answer"><p>A Service gets a stable name and virtual IP. Cluster DNS resolves the name to that IP, EndpointSlices track ready pods, and kube-proxy or an eBPF layer forwards to a pod. It combines third-party registration, DNS lookup, and server-side-style routing.</p></div></details>
+<details><summary>10. What is a headless Service and when do you use one?</summary><div class="answer"><p>A Service without a virtual IP that returns pod IPs directly through DNS. It is used when the client must address specific pods, such as database cluster members or stateful workloads that need stable identities.</p></div></details>
+<details><summary>11. How do you keep the registry highly available?</summary><div class="answer"><p>Run it as a multi-node cluster. Consensus systems such as Consul, etcd, and ZooKeeper favor consistency and may refuse some operations without a majority; Eureka favors availability and serves its last known view. Clients should cache results and refresh with jitter.</p></div></details>
+<details><summary>12. Discovery data is stale — how do callers cope?</summary><div class="answer"><p>Treat every discovered address as possibly dead: use timeouts, retry idempotent operations on another instance, and let load balancers eject failing instances. For writes, require an idempotency key before retrying. Combine this with graceful shutdown to reduce the stale window.</p></div></details>
+<details><summary>13. What is graceful shutdown and why does it matter for discovery?</summary><div class="answer"><p>On shutdown, deregister or fail readiness first so new traffic stops, then finish in-flight requests before exiting. Without it, deployments send requests to instances that are already terminating, producing a burst of errors on every rollout.</p></div></details>
+<details><summary>14. When do you not need service discovery?</summary><div class="answer"><p>When there are only a few servers and addresses rarely change, a load balancer with a stable address is enough. On Kubernetes, the platform already provides discovery, so adding a second registry usually adds complexity without value.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Hardcoding instance IPs and calling the deployment "auto-scaling" because new machines start successfully but receive no traffic.</li><li>Using a heartbeat as the only health signal, so an instance with a broken database connection keeps receiving requests.</li><li>Pointing liveness at a downstream dependency and restarting every instance when that dependency slows down.</li><li>Forgetting that DNS TTLs and long-lived HTTP/2 or gRPC connections can keep a client on a dead instance.</li><li>Retrying a non-idempotent write against another instance without an idempotency key and double-charging the customer.</li><li>Shutting instances down without deregistering or draining, producing errors on every deployment.</li><li>Running a single-node registry and discovering that discovery itself is the outage.</li><li>Caching discovery results forever to avoid registry load, so the cache never learns about new or failed instances.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="message-queues.html"><span>← Previous</span><strong>Message Queues</strong></a><a class="next" href="sidecar-pattern.html"><span>Next →</span><strong>Sidecar Pattern</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/service-discovery">AlgoMaster — Service Discovery</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

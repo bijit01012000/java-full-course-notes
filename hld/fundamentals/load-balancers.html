@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Load Balancers — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 08 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Load Balancers</h1>
+    <p class="dek">Networking · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/load-balancers">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The limit of a single server</a>
+<a href="#s2">How a load balancer works</a>
+<a href="#s3">Why use load balancers</a>
+<a href="#s4">Choosing a backend server</a>
+<a href="#s5">Stateless servers</a>
+<a href="#s6">Stateful servers and sticky sessions</a>
+<a href="#s7">Health checks</a>
+<a href="#s8">Layer 4 vs Layer 7 load balancing</a>
+<a href="#s9">TLS termination</a>
+<a href="#s10">Connection draining</a>
+<a href="#s11">High availability for load balancers</a>
+<a href="#s12">Common load balancing technologies</a>
+<a href="#s13">Putting it together</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A load balancer gives many backend servers one stable endpoint, spreading traffic across healthy instances and removing failed ones from rotation without the client noticing.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Load balancer</dt><dd>A component between clients and a backend pool that chooses which server handles each request and forwards it there.</dd></div><div class="term"><dt>Backend pool</dt><dd>The set of servers currently eligible to receive traffic; membership changes as servers are added, removed, or fail health checks.</dd></div><div class="term"><dt>Round robin</dt><dd>Sending requests to servers in rotation, which is simple and works well when requests cost roughly the same.</dd></div><div class="term"><dt>Least connections</dt><dd>Routing each new request to the server with the fewest active connections, which suits requests of uneven duration.</dd></div><div class="term"><dt>Health check</dt><dd>A periodic probe that decides whether a server stays in the pool, either shallow or dependency-aware.</dd></div><div class="term"><dt>Layer 4 load balancer</dt><dd>Routes on transport-layer information such as IP addresses, protocol, and port, without inspecting application data.</dd></div><div class="term"><dt>Layer 7 load balancer</dt><dd>Parses HTTP and routes on path, host, headers, cookies, or method, enabling content-based routing.</dd></div><div class="term"><dt>TLS termination</dt><dd>Ending the client's encrypted connection at the load balancer and forwarding the request to backends.</dd></div><div class="term"><dt>Connection draining</dt><dd>Stopping new requests to a server while letting in-flight requests and connections finish before removal.</dd></div><div class="term"><dt>Sticky session</dt><dd>Session affinity that pins a user's requests to one backend, usually because session state lives in that server's memory.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The limit of a single server</h2>
+<ul><li>One server works fine until traffic exceeds its CPU, memory, connection, or disk capacity.</li><li>Past that point requests queue, latency climbs, and the server may fail under load.</li><li>If that server is the only one, its failure takes the entire application down with it.</li><li>The obvious fix is more servers, which immediately raises three new questions.</li><li><strong>Routing:</strong> when a request arrives, which server should handle it?</li><li><strong>Balance:</strong> how do you distribute traffic evenly rather than letting one server absorb everything?</li><li><strong>Failure:</strong> what happens when one of those servers becomes unhealthy or goes offline?</li><li>A load balancer exists to answer all three in one place, outside the application code.</li></ul>
+
+<div class="flow"><span class="flow-step">Traffic grows</span><span class="flow-arrow">→</span><span class="flow-step">Single server saturates</span><span class="flow-arrow">→</span><span class="flow-step">Add more servers</span><span class="flow-arrow">→</span><span class="flow-step">Need routing, balance, and failure handling</span></div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>How a load balancer works</h2>
+<p class="lede">The load balancer sits between clients and a group of backend servers. Clients send requests to it instead of to a specific machine, and it decides where each request goes.</p>
+<ul><li>Clients resolve one stable address, for example <code>lb.example.com</code>, and never learn backend IPs.</li><li>The load balancer selects a backend using its configured algorithm and forwards the request.</li><li>It returns the backend's response to the client, optionally rewriting headers along the way.</li><li>To the client the system still looks like a single service, which is the whole point.</li><li>Behind that endpoint the pool can grow, shrink, or lose members without any client change.</li><li>Because the balancer sees every request, it is also a natural place for TLS, rate limits, and observability.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Client sees</th><th>Operator controls</th></tr></thead><tbody><tr><td>One hostname and stable IPs</td><td>Pool membership and weights</td></tr>
+<tr><td>One logical service</td><td>Routing algorithm and health policy</td></tr>
+<tr><td>Normal HTTP responses</td><td>TLS, timeouts, draining, and limits</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Client connects to the VIP or hostname</span><span class="flow-arrow">→</span><span class="flow-step">Balancer picks a healthy backend</span><span class="flow-arrow">→</span><span class="flow-step">Request is forwarded</span><span class="flow-arrow">→</span><span class="flow-step">Backend responds</span><span class="flow-arrow">→</span><span class="flow-step">Balancer relays the response</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Why use load balancers</h2>
+<ul><li><strong>Scalability:</strong> instead of buying a bigger machine forever, add more servers and let the balancer spread requests across them.</li><li><strong>High availability:</strong> with several servers, a failed instance is removed and traffic continues on the rest, removing the single point of failure.</li><li><strong>Better resource utilization:</strong> without balancing, one server can be overloaded while another idles; the balancer spreads work across available capacity.</li><li><strong>Elastic membership:</strong> add servers when traffic rises and remove them when it falls, with no client-visible change.</li><li><strong>Deployment safety:</strong> drain and replace instances one at a time instead of taking the service down.</li><li><strong>Operational leverage:</strong> one place to enforce TLS, timeouts, and access rules for every service behind it.</li><li>The trade is a new hop, a new component to keep available, and a place where misconfiguration affects everything.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Benefit</th><th>Mechanism</th><th>What it costs</th></tr></thead><tbody><tr><td>Scalability</td><td>Spread requests over N servers</td><td>Pool and session management</td></tr>
+<tr><td>High availability</td><td>Health checks remove failed nodes</td><td>Detection delay and failover logic</td></tr>
+<tr><td>Utilization</td><td>Even distribution across capacity</td><td>Algorithm choice and weights</td></tr>
+<tr><td>Elasticity</td><td>Add or remove pool members</td><td>Draining and warm-up handling</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Choosing a backend server</h2>
+<ul><li>The balancing algorithm decides which healthy instance receives the next request.</li><li><strong>Round robin</strong> cycles through the pool; simple, but blind to how long each request takes.</li><li><strong>Weighted round robin</strong> gives stronger machines a larger share of requests.</li><li><strong>Least connections</strong> sends work to the server with the fewest active connections, which suits long or uneven requests.</li><li><strong>Least response time</strong> favours the fastest-responding backend but can amplify a temporary blip if not damped.</li><li><strong>IP or cookie hash</strong> pins a client to a backend, useful for cache locality and stateful sessions.</li><li><strong>Random</strong> choice is surprisingly effective at scale and avoids herd synchronization.</li><li>No algorithm fixes a pool where one backend is simply slower; health checks and capacity planning still matter.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Algorithm</th><th>Best when</th><th>Weakness</th></tr></thead><tbody><tr><td>Round robin</td><td>Requests cost roughly the same</td><td>Ignores current load</td></tr>
+<tr><td>Weighted round robin</td><td>Servers have different capacity</td><td>Weights need tuning</td></tr>
+<tr><td>Least connections</td><td>Requests are long or uneven</td><td>Needs connection tracking</td></tr>
+<tr><td>Hash (IP or cookie)</td><td>Session or cache locality matters</td><td>Uneven distribution, sticky failures</td></tr>
+<tr><td>Random</td><td>Large homogeneous pool</td><td>Occasional imbalance</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Stateless servers</h2>
+<ul><li>In a stateless system any request can be handled by any server; nothing from a previous request is required locally.</li><li>The load balancer is then free to choose any healthy instance for every request.</li><li>Scaling becomes trivial: add or remove servers without tracking which user is connected where.</li><li>Failure recovery is simpler because no user's session is trapped on the lost machine.</li><li>Implement it by moving sessions into a shared store, a database, or a signed token such as a JWT.</li><li>Keep uploads and generated files in object storage rather than local disk, or the server is stateful in practice.</li><li>Stateless application servers are the default assumption behind autoscaling and rolling deploys.</li></ul>
+
+
+<div class="note">A server can be stateless for sessions yet still hold local caches; that is acceptable as long as correctness never depends on them.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Stateful servers and sticky sessions</h2>
+<ul><li>A stateful server keeps information about a user's session in local memory or local disk.</li><li>If the next request lands on a different server, that server does not know the session and may treat the user as logged out.</li><li>Session affinity, or <strong>sticky sessions</strong>, pins a user's requests to one backend to avoid this.</li><li>The balancer typically implements it with a cookie or a hash of the client IP.</li><li>It works, but it creates uneven load: popular users or long sessions concentrate on particular servers.</li><li>When a pinned server dies, its users lose session state unless it was replicated elsewhere.</li><li>Sticky routing also complicates deploys, because draining a server logs out or interrupts everyone pinned to it.</li><li>The usual answer is to move shared state into a database, cache, or distributed store and keep the app tier stateless.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Stateless</th><th>Sticky / stateful</th></tr></thead><tbody><tr><td>Routing freedom</td><td>Any healthy server</td><td>Must return to the same server</td></tr>
+<tr><td>Scaling</td><td>Add or remove freely</td><td>Rebalancing disrupts sessions</td></tr>
+<tr><td>Failure impact</td><td>User retries elsewhere</td><td>Session lost with the server</td></tr>
+<tr><td>Deploy impact</td><td>Rolling updates are easy</td><td>Draining interrupts pinned users</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Health checks</h2>
+<ul><li>A load balancer must never send traffic to a server that cannot handle it.</li><li>It probes each backend periodically, for example <code>GET /health</code>, and expects a successful response within a timeout.</li><li>After several consecutive failures the server is marked unhealthy and removed from the pool.</li><li>Checks continue in the background, and the server is returned to rotation once it passes again.</li><li>A <strong>shallow</strong> check only proves the process answers HTTP; it can pass while the database connection is dead.</li><li>A <strong>deep</strong> check verifies critical dependencies, but a shared dependency outage can then mark every instance unhealthy at once.</li><li>Tune interval, timeout, and failure threshold together: aggressive checks flap, lenient checks keep routing to broken servers.</li><li>Use a separate readiness signal from liveness so a starting server is not sent traffic before it can serve it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Check</th><th>What it verifies</th><th>Example</th></tr></thead><tbody><tr><td>Simple</td><td>The server responds to an HTTP request</td><td><code>GET /health</code> returns 200</td></tr>
+<tr><td>Detailed</td><td>The app can also reach critical dependencies</td><td><code>/health</code> returns 200 only if the database query succeeds</td></tr></tbody></table></div>
+
+<div class="note">Health checks detect the failure; they do not fix it. A flapping instance should be investigated, not just rotated out.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Layer 4 vs Layer 7 load balancing</h2>
+<p class="lede">Load balancers operate at different layers of the network stack. The two common choices trade speed and protocol flexibility against application awareness.</p>
+<ul><li><strong>Layer 4</strong> works at the transport layer using source and destination IP, TCP or UDP, and port numbers.</li><li>It does not parse the request body, so it is fast and works for protocols beyond HTTP.</li><li>It can forward a connection without terminating it, which suits databases, message brokers, and raw TCP services.</li><li><strong>Layer 7</strong> understands HTTP and HTTPS and can inspect URL path, hostname, headers, cookies, and method.</li><li>That enables content-based routing: <code>/images</code> to an image service, <code>/payments</code> to a payment service.</li><li>It also enables per-route policies, header rewrites, and smarter retries or timeouts.</li><li>The cost is more processing per request and HTTP-specific scope.</li><li>A common pattern is a Layer 4 balancer at the edge for raw throughput and Layer 7 inside for routing.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Feature</th><th>Layer 4</th><th>Layer 7</th></tr></thead><tbody><tr><td>Works at</td><td>Transport layer</td><td>Application layer</td></tr>
+<tr><td>Decision input</td><td>Source and destination IP, TCP or UDP, port</td><td>URL path, hostname, headers, cookies, HTTP method</td></tr>
+<tr><td>Protocols</td><td>Many, not just HTTP</td><td>HTTP and HTTPS</td></tr>
+<tr><td>Strength</td><td>Fast, protocol-agnostic</td><td>Smarter, content-based routing</td></tr>
+<tr><td>Cost</td><td>Less processing per request</td><td>More processing per request</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>TLS termination</h2>
+<p class="lede">When clients connect over HTTPS, the load balancer can be the point where encryption ends instead of making every backend do it.</p>
+<ul><li>The client performs the TLS handshake with the load balancer, not with the application server.</li><li>The balancer decrypts the request, forwards it to a backend, then encrypts the response back to the client.</li><li>Certificates are managed in one place rather than on every server.</li><li>Backends spend no CPU on handshakes and encryption for each connection.</li><li>TLS policy, cipher suites, and protocol versions can be updated centrally and applied consistently.</li><li>After termination the balancer may talk plain HTTP to backends on a trusted network.</li><li>Many production systems re-encrypt between the balancer and the backend, so termination does not mean encryption stops there.</li><li>Forwarding the original scheme and client IP in headers keeps redirects, logs, and rate limits correct.</li></ul>
+
+<div class="flow"><span class="flow-step">Client TLS handshake with balancer</span><span class="flow-arrow">→</span><span class="flow-step">Client sends encrypted request</span><span class="flow-arrow">→</span><span class="flow-step">Balancer decrypts</span><span class="flow-arrow">→</span><span class="flow-step">Request forwarded to backend</span><span class="flow-arrow">→</span><span class="flow-step">Response returned and encrypted</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Connection draining</h2>
+<ul><li>Servers are removed during deploys, scale-down, and maintenance, not only when they fail.</li><li>Removing a server abruptly interrupts requests it is already processing and kills open connections.</li><li>In draining mode the balancer stops sending <strong>new</strong> requests but lets in-flight work finish.</li><li>New traffic goes to the remaining servers while the draining node completes what it started.</li><li>Once requests complete, the process can exit cleanly and be replaced.</li><li>This matters most for long-running requests and long-lived connections such as WebSockets and streaming responses.</li><li>Draining needs a timeout: a stuck request must not keep a node alive forever.</li><li>Kubernetes expresses the same idea through pod termination and preStop hooks, but the principle is identical.</li></ul>
+
+<div class="flow"><span class="flow-step">Mark server draining</span><span class="flow-arrow">→</span><span class="flow-step">Stop new requests</span><span class="flow-arrow">→</span><span class="flow-step">Finish in-flight requests</span><span class="flow-arrow">→</span><span class="flow-step">Close connections</span><span class="flow-arrow">→</span><span class="flow-step">Remove from pool</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>High availability for load balancers</h2>
+<p class="lede">If the load balancer is what keeps the backend available, the balancer itself cannot be a single point of failure.</p>
+<ul><li>One load balancer merely moves the single point of failure one hop closer to the client.</li><li>Production systems run multiple balancer instances behind a shared address or DNS name.</li><li><strong>Active-active:</strong> several instances serve traffic simultaneously; losing one leaves the others serving.</li><li><strong>Active-passive:</strong> one instance serves while a standby monitors it and takes over on failure.</li><li>Active-active uses capacity better; active-passive is simpler but wastes the standby and requires reliable failover detection.</li><li>Clients still see one logical endpoint even when many instances are running.</li><li>Managed cloud load balancers handle this redundancy for you, which is a major reason to use them.</li><li>Whichever model you pick, the balancer tier needs its own health checks, monitoring, and capacity headroom.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>Traffic</th><th>Failover</th><th>Trade-off</th></tr></thead><tbody><tr><td>Active-active</td><td>All instances serve at once</td><td>Remaining instances continue</td><td>Better utilization, more coordination</td></tr>
+<tr><td>Active-passive</td><td>One serves, one stands by</td><td>Standby takes over</td><td>Simpler, but idle capacity and detection delay</td></tr>
+<tr><td>Managed service</td><td>Provider handles instances</td><td>Automatic</td><td>Less control, provider coupling</td></tr></tbody></table></div>
+
+<div class="note">DNS-based failover is slower than an address that moves within the network, so consider how fast failover must be.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Common load balancing technologies</h2>
+<ul><li><strong>NGINX</strong> is widely used as a reverse proxy and Layer 7 load balancer for HTTP and HTTPS.</li><li><strong>HAProxy</strong> is known for high-performance Layer 4 and Layer 7 balancing with rich health-check options.</li><li><strong>Envoy</strong> targets microservices and service meshes, handling both north-south and east-west traffic.</li><li><strong>Cloud load balancers</strong> offer managed options such as an application (Layer 7) balancer and a network (Layer 4) balancer.</li><li><strong>Kubernetes</strong> distributes traffic through Services, Ingress controllers, and gateways.</li><li>The right choice depends on protocol, scale, operational model, and whether you need advanced routing.</li><li>Whatever the product, the responsibilities are identical: accept traffic, pick a healthy backend, and spread load.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Technology</th><th>Layer</th><th>Typical role</th></tr></thead><tbody><tr><td>NGINX</td><td>Layer 7 (also L4)</td><td>Reverse proxy, HTTP load balancing, TLS, caching</td></tr>
+<tr><td>HAProxy</td><td>Layer 4 and 7</td><td>High-performance balancing with health checks</td></tr>
+<tr><td>Envoy</td><td>Layer 4 and 7</td><td>Service mesh and microservice traffic management</td></tr>
+<tr><td>Cloud ALB / NLB</td><td>Layer 7 / Layer 4</td><td>Managed application or network balancing</td></tr>
+<tr><td>Kubernetes Services and Ingress</td><td>Mostly Layer 7</td><td>Cluster ingress and service discovery</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Putting it together</h2>
+<ul><li>Typical flow: DNS resolves to the balancer, the balancer terminates TLS, selects a healthy backend, and forwards the request.</li><li>Keep application servers stateless so the balancer can route freely and failures are cheap.</li><li>Use health checks with sensible thresholds, and separate readiness from liveness.</li><li>Drain connections during every planned removal, including deploys and scale-down.</li><li>Make the balancer tier redundant, or use a managed service that already is.</li><li>Set timeouts and retry policy at the balancer; an infinite wait there turns a slow backend into a stuck frontend.</li><li>Instrument per-backend request counts, error rates, and latency so imbalance is visible before users report it.</li><li>Watch the balancer itself: it sees all traffic and can become the bottleneck it was meant to remove.</li></ul>
+
+<div class="flow"><span class="flow-step">DNS</span><span class="flow-arrow">→</span><span class="flow-step">Load balancer (TLS termination)</span><span class="flow-arrow">→</span><span class="flow-step">Health-checked backend pool</span><span class="flow-arrow">→</span><span class="flow-step">Stateless app servers</span><span class="flow-arrow">→</span><span class="flow-step">Shared cache and database</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Adding a load balancer</strong> enables horizontal scaling and failover, but introduces another hop, another component to operate, and a potential bottleneck.</li><li><strong>Layer 4 balancing</strong> is fast and protocol-agnostic, but cannot route on paths or headers and cannot apply HTTP-level policy.</li><li><strong>Layer 7 balancing</strong> enables content-based routing and per-route policy, but costs more processing per request and only understands HTTP-like protocols.</li><li><strong>Least-connections routing</strong> adapts to uneven request cost, but requires connection tracking and can still pile work onto a struggling node.</li><li><strong>Sticky sessions</strong> preserve in-memory state with no shared store, but produce uneven load and lose sessions when a server dies.</li><li><strong>Deep health checks</strong> catch dependency failures, but can mark the entire pool unhealthy when a shared dependency goes down.</li><li><strong>Aggressive health checks</strong> remove bad nodes quickly, but flap on transient errors and cause unnecessary churn.</li><li><strong>Active-active balancers</strong> use capacity well, but need coordination and careful configuration sync; active-passive is simpler but leaves capacity idle.</li><li><strong>TLS termination</strong> centralizes certificate management and saves backend CPU, but puts plaintext on the internal network unless you re-encrypt.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What does a load balancer actually do?</summary><div class="answer"><p>It presents one stable endpoint in front of a pool of backend servers, chooses a healthy backend for each request, forwards the request, and relays the response. Clients never need to know how many servers exist or which one served them.</p></div></details>
+<details><summary>2. What problems appear as soon as you add a second server?</summary><div class="answer"><p>Three: which server should handle a given request, how to keep distribution even, and what to do when one server is unhealthy or offline. A load balancer is the component that answers all three outside application code.</p></div></details>
+<details><summary>3. Layer 4 vs Layer 7 — how do you choose?</summary><div class="answer"><p>Choose Layer 4 for raw throughput, non-HTTP protocols, or when you only need to spread connections by IP and port. Choose Layer 7 when you need routing by path, host, header, or cookie, or per-route TLS and policy. Many architectures use both, L4 at the edge and L7 inside.</p></div></details>
+<details><summary>4. What is TLS termination and what does it cost?</summary><div class="answer"><p>The balancer completes the TLS handshake with the client, decrypts the request, and forwards it to the backend. Certificates and cipher policy are managed in one place and backends save CPU, but traffic is plaintext inside the network unless you re-encrypt.</p></div></details>
+<details><summary>5. Why are stateless servers easier to load balance?</summary><div class="answer"><p>Any instance can serve any request, so the balancer can choose freely, failed instances can be replaced, and new instances can be added without migrating users. Stateful servers force affinity, which creates uneven load and session loss on failure.</p></div></details>
+<details><summary>6. When would you accept sticky sessions?</summary><div class="answer"><p>When session state is expensive to externalize, or when per-user cache locality matters more than perfect balance. Accept it knowingly: it concentrates load, complicates deploys, and loses sessions when the pinned server dies.</p></div></details>
+<details><summary>7. How should health checks be designed?</summary><div class="answer"><p>Probe a dedicated endpoint with a defined interval, timeout, and failure threshold, and require several consecutive failures before removal. Use a shallow check for liveness and a dependency-aware check for readiness, but be careful that a shared dependency outage does not empty the pool.</p></div></details>
+<details><summary>8. What is connection draining and why does it matter?</summary><div class="answer"><p>Before removing a server, the balancer stops sending it new requests but lets in-flight requests and open connections finish. Without it, deploys and scale-down interrupt active users, especially on long-lived connections like WebSockets.</p></div></details>
+<details><summary>9. How do you keep the load balancer from becoming a single point of failure?</summary><div class="answer"><p>Run multiple instances in an active-active or active-passive configuration behind a shared address, or use a managed load balancer that provides redundancy. The balancer tier needs its own health checks, monitoring, and spare capacity.</p></div></details>
+<details><summary>10. Round robin or least connections?</summary><div class="answer"><p>Round robin is fine when requests cost about the same. Least connections adapts when request durations vary widely or some backends are slower, because it accounts for work already in progress rather than just counting arrivals.</p></div></details>
+<details><summary>11. A healthy-looking server is returning errors. What is happening?</summary><div class="answer"><p>The health check is probably too shallow — it proves the process answers, not that it can serve. A dependency-aware readiness check, plus error-rate and latency metrics per backend, exposes the problem the health check missed.</p></div></details>
+<details><summary>12. Where else does load balancing appear besides a dedicated appliance?</summary><div class="answer"><p>DNS round robin, reverse proxies, API gateways, service meshes, Kubernetes Services and Ingress, and client-side balancing in RPC libraries. The mechanism differs, but each picks a backend from a known healthy set.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Adding servers behind a balancer while the database remains the real bottleneck.</li><li>Calling the app tier stateless while sessions or uploaded files still live on local disk.</li><li>Using sticky sessions by default instead of externalizing shared state.</li><li>Relying on a shallow health check that passes while the application cannot reach its database.</li><li>Setting health-check thresholds so aggressively that transient errors flap the whole pool.</li><li>Removing instances without connection draining and cutting off in-flight requests.</li><li>Deploying a single load balancer and recreating the single point of failure one layer up.</li><li>Forgetting that a Layer 7 balancer adds per-request processing and can itself saturate under load.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="latency-vs-throughput.html"><span>← Previous</span><strong>Latency vs Throughput</strong></a><a class="next" href="proxy-vs-reverse-proxy.html"><span>Next →</span><strong>Proxy vs Reverse Proxy</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/load-balancers">AlgoMaster — Load Balancers</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

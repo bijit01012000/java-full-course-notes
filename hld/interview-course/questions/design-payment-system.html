@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design a Payment System — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 07 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Product design</span></div>
+    <h1>Design a Payment System</h1>
+    <p class="dek">Money makes every ordinary distributed-systems problem visible: ambiguous timeouts, duplicate requests, partial failure, and the need for an audit trail that can survive an argument with a customer or a regulator.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Model each payment as an explicit state machine, make every mutation idempotent with a client key, record value movements in an append-only double-entry ledger, and reconcile against the provider's settlement report.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Create a payment for an order with an amount, currency, merchant, and customer reference.</li><li>Authorize and capture funds through an external payment service provider, with support for immediate capture.</li><li>Query payment status reliably after a timeout or an app restart.</li><li>Issue full or partial refunds and track their provider references and settlement state.</li><li>Expose a merchant-facing statement derived from ledger entries.</li><li>Ingest signed provider webhooks for authorization, capture, failure, refund, and chargeback events.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Never lose or duplicate a value movement; every state change is durable and auditable.</li><li>A retry with the same idempotency key must return the original result and must not charge twice.</li><li>Keep the API responsive while the provider is slow: charge calls time out in seconds, so confirmation may be asynchronous.</li><li>Maintain an append-only ledger whose entries can be replayed and whose debits equal credits per transaction.</li><li>Keep card data out of scope by tokenizing at the provider and never storing a primary account number.</li><li>Detect and repair drift with a daily reconciliation against provider settlement files.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 5M payments per day: about 58 per second average and roughly 500 per second at peak.</li><li>At two ledger entries per captured payment, the ledger grows by about 10M entries per day before refunds and adjustments.</li><li>A provider call can take hundreds of milliseconds to several seconds and may time out with an unknown outcome, so the API cannot assume a synchronous answer.</li><li>Retention is measured in years, so the ledger and payment tables must be partitioned by month and archived, not kept in one ever-growing hot table.</li><li>One payment may produce several provider attempts after timeouts, so attempt records and idempotency keys must be retained longer than the maximum retry window.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">PaymentIntent</span><span class="fields">payment_id, merchant_id, order_ref, amount_minor, currency, status, idempotency_key, customer_ref, created_at, updated_at</span></div><div class="entity"><span class="name">Charge</span><span class="fields">charge_id, payment_id, provider, provider_reference, amount_minor, currency, status, authorized_at, captured_at, failure_code</span></div><div class="entity"><span class="name">LedgerEntry</span><span class="fields">entry_id, transaction_id, account_code, direction (debit/credit), amount_minor, currency, payment_id, created_at</span></div><div class="entity"><span class="name">Refund</span><span class="fields">refund_id, charge_id, payment_id, amount_minor, status, provider_reference, idempotency_key, created_at</span></div><div class="entity"><span class="name">WebhookEvent</span><span class="fields">provider, event_id, event_type, payload_hash, signature_verified, status (received/processed/ignored), received_at, processed_at</span></div><div class="entity"><span class="name">MerchantAccount</span><span class="fields">merchant_id, settlement_account_code, default_currency, fee_schedule, status, payout_schedule</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/payments</code></td><td>Create and charge a payment; requires an Idempotency-Key header and returns the payment id plus current status.</td></tr><tr><td><code>GET</code></td><td><code>/v1/payments/{payment_id}</code></td><td>Return the authoritative payment, charge, and refund state so a client can resolve an ambiguous timeout.</td></tr><tr><td><code>POST</code></td><td><code>/v1/payments/{payment_id}/capture</code></td><td>Capture a previously authorized payment, idempotently and only from the authorized state.</td></tr><tr><td><code>POST</code></td><td><code>/v1/refunds</code></td><td>Create a full or partial refund with its own idempotency key; the total refunded can never exceed the captured amount.</td></tr><tr><td><code>POST</code></td><td><code>/v1/webhooks/providers/{provider}</code></td><td>Verify the provider signature, store the event idempotently, and trigger the matching state transition.</td></tr><tr><td><code>GET</code></td><td><code>/v1/merchants/{merchant_id}/statement?from=...&amp;to=...</code></td><td>Return a statement built from ledger entries for a period, with opening and closing balances.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Money representation</td><td>Store integer minor units plus an ISO currency code; never use floating point, and fix rounding rules at the boundary.</td><td>Binary floating point cannot represent most decimal amounts exactly, and a one-cent drift in a ledger is a correctness bug, not a display issue.</td></tr><tr><td>Payment state</td><td>An explicit state machine: requires_payment_method, requires_confirmation, processing, authorized, captured, partially_refunded, refunded, failed, cancelled. Every transition is a conditional update.</td><td>A status field updated blindly lets a duplicate webhook move a refunded payment back to captured; conditional transitions make out-of-order events harmless.</td></tr><tr><td>Ledger</td><td>Append-only double-entry entries grouped by transaction_id, with a debit and a credit of equal amount for every movement; balances derived by aggregation.</td><td>An append-only ledger is auditable and replayable, and double entry makes it impossible to create value from nowhere; a mutable balance row hides how it got there.</td></tr><tr><td>Idempotency and provider references</td><td>A durable table keyed by (merchant_id, idempotency_key) holding a request hash, status, and stored response, optionally fronted by Redis; each provider attempt stores its reference with a unique constraint.</td><td>A timeout gives the client no way to know whether the charge happened, so the retry must replay the original outcome, while the provider reference is needed for lookup and reconciliation and keeping every attempt preserves the audit trail.</td></tr><tr><td>Webhook ingestion</td><td>An inbox table keyed by provider event id, processed asynchronously after signature verification, with the event marked processed in the same transaction as the state change.</td><td>Providers deliver at least once and out of order; a durable dedupe record plus conditional transitions prevents double application and survives a crash.</td></tr><tr><td>Event publication</td><td>Write an outbox row in the same transaction as the payment or ledger change, and let a relay publish to downstream consumers.</td><td>A direct publish can fail after commit, leaving orders and analytics unaware of a real payment; the outbox makes the database commit the source of truth.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> API[🛡️ Payments API]
+  API --> DB[(🗄️ Payments DB: intents, ledger, idempotency, outbox)]
+  API --> AD[🔌 PSP Adapter]
+  AD --> PSP[🌐 Payment Provider]
+  PSP -.->|signed webhook| WH[📥 Webhook Handler]
+  WH --> DB
+  DB --> OB[📤 Outbox Relay]
+  OB --> Q[📬 Event Queue]
+  Q --> CON[📊 Downstream Consumers]
+  RC[🧾 Reconciliation Job] --> PSP
+  RC --> DB
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef svc fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef store fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  class C client;
+  class API edge;
+  class AD,WH,OB,RC svc;
+  class DB,PSP,Q,CON store;</div><div class="diagram-caption">The API records intent, idempotency, and ledger state in one database before and after the provider call; signed webhooks drive conditional transitions, and reconciliation compares internal records with provider settlement.</div></div>
+        <ul><li>Keep the payment database as the source of truth and the provider as an external system with an unknown outcome. A timeout is not a failure; it is an unresolved state that must be queried or reconciled.</li><li>Create the payment row and its idempotency record in one transaction before the provider call. If the process crashes after the call, the retry finds the in-progress record and resolves it instead of charging again.</li><li>Pass a stable idempotency key to the provider on every attempt for the same logical charge. If the provider does not support one, use its lookup-by-reference API before retrying.</li><li>Confirm the charge with a conditional update from processing to captured, guarded by the provider reference. A duplicate or late webhook then becomes a no-op.</li><li>Write ledger entries in the same local transaction as the status change they represent. Two entries, one debit and one credit, with the same transaction_id and equal amounts. The ledger tables can live in the same database as payments but are partitioned and indexed separately.</li><li>Never mutate or delete a ledger entry. Corrections are new reversing entries, so the history remains complete and an auditor can replay it.</li><li>Verify webhook signatures before parsing, deduplicate by provider event id, and acknowledge quickly; do the state transition synchronously if it is small, otherwise enqueue it with the inbox row committed first.</li><li>Reconcile daily: pull the provider settlement report, match every captured charge and refund, and put unmatched items in a break queue with an owner and an SLA.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Synchronous charge API</td><td>The client gets an immediate outcome for the common case and the user experience is simple.</td><td>The API is coupled to provider latency and timeouts, and an ambiguous timeout still forces a pending state and a status lookup.</td></tr><tr><td>Asynchronous confirmation</td><td>The service survives slow providers and can absorb bursts without holding connections or transactions open.</td><td>The client must poll or receive a webhook, and the UI needs a pending state that is honest about uncertainty.</td></tr><tr><td>Append-only double-entry ledger</td><td>Full auditability, replayability, and a mathematical invariant that catches missing or duplicated entries.</td><td>More rows and more complex queries; balances require aggregation or snapshots, and corrections require reversing entries.</td></tr><tr><td>Database-backed idempotency</td><td>Durable across restarts and transactional with the payment record, so a crash cannot forget that a request was already accepted.</td><td>An extra write and lookup on every request and a growing table that needs retention and partitioning.</td></tr><tr><td>Transactional outbox</td><td>Downstream systems eventually see every committed change without a distributed transaction or a dual-write failure.</td><td>Consumers must be idempotent, events arrive later, and the relay plus outbox table need monitoring and cleanup.</td></tr><tr><td>Auth and capture as separate steps</td><td>Supports order fulfillment, partial captures, and cancellation before settlement, which many businesses need.</td><td>More states and more failure paths, and an authorization can expire before capture.</td></tr><tr><td>Retry unknown provider outcomes</td><td>Recovers from transient network failures without failing a payment that may have succeeded.</td><td>Requires provider-side idempotency or lookup; without it, a retry is a duplicate-charge risk.</td></tr><tr><td>Tokenize card data at the provider</td><td>The service never stores a PAN, dramatically reducing PCI scope and breach impact.</td><td>The provider becomes a critical dependency, and token portability across providers is limited.</td></tr></tbody></table></div>
+        <ul><li>Cache merchant configuration, fee schedules, and payment method metadata so the charge path avoids repeated lookups.</li><li>Keep the synchronous API path short: validate, persist, call the provider once, and return; move notifications, downstream projections, and analytics to the outbox.</li><li>Partition payment and ledger tables by month and archive closed periods, while keeping indexes on payment_id and provider_reference for lookups.</li><li>Derive merchant balances from ledger entries and cache periodic snapshots rather than summing the full history on every statement request.</li><li>Use provider tokenization and a hosted card field so card data never reaches the payment service, which keeps PCI scope small.</li><li>Retry only idempotent provider operations, with exponential backoff, jitter, and a cap; never retry a charge with a new key.</li><li>Prefer a single provider adapter interface with explicit capability flags, so adding a provider does not leak its status codes into business logic.</li><li>Alert on reconciliation breaks, duplicate charge attempts, webhook signature failures, and payments stuck in processing beyond a threshold.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>How do you prevent a double charge on retry?</strong> Require an idempotency key, persist it with the in-progress request before calling the provider, and pass the same key or reference on every retry.</div><div class="followup"><strong>What if the provider call times out?</strong> Treat it as unknown, keep the payment in processing, and resolve it by querying the provider or waiting for a webhook; never retry with a new key.</div><div class="followup"><strong>What if a webhook arrives twice or out of order?</strong> Deduplicate by provider event id and apply transitions only when they move the payment forward from its current state.</div><div class="followup"><strong>How do partial refunds work?</strong> Each refund is its own record with an idempotency key, and the sum of successful refunds is constrained never to exceed the captured amount.</div><div class="followup"><strong>How does reconciliation work?</strong> A daily job compares provider settlement records with internal charges and refunds, and unmatched items go to a break queue for investigation.</div><div class="followup"><strong>What guarantees does the ledger provide?</strong> Every movement has equal debits and credits under one transaction_id, entries are immutable, and balances can be recomputed from history.</div><div class="followup"><strong>How do you handle currency and rounding?</strong> Store integer minor units with a currency code, keep one currency per payment, and apply a documented rounding rule at the point of conversion.</div><div class="followup"><strong>How do you keep card data out of scope?</strong> Use provider-hosted fields or tokenization so the service only ever sees a token and never stores, logs, or transmits a primary account number.</div><div class="followup"><strong>What if the database commit succeeds but the response is lost?</strong> The client retries with the same idempotency key and receives the stored result, so the lost response never becomes a second payment.</div><div class="followup"><strong>What if the ledger write fails after a successful charge?</strong> The captured state and its ledger entries commit in one local transaction; if that transaction fails, the payment remains processing and is retried before any settlement or confirmation.</div><div class="followup"><strong>How are payouts handled?</strong> Payouts are a separate ledger transaction against the merchant's payable balance, usually batched on a schedule and reconciled with the bank statement.</div><div class="followup"><strong>Why not update a balance column directly?</strong> A mutable balance loses the history of how it changed, cannot prove that debits equal credits, and is vulnerable to lost updates and silent corrections.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Treating a provider timeout as a failure and retrying with a fresh idempotency key, which is the classic path to a double charge.</li><li>Storing an amount as a float or double, which introduces rounding drift that no amount of later reconciliation can cleanly fix.</li><li>Mutating or deleting ledger rows to correct a mistake instead of posting a reversing entry, which destroys the audit trail.</li><li>Trusting a webhook without verifying its signature, or updating status unconditionally, so a forged, late, or duplicate event can undo a refund or a cancellation.</li><li>Publishing an event to a queue after the database commit without an outbox, leaving orders and analytics permanently unaware of a successful payment.</li><li>Storing card numbers or CVVs in the application database or logs, which expands PCI scope and turns a minor bug into a breach.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="design-ticket-booking.html"><span>← Previous</span><strong>Design Ticket Booking</strong></a><a class="next" href="scale-read-traffic.html"><span>Next →</span><strong>Scale Read Traffic</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebSockets vs SSE vs Polling — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 17 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · APIs</span></div>
+    <h1>WebSockets vs SSE vs Polling</h1>
+    <p class="dek">It tests whether you choose a transport from direction and freshness instead of naming a technology, and whether you know the second half of the problem: routing an update to the server that holds the connection.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Pick the transport from direction and freshness, then solve routing separately: polling for rare updates, SSE for one-way streams, WebSockets for frequent two-way traffic, with pub/sub or a connection registry to find the right server and sequence numbers to recover what was missed.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Deliver server-initiated updates to connected clients within a stated delay.</li><li>Support one-way workloads such as notifications, live scores, and token streaming.</li><li>Support two-way workloads such as chat, typing indicators, and collaborative editing.</li><li>Recover updates missed while offline, during a deploy, or across a network switch.</li><li>Expose approximate presence with a last-seen timestamp.</li><li>Fall back to a plain HTTP path where long-lived connections are blocked.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>p99 delivery under about one second for online users, with catch-up bounded by one query.</li><li>Scale to millions of concurrent connections, sized by connections and file descriptors rather than requests per second.</li><li>No silent message loss: persist before publishing, and let clients replay from a sequence number.</li><li>Reconnects use exponential backoff with jitter so a server loss does not cascade.</li><li>Deploys drain connections gradually instead of dropping a server's worth at once.</li><li>Dead connections are detected by heartbeat, not by waiting for the next write to fail.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 10M concurrent connections and about 50k connections per server, which implies roughly 200 connection servers before headroom.</li><li>Short polling at 1M users every two seconds is 500k requests per second, and almost all of them return nothing.</li><li>Heartbeats every 30 seconds across 10M connections is about 333k small messages per second, which is cheap per message but not free.</li><li>A room broadcast to 100k members is 100k deliveries per message, so rooms need pub/sub rather than per-user lookups.</li><li>Catch-up after a reconnect must be indexed by (channel_id, seq) so replay is a range scan, not a scan of the conversation.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Connection</span><span class="fields">connection_id, user_id, device_id, server_id, connected_at, last_heartbeat</span></div><div class="entity"><span class="name">Subscription</span><span class="fields">connection_id, channel_id, subscribed_at</span></div><div class="entity"><span class="name">Event</span><span class="fields">event_id, channel_id, seq, type, payload_ref, created_at</span></div><div class="entity"><span class="name">DeliveryCursor</span><span class="fields">user_id, device_id, channel_id, last_seq</span></div><div class="entity"><span class="name">PresenceRecord</span><span class="fields">user_id, status, last_seen_at, ttl</span></div><div class="entity"><span class="name">DeviceToken</span><span class="fields">device_id, user_id, platform, push_token, updated_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/events?channels={ids}</code></td><td>Opens a text/event-stream for server-to-client updates; supports Last-Event-ID for resume.</td></tr><tr><td><code>WS</code></td><td><code>/ws</code></td><td>Upgrades to a full-duplex connection, then carries subscribe, send, and heartbeat frames.</td></tr><tr><td><code>GET</code></td><td><code>/messages?channel_id={id}&after={seq}&limit=100</code></td><td>Catch-up read that returns everything after the client's last sequence number.</td></tr><tr><td><code>POST</code></td><td><code>/messages</code></td><td>Sends a message over plain HTTP, used as a fallback and by clients that are not holding a socket.</td></tr><tr><td><code>GET</code></td><td><code>/presence?user_ids={ids}</code></td><td>Returns approximate online state and last-seen timestamps from a TTL-backed store.</td></tr><tr><td><code>POST</code></td><td><code>/devices</code></td><td>Registers a push token so offline users can be notified through APNs or FCM and catch up on open.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Message durability</td><td>Persist the message with a per-channel monotonic sequence number before publishing it</td><td>Real-time delivery becomes an optimisation; if the publish is lost, the client still recovers the message by sequence.</td></tr><tr><td>Connection routing</td><td>user_id and device_id mapped to server_id in Redis, with a TTL refreshed by heartbeat</td><td>Any service can find the one server holding a socket, and a crashed server's entries expire on their own.</td></tr><tr><td>Fan-out to groups</td><td>Pub/sub channel per room or per user, with connection servers subscribing for their members</td><td>One publish reaches every server with an interested connection instead of a lookup per member.</td></tr><tr><td>Cursor scope</td><td>One cursor per device per channel, not one per user</td><td>A user with a phone and a laptop has different delivery histories, and a shared cursor would skip messages on one device.</td></tr><tr><td>Presence</td><td>TTL key updated by heartbeat, read as best effort</td><td>Presence is approximate by nature; a TTL avoids a cleanup job for every crashed client.</td></tr><tr><td>Polling fallback</td><td>The same after={seq} index that serves catch-up also serves short polling</td><td>One code path supports real-time clients, reconnecting clients, and restrictive networks.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] -->|poll, SSE, or WS upgrade| G[🛡️ Gateway: LB + upgrade]
+  G --> CS[🔌 Connection servers]
+  CS --> RG[🔑 Connection registry]
+  P[⚙️ Message service] --> DB[🗄️ Message store + seq]
+  P --> PS[📬 Pub/sub]
+  PS --> CS
+  CS -->|push| C
+  C -->|catch up after seq| P
+  P --> DB
+  CS --> N[🔔 APNs / FCM for offline]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#6d3fc4,color:#17211f;
+  classDef queue fill:#ffe8ec,stroke:#b42342,color:#17211f;
+  classDef edge fill:#fff2d6,stroke:#b26a08,color:#17211f;
+  class C client;
+  class CS,P svc;
+  class DB,RG store;
+  class PS,N queue;
+  class G edge;</div><div class="diagram-caption">A separate connection tier holds sockets, pub/sub or the registry finds the right server, and every update is persisted with a sequence number so a reconnecting client can catch up.</div></div>
+        <ul><li>Name both halves before choosing anything: the client transport, and the backend routing that finds the server holding the recipient's socket.</li><li>Polling keeps servers stateless and any server can answer; SSE and WebSockets pin a user to one server for the life of the connection, which changes deploys and scaling.</li><li>Separate the connection tier from business logic so connection count and request throughput scale independently.</li><li>Save first, then publish. Pub/sub is fire-and-forget, so an offline or slow client silently loses anything not persisted.</li><li>Sequence numbers give ordering, deduplication, and a resumable cursor with one mechanism.</li><li>The dangerous moments are deploys and mass disconnects: drain connections gradually and make clients reconnect with backoff plus jitter.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Short polling</td><td>Trivial to build, stateless servers, works everywhere</td><td>Wasted requests and battery, with delay bounded by the interval</td></tr><tr><td>Long polling</td><td>Near-instant updates over plain HTTP that passes restrictive proxies</td><td>One held connection per client and full HTTP overhead per update</td></tr><tr><td>SSE</td><td>Simple one-way streaming with browser-managed reconnection and Last-Event-ID</td><td>Text only, one-way, and about six connections per domain on HTTP/1.1</td></tr><tr><td>WebSockets</td><td>Low-overhead two-way messaging for chat, games, and collaboration</td><td>Stateful connections that complicate deploys, load balancing, and reconnect logic</td></tr><tr><td>Separate connection tier</td><td>Connections and business logic scale independently</td><td>Another stateful service to deploy, drain, and monitor</td></tr><tr><td>Connection registry</td><td>Precise targeting and easier debugging of where a user is connected</td><td>A mapping to maintain and expire on every connect, disconnect, and move</td></tr><tr><td>Pub/sub routing</td><td>Senders stay ignorant of topology and rooms fan out with one publish</td><td>Fire-and-forget delivery that depends on broker health</td></tr><tr><td>Save-first with sequence numbers</td><td>Missed updates are recoverable and duplicates are detectable</td><td>A database write and a catch-up read path on every update</td></tr></tbody></table></div>
+        <ul><li>Choose the cheapest transport that meets the freshness target; do not reach for WebSockets when SSE or polling is enough.</li><li>Persist with a sequence number, publish best effort, and let reconnect resolve any gap with one indexed range query.</li><li>Use pub/sub rooms for group fan-out and a registry only where precise per-user targeting is needed.</li><li>Send heartbeats around every 30 seconds and treat silence or a failed write as a dead connection.</li><li>Client reconnect with exponential backoff and jitter, capped, plus a resume token so retries are cheap.</li><li>Drain connection servers gracefully on deploy and let clients reconnect to peers instead of all at once.</li><li>Raise file-descriptor limits and size the tier by concurrent connections and memory per connection.</li><li>Batch or compress small frames and avoid a database read per delivered message; hydrate bodies from cache.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why can't the server just push over plain HTTP?</strong> HTTP is request-response, so once the response is sent there is no open channel; every technique either reopens requests or keeps a connection open.</div><div class="followup"><strong>What are the two parts of a real-time design?</strong> The client transport (polling, SSE, or WebSockets) and the backend routing that finds the server holding the recipient's connection.</div><div class="followup"><strong>When is short polling good enough?</strong> When updates are rare and a few seconds of delay is acceptable, such as checking whether a background export finished.</div><div class="followup"><strong>SSE or WebSockets?</strong> SSE when data flows only server to client and you want automatic reconnection over ordinary HTTP; WebSockets when the client also sends frequently.</div><div class="followup"><strong>What are the limits of SSE?</strong> It is one-way and text-only, limited to about six connections per domain on HTTP/1.1, and EventSource cannot set custom headers, so auth uses cookies or a short-lived URL token.</div><div class="followup"><strong>How does SSE reconnect work?</strong> The browser reconnects automatically and sends Last-Event-ID, so the server replays everything after that id from stored events.</div><div class="followup"><strong>How does an update reach a user connected to another server?</strong> Look up the user's server in a connection registry and send directly, or publish to a channel that the user's connection server subscribes to.</div><div class="followup"><strong>What limits one connection server?</strong> Usually memory and open file descriptors, not CPU, since every connection holds a socket and buffers, so capacity is measured in connections.</div><div class="followup"><strong>How do you handle users who were offline?</strong> Persist every update with a sequence number, notify through APNs or FCM, and have the client fetch everything after its last sequence when it reopens.</div><div class="followup"><strong>What is a reconnection storm?</strong> When a server dies, all its clients reconnect at once and overload the survivors and the database, so clients need backoff with jitter and deploys need draining.</div><div class="followup"><strong>How do you deploy a WebSocket fleet?</strong> Drain one server at a time: stop accepting new connections, let existing ones finish or migrate, then terminate, while clients reconnect with jitter to healthy peers.</div><div class="followup"><strong>What do you monitor?</strong> Concurrent connections, connect and disconnect rate per server, publish latency, catch-up query load, heartbeat failures, and reconnect rate.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Designing the client transport and forgetting that the backend must find the server holding the recipient's connection.</li><li>Saying WebSockets are required for real-time when updates are one-way and SSE is simpler.</li><li>Forgetting that pub/sub is fire-and-forget, so an offline or slow client silently loses updates.</li><li>Not persisting updates before delivery, leaving no way to catch up after a disconnect.</li><li>Sizing connection servers by requests per second instead of concurrent connections and file descriptors.</li><li>Letting all clients retry immediately after a failure and turning one lost server into a cascade.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="upload-large-files.html"><span>← Previous</span><strong>Upload and Serve Large Files</strong></a><a class="next" href="distributed-transactions.html"><span>Next →</span><strong>Distributed Transactions / SAGA</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

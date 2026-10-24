@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preventing Duplicate Processing — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 10 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Preventing Duplicate Processing</h1>
+    <p class="dek">Interview Patterns · Staying Reliable</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/deduplicating-data">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Where duplicates come from</a>
+<a href="#s3">Idempotency as the foundation</a>
+<a href="#s4">Idempotency keys</a>
+<a href="#s5">The idempotent request lifecycle</a>
+<a href="#s6">Consumer-side deduplication</a>
+<a href="#s7">Exactly-once is really effectively-once</a>
+<a href="#s8">Unique constraints and conditional writes</a>
+<a href="#s9">Choosing a deduplication store</a>
+<a href="#s10">Races, crashes, and partial failures</a>
+<a href="#s11">Ordering, versions, and late duplicates</a>
+<a href="#s12">Deduplication in batch and streaming</a>
+<a href="#s13">What to monitor and how to answer</a>
+<a href="#s14">When deduplication is overkill</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Duplicates are inevitable once clients retry and queues redeliver, so make every effect <strong>idempotent</strong> and keep a durable record of what has already been done.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>At-least-once delivery</dt><dd>A messaging guarantee that every message is delivered, but possibly more than once. Most queues default to this.</dd></div><div class="term"><dt>Idempotency</dt><dd>The property that repeating the same operation produces the same result and the same side effects as doing it once.</dd></div><div class="term"><dt>Idempotency key</dt><dd>A client-generated identifier that lets the server recognize a retry of the same logical request.</dd></div><div class="term"><dt>Deduplication window</dt><dd>The period during which previously seen message or request IDs are remembered and rejected.</dd></div><div class="term"><dt>Effectively-once</dt><dd>Exactly-once results achieved by combining at-least-once delivery with idempotent or deduplicated processing.</dd></div><div class="term"><dt>Processed-message table</dt><dd>A durable store of message IDs already handled, written in the same transaction as the side effect.</dd></div><div class="term"><dt>Unique constraint</dt><dd>A database guarantee that prevents a second row with the same business key, acting as a final duplicate barrier.</dd></div><div class="term"><dt>Compare-and-set</dt><dd>A conditional write that succeeds only if the current value or version matches, preventing double application.</dd></div><div class="term"><dt>Transactional outbox</dt><dd>Writing the event to an outbox table in the same transaction as the state change, then publishing it reliably.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">Networks fail, responses get lost, clients retry, and message queues may deliver the same message more than once. As a result, the same request can reach a system multiple times.</p>
+<ul><li>If every delivery is processed as new work, a payment can be charged twice or an order created twice.</li><li>The client often cannot tell whether its request succeeded: the write may have committed and only the response was lost.</li><li>Retrying is the correct client behavior for reliability, which makes duplicates a <strong>design assumption</strong>, not an edge case.</li><li>Queues with <strong>at-least-once</strong> delivery guarantee no loss but explicitly allow redelivery after a crash or timeout.</li><li>Duplicate processing is usually discovered by users, through double charges, duplicate emails, or inflated counters.</li><li>The goal is not to prevent duplicates from arriving, but to make their arrival harmless.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Where duplicates come from</h2>
+<ul><li><strong>Client retries:</strong> a timeout triggers a retry while the original request is still being processed.</li><li><strong>Load balancer or proxy retries:</strong> infrastructure resends a request that appears to have failed.</li><li><strong>Queue redelivery:</strong> the consumer crashes or exceeds the visibility timeout before acknowledging.</li><li><strong>Producer retries:</strong> a publish is retried after an ambiguous acknowledgement, creating two messages.</li><li><strong>Worker crash after the side effect:</strong> the database write committed but the acknowledgment never happened.</li><li><strong>Upstream duplication:</strong> two services emit the same business event, or a replay reprocesses history.</li><li>Mobile and offline clients resend aggressively after reconnect, so bursts of identical requests are normal.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Source</th><th>Why it happens</th><th>Typical defense</th></tr></thead><tbody><tr><td>Client retry</td><td>Timeout or lost response</td><td>Idempotency key at the API</td></tr>
+<tr><td>Queue redelivery</td><td>Consumer crash before ack</td><td>Processed-message table, dedupe on message ID</td></tr>
+<tr><td>Producer retry</td><td>Ambiguous publish ack</td><td>Deterministic event ID, dedupe on consume</td></tr>
+<tr><td>Replay / backfill</td><td>Reprocessing history</td><td>Idempotent handlers, version checks</td></tr>
+<tr><td>Upstream fan-in</td><td>Two sources emit the same event</td><td>Business key uniqueness, not just message ID</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Idempotency as the foundation</h2>
+<p class="lede">The most robust defense is an operation that is safe to run repeatedly. Detection is a fallback for operations that cannot be made naturally idempotent.</p>
+<ul><li>A <strong>naturally idempotent</strong> operation converges to the same state: set status to shipped, delete by ID, or write a full record.</li><li>A <strong>non-idempotent</strong> operation accumulates: increment a balance, append a row, send an email, or charge a card.</li><li>Convert accumulation into assignment where possible: set the balance to a known value rather than adding a delta.</li><li>Use <strong>upserts</strong> keyed by a business identifier so a repeated write updates instead of inserting.</li><li>Design commands to carry the intended end state, and make the handler tolerant of the state already being reached.</li><li>Idempotency at the handler level protects against every duplicate source, not just the one you anticipated.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Idempotency keys</h2>
+<ul><li>The client generates a unique key per logical operation and reuses it for every retry of that operation.</li><li>A UUID or a hash of the request payload plus a client-scoped nonce are common choices; the key must not change between retries.</li><li>Scope keys per customer or account so one client cannot collide with or probe another client's keys.</li><li>Store the key with the operation's status and the original response, so a retry can replay the same result.</li><li>Define behavior for a reused key with a <strong>different payload</strong>: reject it rather than silently returning the old result.</li><li>Expire keys after a window longer than the maximum retry period; keeping them forever is expensive, expiring too early reopens the duplicate window.</li><li>The key must be checked and recorded <strong>atomically</strong> with the effect, or two concurrent retries can both pass the check.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The idempotent request lifecycle</h2>
+<p class="lede">A typical API path records the key first, performs the work, and stores the outcome so retries replay rather than repeat.</p>
+<ul><li>Receive the request with its idempotency key and look up the key record.</li><li>If a completed record exists, return the stored response without re-running the work.</li><li>If a record is in progress, return a conflict or wait; do not start a second execution.</li><li>If no record exists, insert it as in-progress and proceed; a unique constraint on the key resolves the race.</li><li>Perform the business effect and record the result in the same transaction where possible.</li><li>Mark the record complete with the response and status code, then return it.</li><li>On failure, either delete the record so a retry can run, or store a terminal failure the retry can replay.</li></ul>
+
+<div class="flow"><span class="flow-step">Receive key</span><span class="flow-arrow">→</span><span class="flow-step">Lookup record</span><span class="flow-arrow">→</span><span class="flow-step">Completed? return stored response</span><span class="flow-arrow">→</span><span class="flow-step">In progress? reject or wait</span><span class="flow-arrow">→</span><span class="flow-step">Insert in-progress</span><span class="flow-arrow">→</span><span class="flow-step">Execute effect</span><span class="flow-arrow">→</span><span class="flow-step">Store result</span><span class="flow-arrow">→</span><span class="flow-step">Return response</span></div>
+<pre class="code"><code>def handle(request):
+    key = request.idempotency_key
+    rec = store.get(key)
+    if rec and rec.status == &#x27;done&#x27;:
+        return rec.response
+    if rec and rec.status == &#x27;in_progress&#x27;:
+        return conflict(&#x27;request already processing&#x27;)
+    try:
+        store.put_if_absent(key, status=&#x27;in_progress&#x27;, fingerprint=hash(request.body))
+    except AlreadyExists:
+        return conflict(&#x27;duplicate request&#x27;)
+    result = perform_effect(request)
+    store.complete(key, response=result)   # atomic with the effect
+    return result</code></pre>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Consumer-side deduplication</h2>
+<ul><li>Every message carries a stable <strong>message ID</strong> assigned by the producer, not generated on delivery.</li><li>Before processing, check whether that ID is already in the processed table; skip if it is.</li><li>Write the processed ID in the <strong>same transaction</strong> as the business change so neither can exist alone.</li><li>Acknowledge the message only after the transaction commits; a crash before the ack causes redelivery, which is now harmless.</li><li>Keep the dedupe record keyed by message ID with a TTL longer than the maximum redelivery window.</li><li>For partitioned consumers, remember that redelivery after a rebalance can replay a batch, so dedupe must be per message, not per batch.</li></ul>
+
+<div class="flow"><span class="flow-step">Receive message</span><span class="flow-arrow">→</span><span class="flow-step">Begin transaction</span><span class="flow-arrow">→</span><span class="flow-step">Already processed?</span><span class="flow-arrow">→</span><span class="flow-step">Apply change</span><span class="flow-arrow">→</span><span class="flow-step">Record message ID</span><span class="flow-arrow">→</span><span class="flow-step">Commit</span><span class="flow-arrow">→</span><span class="flow-step">Acknowledge</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Exactly-once is really effectively-once</h2>
+<p class="lede">True exactly-once delivery across arbitrary systems is not achievable; what systems offer is exactly-once <em>processing effects</em> built on at-least-once delivery plus deduplication.</p>
+<ul><li>A network cannot guarantee a message is delivered once and only once, because the sender cannot distinguish a lost message from a lost acknowledgment.</li><li>Streaming platforms can provide exactly-once semantics inside their own boundary using transactions and idempotent producers.</li><li>Crossing the boundary to an external database or API brings the problem back, so the sink must still be idempotent.</li><li>Say <strong>effectively-once</strong> in an interview and explain the mechanism; claiming true exactly-once invites a well-aimed follow-up.</li><li>The cost is extra state, extra latency from transactions, and a dedupe window that must cover the retry horizon.</li><li>If the effect is naturally idempotent, you get the same outcome with far less machinery.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Unique constraints and conditional writes</h2>
+<ul><li>A <strong>unique index</strong> on the business key (order ID, payment ID, user plus date) makes the database reject the second write.</li><li>Catch the duplicate-key error and treat it as success if the existing row represents the same intent.</li><li>Use <strong>compare-and-set</strong> on a version or status column so a transition happens only once.</li><li>Prefer conditional updates such as <code>UPDATE ... WHERE status = 'pending'</code> over read-then-write sequences.</li><li>For counters, store per-key aggregates or apply a delta keyed by event ID rather than incrementing twice.</li><li>The database constraint is the last line of defense; it works even when application-level checks race.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Choosing a deduplication store</h2>
+<ul><li>A <strong>database table</strong> gives durability and transactional coupling with the effect, at the cost of write latency and growth.</li><li>A <strong>Redis or cache</strong> gives fast lookups and TTLs, but eviction or loss widens the duplicate window.</li><li>Use the database when the duplicate is expensive and correctness matters more than throughput.</li><li>Use a cache or bloom filter as a fast pre-check in front of the durable store, not as the only record.</li><li>Partition the dedupe store by key so it scales with traffic and does not become a single hot spot.</li><li>Budget for retention: dedupe tables grow with every request, so TTL, partitioning, and archival are part of the design.</li><li>A <strong>bloom filter</strong> can rule out most repeats cheaply but has false positives and cannot be the source of truth.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Store</th><th>Strength</th><th>Weakness</th></tr></thead><tbody><tr><td>Relational table</td><td>Durable, transactional with the effect</td><td>Slower, needs retention policy</td></tr>
+<tr><td>Redis / cache</td><td>Very fast, native TTL</td><td>Loss or eviction loses history</td></tr>
+<tr><td>Bloom filter</td><td>Tiny memory for large sets</td><td>False positives, cannot delete</td></tr>
+<tr><td>Unique index</td><td>Race-proof final barrier</td><td>Only for keys with a natural uniqueness rule</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Races, crashes, and partial failures</h2>
+<ul><li>Two concurrent retries can both read 'not seen' and both proceed; the insert of the key must be atomic and unique.</li><li>A crash between the effect and recording the key creates a duplicate on retry unless both happen in one transaction.</li><li>A crash after recording the key but before the effect creates a lost request; store in-progress state with a timeout and recovery path.</li><li>Long-running work should record progress so a retry can resume or safely restart rather than repeat side effects.</li><li>External side effects such as emails or third-party charges need their own idempotency key passed downstream.</li><li>Timeouts on the dedupe lookup must fail closed for expensive operations: if you cannot confirm, do not charge twice.</li><li>Test the crash points deliberately; most duplicate bugs live between the effect and the acknowledgment.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Ordering, versions, and late duplicates</h2>
+<ul><li>A duplicate can arrive long after the original, so the dedupe window must cover the longest realistic retry or replay.</li><li>Attach a <strong>sequence number or version</strong> to events and ignore updates older than the state already applied.</li><li>Last-write-wins by timestamp is fragile when clocks skew; prefer per-entity versions or server-assigned order.</li><li>Out-of-order delivery is a different problem from duplication, but both are solved by making handlers state-aware.</li><li>Idempotent handlers plus version checks tolerate replay, redelivery, and late arrivals without special cases.</li><li>If ordering matters for correctness, partition by entity key so one consumer handles that entity's events in order.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Deduplication in batch and streaming</h2>
+<ul><li>Batch jobs that reprocess a date range must be idempotent by partition or output key, not by run ID alone.</li><li>Overwrite the target partition instead of appending, or merge on a deterministic key.</li><li>Streaming consumers should checkpoint offsets only after the effect is committed, and still dedupe on replay.</li><li>Windowing helps: count distinct IDs within a window when exact global dedupe is too expensive.</li><li>Fingerprinting the payload can catch duplicates that arrive with different message IDs but identical content.</li><li>Replays for backfills are a common source of double counting; run them through the same idempotent path as live traffic.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>What to monitor and how to answer</h2>
+<ul><li>Count duplicate detections by source: API key replay, queue redelivery, unique-constraint violations.</li><li>Alert on a rising duplicate rate; it usually signals retry storms, timeouts, or consumer crashes.</li><li>Track dedupe-store size, hit rate, eviction, and lookup latency.</li><li>In an interview, start by naming the duplicate sources, then make the effect idempotent, then add keys or dedupe tables, then a unique constraint.</li><li>State the window and the storage cost, because 'we dedupe forever' is not a design.</li><li>Explain what happens on a crash between effect and record, since that is where interviewers probe.</li><li>Tie the answer back to the user-visible guarantee: at most one charge, one order, one email.</li></ul>
+
+<div class="flow"><span class="flow-step">Name duplicate sources</span><span class="flow-arrow">→</span><span class="flow-step">Make effect idempotent</span><span class="flow-arrow">→</span><span class="flow-step">Add idempotency key</span><span class="flow-arrow">→</span><span class="flow-step">Dedupe at consumer</span><span class="flow-arrow">→</span><span class="flow-step">Enforce unique constraint</span><span class="flow-arrow">→</span><span class="flow-step">Set retention</span><span class="flow-arrow">→</span><span class="flow-step">Monitor duplicate rate</span></div>
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>When deduplication is overkill</h2>
+<ul><li>Read-only and naturally idempotent operations need no key or table.</li><li>Analytics that tolerate approximate counts may prefer distinct counting over exact dedupe state.</li><li>A short dedupe window is enough when retries are bounded and clients stop after a few attempts.</li><li>Every dedupe store adds a write, a lookup, and a retention problem; measure whether duplicates actually occur.</li><li>For low-value, low-frequency actions, a unique constraint may be the only mechanism worth maintaining.</li><li>Do not build a global dedupe service before proving that per-handler idempotency is insufficient.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Idempotency keys</strong> make retries safe but add a lookup, storage, and a retention policy to every write path.</li><li><strong>Database-backed dedupe</strong> is durable and transactional but adds write latency and grows without bound.</li><li><strong>Cache-backed dedupe</strong> is fast and self-expiring but loses protection when entries are evicted or the cache fails.</li><li><strong>Unique constraints</strong> are race-proof but only apply when the business key has a natural uniqueness rule.</li><li><strong>Long dedupe windows</strong> catch late replays but increase storage and lookup cost.</li><li><strong>Short windows</strong> keep state small but let slow retries and backfills slip through.</li><li><strong>Exactly-once processing</strong> simplifies the consumer contract but costs transactions, latency, and platform coupling.</li><li><strong>Fail-closed dedupe checks</strong> prevent double charges but turn a dedupe-store outage into a write outage.</li><li><strong>Producer-assigned IDs</strong> make dedupe reliable but require coordination and discipline across services.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why do duplicates happen in a distributed system?</summary><div class="answer"><p>Because a client cannot distinguish a lost request from a lost response, so it retries. Queues guarantee at-least-once delivery, and consumers can crash after doing the work but before acknowledging. Duplicates are therefore expected, not exceptional.</p></div></details>
+<details><summary>2. What does idempotent mean?</summary><div class="answer"><p>Repeating the operation has the same effect as performing it once. Setting a status or upserting a record is naturally idempotent; incrementing a balance or sending an email is not.</p></div></details>
+<details><summary>3. How does an idempotency key work?</summary><div class="answer"><p>The client sends a unique key per logical operation and reuses it on retries. The server records the key with the operation's status and response, atomically with the effect. A retry finds the record and replays the stored response instead of running the work again.</p></div></details>
+<details><summary>4. What if the same key arrives with a different payload?</summary><div class="answer"><p>Reject it with a conflict error. The key identifies one logical operation; a different body means a client bug or misuse, and silently returning the old response would hide it.</p></div></details>
+<details><summary>5. Where should the dedupe record be written?</summary><div class="answer"><p>In the same transaction and the same database as the business effect when correctness matters. Otherwise a crash between the effect and the record creates a duplicate, and a crash between the record and the effect loses the request.</p></div></details>
+<details><summary>6. Is exactly-once delivery possible?</summary><div class="answer"><p>Not end-to-end over an unreliable network. Systems provide exactly-once processing effects by combining at-least-once delivery, idempotent producers, transactions, and deduplication at the sink. Say effectively-once and describe the mechanism.</p></div></details>
+<details><summary>7. How long should you keep deduplication records?</summary><div class="answer"><p>Longer than the maximum retry, redelivery, and replay horizon. That horizon comes from queue retention, client retry policy, and backfill practice. Then expire or archive to control storage.</p></div></details>
+<details><summary>8. How do you handle two concurrent retries?</summary><div class="answer"><p>Use an atomic insert with a unique constraint on the key. One request wins and proceeds; the other sees the existing in-progress or completed record and waits, rejects, or replays the result.</p></div></details>
+<details><summary>9. What is the difference between deduplication and idempotency?</summary><div class="answer"><p>Deduplication detects and drops repeats using stored identifiers. Idempotency makes the operation safe even if a repeat gets through. Idempotency is the stronger property; dedupe is one way to approximate it.</p></div></details>
+<details><summary>10. How do you deduplicate queue messages?</summary><div class="answer"><p>Give each message a stable producer-assigned ID, keep a processed table, and commit the ID in the same transaction as the side effect. Acknowledge only after commit, so redelivery is harmless.</p></div></details>
+<details><summary>11. What is a transactional outbox and why does it help?</summary><div class="answer"><p>It writes the event to an outbox table in the same local transaction as the state change, then publishes from the outbox. That avoids the gap where the database commits but the event is never sent, and it makes retries safe.</p></div></details>
+<details><summary>12. How do you stop duplicate emails or third-party charges?</summary><div class="answer"><p>Pass an idempotency key to the downstream provider when it supports one, and record the send attempt locally with its own key. For email, a dedupe table keyed by event plus recipient is usually enough.</p></div></details>
+<details><summary>13. What would you monitor?</summary><div class="answer"><p>Duplicate detection rate by source, unique-constraint violations, dedupe-store size and eviction, retry rate, and consumer redelivery counts. A sudden rise points to timeouts, crashes, or a retry storm upstream.</p></div></details>
+<details><summary>14. When is deduplication unnecessary?</summary><div class="answer"><p>For read-only or naturally idempotent operations, or when duplicates are harmless and cheap. Adding a key store to every write has real cost, so match the mechanism to the value at risk.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Checking for a duplicate and then writing in two separate steps, leaving a race between concurrent retries.</li><li>Recording the idempotency key outside the transaction that performs the effect.</li><li>Deduplicating only at the API and forgetting queue redelivery and replays.</li><li>Using a client-generated key that changes on every retry, which defeats the whole mechanism.</li><li>Claiming exactly-once delivery instead of explaining effectively-once processing.</li><li>Expiring dedupe records before the maximum retry or backfill window has passed.</li><li>Keying deduplication on message ID only when the same business event can arrive with two different IDs.</li><li>Returning a cached success for a reused key whose payload has changed.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="surviving-component-failures.html"><span>← Previous</span><strong>Surviving Component Failures</strong></a><a class="next" href="running-across-regions.html"><span>Next →</span><strong>Running Across Multiple Regions</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/deduplicating-data">AlgoMaster — Preventing Duplicate Processing</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

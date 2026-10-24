@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Search and Typeahead — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 22 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · Specialized</span></div>
+    <h1>Search and Typeahead</h1>
+    <p class="dek">Search tests whether you understand inverted indexes, relevance, and the difference between a cold analytical query and a hot low-latency suggestion path. Typeahead adds a second workload with a much tighter budget and a much higher request rate.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Keep the transactional database as the source of truth, build a sharded inverted index for ranked search, and serve typeahead from cached prefix top-k with debouncing and a separate latency budget.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Full-text search over documents with ranked results, highlighting, filters, and facets.</li><li>Prefix suggestions for typeahead, ranked by popularity, recency, and context.</li><li>Near-real-time indexing of creates, updates, deletes, and permission changes.</li><li>Tolerate typos and synonyms without silently rewriting high-confidence queries.</li><li>Rebuild the index from the source of truth and swap it atomically.</li><li>Degrade to partial results or a safe fallback when a shard or the cluster is unhealthy.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Search p95 target around 200 ms and typeahead p99 under 100 ms, measured as separate budgets.</li><li>Typeahead absorbs a much higher query rate than full search and must never block the search box.</li><li>Index lag is bounded and monitored; discovery tolerates seconds of staleness, permission changes do not.</li><li>Relevance is evaluated offline with NDCG and online with click-through and zero-result rate.</li><li>A failed shard returns partial results with a degraded signal rather than a 500 for the whole query.</li><li>The index is a derived view that can be rebuilt without losing source data.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 50M documents at 2 KB each: 100 GB of raw text before index overhead, positions, doc values, and replicas.</li><li>Assume 5k search QPS and 50k typeahead QPS at peak, so typeahead is ten times the traffic and needs its own capacity.</li><li>Twenty document shards with two replicas means 40 index copies to store, operate, and reindex.</li><li>A query fans out to all 20 shards, so p99 is set by the slowest shard unless requests are hedged or timed out.</li><li>Cache the top 100k prefixes; the head of the query distribution is small and highly repetitive.</li><li>Assume 500 document writes/s; a ten-second visibility target sets the indexing pipeline's throughput and queue-depth budget.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Document</span><span class="fields">doc_id, tenant_id, title, body, tags, updated_at, version, acl</span></div><div class="entity"><span class="name">Posting</span><span class="fields">term, doc_id, frequency, positions</span></div><div class="entity"><span class="name">Suggestion</span><span class="fields">prefix, top_queries, top_docs, score, refreshed_at</span></div><div class="entity"><span class="name">IndexShard</span><span class="fields">shard_id, doc_range, replica_of, segment_count, lag_ms</span></div><div class="entity"><span class="name">QueryLog</span><span class="fields">query_id, user_id, normalized_query, filters, clicked_doc, latency_ms</span></div><div class="entity"><span class="name">SynonymRule</span><span class="fields">term, synonyms, locale, status</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/v1/search?q=...&filter=...&cursor=...</code></td><td>Return ranked results, facets, and a cursor for the next page.</td></tr><tr><td><code>GET</code></td><td><code>/v1/suggest?prefix=...&limit=8</code></td><td>Return typeahead suggestions within a strict low-latency budget.</td></tr><tr><td><code>GET</code></td><td><code>/v1/documents/{id}</code></td><td>Fetch the source-of-truth document for detail or a read-time permission check.</td></tr><tr><td><code>POST</code></td><td><code>/internal/v1/index/events</code></td><td>Apply idempotent, versioned index updates from the change stream.</td></tr><tr><td><code>POST</code></td><td><code>/internal/v1/index/rebuild</code></td><td>Build a new index from the source of truth and swap an alias.</td></tr><tr><td><code>GET</code></td><td><code>/internal/v1/index/health</code></td><td>Report shard lag, merge pressure, and document-count drift.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Core index structure</td><td>An inverted index mapping each analyzed term to posting lists with document IDs, frequencies, and positions</td><td>Queries look up only their terms and intersect posting lists instead of scanning every document, and positions enable phrase queries and highlighting.</td></tr><tr><td>Text analysis</td><td>Unicode normalization, lowercasing, stemming, and curated synonyms, with the same analyzer at index and query time</td><td>Matching depends on both sides producing the same normalized terms, and richer analysis trades precision and CPU for recall.</td></tr><tr><td>Index sharding</td><td>Partition by document ID; each query fans out to all shards and merges top-k results</td><td>Multi-term queries stay local to a shard, and scoring is comparable across shards, at the cost of tail latency from the slowest shard.</td></tr><tr><td>Typeahead storage</td><td>Precomputed top-k suggestions per prefix in a KV cache, with a trie or finite-state transducer fallback for long-tail prefixes</td><td>Most suggestions are served without traversing an index, and the fallback keeps rare prefixes useful without precomputing every string.</td></tr><tr><td>Ingestion path</td><td>Database plus outbox or change stream feeding idempotent, versioned indexing workers; full rebuild behind an alias swap</td><td>The transactional store remains the source of truth, retries cannot duplicate documents, and a bad mapping can be replaced without downtime.</td></tr><tr><td>Ranking</td><td>Retrieve candidates with the inverted index, score with BM25 and field boosts, then rerank the top candidates with popularity, recency, and business signals</td><td>Cheap lexical retrieval keeps recall high, while expensive signals only run on a small candidate set.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  U[📱 User] --> CDN[🌐 Edge Cache]
+  CDN --> API[🛡️ Search API]
+  API --> S[🔎 Search Service]
+  API --> T[⚡ Typeahead Service]
+  S --> SH[📚 Index Shards]
+  T --> P[🌲 Prefix Cache]
+  P --> SH
+  DB[(🗄️ Source DB)] --> O[📬 Outbox and CDC]
+  O --> W[👷 Index Worker]
+  W --> SH
+  W --> P
+  L[📊 Query Logs] --> T
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef service fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef data fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef ops fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class U client;
+  class CDN,API,P edge;
+  class S,T,W service;
+  class SH,DB data;
+  class O,L ops;</div><div class="diagram-caption">Search and typeahead have separate services and budgets but share derived indexes, which are fed from the source database through an outbox and idempotent indexing workers.</div></div>
+        <ul><li>Search is a derived read model: the transactional database owns truth, and the index can be rebuilt from it.</li><li>Analyzer choice is part of the contract; index-time and query-time analysis must match or terms will not line up.</li><li>Typeahead is a separate service with its own cluster, cache, and latency budget so a search outage does not break the search box.</li><li>Deletes and permission changes propagate at higher priority than creates, because a stale index can leak content.</li><li>Use aliases for blue-green reindexing and verify document counts and relevance before switching traffic.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Dedicated search index instead of database queries</td><td>Relevance ranking, tokenization, facets, and fast free-text matching.</td><td>A second data store to operate and keep in sync with the source of truth.</td></tr><tr><td>Near-real-time indexing</td><td>New and updated documents become searchable within seconds.</td><td>More segment merges, lower indexing throughput, and visible index lag.</td></tr><tr><td>More shards</td><td>More parallelism and isolation for large corpora.</td><td>Higher fan-out, worse tail latency, and expensive resharding later.</td></tr><tr><td>More replicas</td><td>More query throughput and availability during a node loss.</td><td>More storage and multiplied indexing work.</td></tr><tr><td>Precomputed typeahead lists</td><td>Very low latency for the hot prefix head.</td><td>Memory footprint and staleness as query popularity shifts.</td></tr><tr><td>Fuzzy matching and synonyms</td><td>Higher recall for typos and alternate wording.</td><td>Lower precision, more candidate work, and surprising matches if not curated.</td></tr><tr><td>Partial results on shard failure</td><td>The query still returns something instead of failing entirely.</td><td>Relevant documents can be silently missing, so the degraded state must be signalled.</td></tr><tr><td>Aggressive result caching</td><td>Protects the cluster from repeated head queries.</td><td>Stale results and invalidation bugs when filters, permissions, or inventory change.</td></tr></tbody></table></div>
+        <ul><li>Cache the head of the query distribution at the edge with normalized keys and short TTLs for volatile results.</li><li>Precompute top-k suggestions per prefix and refresh them on a schedule, falling back to lexical completion for rare prefixes.</li><li>Debounce on the client, require a minimum prefix length, and cancel stale in-flight requests.</li><li>Fetch limit plus one candidate per shard, merge top-k, and hedge or time out slow shards.</li><li>Bulk-index in batches and throttle segment merges so indexing does not destroy search latency.</li><li>Use request coalescing and circuit breakers so a hot cache miss or retry storm does not stampede the cluster.</li><li>Return partial results with a degraded flag when a shard is unavailable.</li><li>Monitor zero-result rate and first-click rank, not just latency.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why not just use a SQL LIKE query for search?</strong> A leading-wildcard LIKE cannot use a normal index and cannot rank by relevance, and it lacks tokenization, synonyms, phrase proximity, and facet aggregation.</div><div class="followup"><strong>What is an inverted index and why is it fast?</strong> It maps each analyzed term to a posting list of documents and positions, so a query intersects only the terms it contains instead of scanning every document.</div><div class="followup"><strong>How do you keep the search index in sync with the database?</strong> Write to the database as the source of truth, publish changes through an outbox or change stream, and apply idempotent versioned updates with a rebuild and reconcile path.</div><div class="followup"><strong>How do you handle a document update arriving out of order?</strong> Attach a monotonically increasing version or timestamp and reject older writes so retries stay idempotent and stale updates cannot overwrite newer ones.</div><div class="followup"><strong>How does ranking work?</strong> Retrieve candidates with the inverted index, score them with BM25 and field boosts, then rerank the top candidates with popularity, recency, and business rules.</div><div class="followup"><strong>Why is search eventually consistent, and is that acceptable?</strong> Indexing is asynchronous and search engines refresh in batches, which discovery tolerates, but a user's own new listing or a permission revocation needs a source-of-truth read.</div><div class="followup"><strong>How would you design typeahead?</strong> Precompute or cache top-k completions per prefix, rank and filter them, debounce on the client, and run the service separately from full search.</div><div class="followup"><strong>How do you scale a search index?</strong> Partition documents across shards, add replicas for query throughput, fan out each query, merge top results, and plan shard count for future growth.</div><div class="followup"><strong>What is the tail-latency problem in search?</strong> Every query waits for every shard, so the slowest shard sets latency; hedge, time out, or return partial results to bound it.</div><div class="followup"><strong>How do you deploy a new analyzer or schema?</strong> Build a new index with the new mapping, backfill from the source of truth, verify counts and relevance, then switch an alias atomically.</div><div class="followup"><strong>How do you prevent a stale index from leaking deleted content?</strong> Propagate deletes and permission changes at high priority, keep tombstones until physical removal, and enforce authorization at read time.</div><div class="followup"><strong>When would you not use a dedicated search engine?</strong> When the corpus is small, queries are exact or simple prefix matches, and the database can meet the latency budget without a second store to synchronize.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Treating the search index as the source of truth and losing data when it is rebuilt.</li><li>Using LIKE with a leading wildcard and calling it search.</li><li>Mismatching the analyzer at index time and query time so terms never line up.</li><li>Ignoring index lag and then wondering why newly created records are missing.</li><li>Putting typeahead on the full search path with no cache, debounce, or separate budget.</li><li>Letting one slow shard determine the latency of every query through unbounded scatter-gather.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="api-pagination-versioning.html"><span>← Previous</span><strong>API Pagination and Versioning</strong></a><a class="next" href="jwt-vs-sessions.html"><span>Next →</span><strong>JWT vs Server-side Sessions</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

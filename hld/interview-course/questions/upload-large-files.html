@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Upload and Serve Large Files — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 16 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · Content</span></div>
+    <h1>Upload and Serve Large Files</h1>
+    <p class="dek">It tests one instinct that separates a working design from a fragile one: file bytes should never flow through the application tier, and the hard parts are resumability, integrity, and delivery cost.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Authorize the transfer with a short-lived presigned URL, upload directly to object storage in resumable parts, verify checksums before the file becomes visible, process asynchronously, and serve through a CDN with range support.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Upload files from web and mobile, from a few megabytes up to several gigabytes.</li><li>Resume an interrupted upload from the last completed part instead of restarting.</li><li>Verify size and checksum and reject corrupt or truncated objects.</li><li>Serve downloads quickly and let clients seek or resume partial downloads.</li><li>Generate derived artifacts such as thumbnails, previews, and transcoded renditions.</li><li>List, delete, and share files with scoped access.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>No file bytes pass through application servers; app capacity stays independent of file size.</li><li>Upload survives flaky mobile networks with only failed parts retried.</li><li>A file is never visible to readers before verification and processing complete.</li><li>Download p99 is low and mostly served from edge caches; origin egress is a small fraction.</li><li>Storage is durable and private by default, with access granted per file and per user.</li><li>Cost is bounded by retention rules, lifecycle policies, and cleanup of abandoned uploads.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 10M uploads per day at 20 MB average, about 200 TB per day of ingress, with a peak near 200 MB per second.</li><li>Assume 1M downloads per day at 50 MB average, about 50 TB per day of egress; a 95 percent CDN hit ratio leaves roughly 2.5 TB per day from origin.</li><li>With 8 to 16 MB parts, a 5 GB file is roughly 320 to 640 parts, which is small enough to track per part and large enough to limit overhead.</li><li>A presigned URL TTL of 15 minutes and an upload session TTL of 24 hours balance leakage risk against slow mobile uploads.</li><li>Metadata is about 1 KB per file, so 10M uploads per day is roughly 10 GB of rows, negligible next to the bytes.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">FileObject</span><span class="fields">file_id, owner_id, object_key, size, content_type, checksum, version, status</span></div><div class="entity"><span class="name">UploadSession</span><span class="fields">upload_id, file_id, expected_size, part_size, parts_done, expires_at</span></div><div class="entity"><span class="name">FilePart</span><span class="fields">upload_id, part_no, etag, size, checksum, uploaded_at</span></div><div class="entity"><span class="name">Variant</span><span class="fields">file_id, version, kind (thumb, 720p), object_key, status</span></div><div class="entity"><span class="name">ShareGrant</span><span class="fields">file_id, grantee_id, permission, token, expires_at</span></div><div class="entity"><span class="name">ProcessingJob</span><span class="fields">file_id, version, stage, attempts, started_at, status</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/files</code></td><td>Creates the file record and upload session, and returns a server-chosen object key plus presigned part URLs.</td></tr><tr><td><code>POST</code></td><td><code>/uploads/{upload_id}/parts</code></td><td>Returns a fresh presigned URL for one part, or records a part as completed after a client resume.</td></tr><tr><td><code>POST</code></td><td><code>/uploads/{upload_id}/complete</code></td><td>Idempotently completes the upload with the part list and whole-file checksum, then triggers verification.</td></tr><tr><td><code>GET</code></td><td><code>/files/{file_id}</code></td><td>Returns metadata plus a short-lived signed CDN URL for download or playback.</td></tr><tr><td><code>GET</code></td><td><code>/files/{file_id}/status</code></td><td>Reports pending, verified, processing, ready, or failed, so the client can poll or subscribe.</td></tr><tr><td><code>DELETE</code></td><td><code>/files/{file_id}</code></td><td>Soft-deletes metadata and schedules object and variant deletion by lifecycle policy.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Where the bytes live</td><td>Object storage keyed by an opaque id; only metadata in the relational database</td><td>Blobs and rows have completely different access patterns, sizes, and scaling limits, so separating them keeps both cheap.</td></tr><tr><td>Object key format</td><td>u/{owner_id}/f/{file_id}/v/{version}, generated by the server</td><td>A server-chosen key prevents a client from overwriting another user's object or attempting path traversal.</td></tr><tr><td>Upload state</td><td>A session row plus one row per part with etag and checksum, expired by a cleanup job</td><td>This is what makes resume possible and lets abandoned multipart uploads be aborted instead of billing silently.</td></tr><tr><td>Deduplication</td><td>Secondary index on content hash mapped to an existing object key</td><td>Identical files can share one object, cutting storage and upload work for common attachments and templates.</td></tr><tr><td>Visibility state machine</td><td>pending, uploaded, verified, processing, ready, failed, with readers allowed only on ready</td><td>Gating on state guarantees a partially uploaded or unscanned file is never served.</td></tr><tr><td>Cache keys for delivery</td><td>Versioned keys so each change produces a new URL, with long immutable cache headers</td><td>Immutable URLs give high CDN hit ratios without invalidation, and a changed file can never be served stale.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> A[⚙️ File API]
+  A --> M[🗄️ Metadata DB]
+  A -->|presigned URLs| C
+  C -->|bytes in parts| O[🪣 Object storage]
+  O -->|completion event| Q[📬 Processing queue]
+  Q --> W[👷 Workers: scan + transcode]
+  W --> O
+  W --> M
+  R[👀 Viewer] --> CDN[🌍 CDN edge]
+  CDN -->|cache miss| O
+  CDN --> R
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#6d3fc4,color:#17211f;
+  classDef queue fill:#ffe8ec,stroke:#b42342,color:#17211f;
+  classDef edge fill:#fff2d6,stroke:#b26a08,color:#17211f;
+  class C,R client;
+  class A,W svc;
+  class M,O store;
+  class Q queue;
+  class CDN edge;</div><div class="diagram-caption">The metadata path and the byte path are separate: the API only authorizes and records state, clients write parts straight to object storage, and readers are served from the CDN with storage as origin.</div></div>
+        <ul><li>Two paths, deliberately separated: small JSON requests on the API, large immutable byte streams on storage. This is what keeps app memory and request timeouts out of the picture.</li><li>A presigned URL is a bearer capability: it grants one operation on one key for a short time, so scope the key, method, expiry, content type, and size, and never log the full URL.</li><li>Completion is the gate. Verify size and checksum, keep the object in a pending state, then process asynchronously and only then mark it ready.</li><li>Downloads go through a CDN with signed URLs. Application servers issue the signature and never carry the bytes.</li><li>Failure modes to plan for: dropped parts, checksum mismatch, abandoned multipart uploads, stuck processing jobs, and a CDN rule that caches a private object.</li><li>Abuse and safety: validate content type, scan untrusted uploads before serving, enforce per-user quotas, and keep buckets private by default.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Direct-to-storage upload</td><td>App capacity is independent of file size and slow clients no longer hold worker slots</td><td>A two-step flow and a new place for key and permission mistakes</td></tr><tr><td>Presigned URLs</td><td>No long-lived credentials in browsers or apps, and no proxying through the API</td><td>The URL is a bearer token, so a leak is usable until expiry</td></tr><tr><td>Multipart upload</td><td>Parallel transfer and retry of only failed parts</td><td>Upload state, part bookkeeping, and orphan cleanup</td></tr><tr><td>Resumable sessions</td><td>Survives flaky mobile networks without restarting a multi-gigabyte transfer</td><td>Persistent session state and an idempotent completion path</td></tr><tr><td>Asynchronous processing</td><td>Fast uploads and isolated, retryable heavy work</td><td>The file is temporarily unavailable and the pipeline needs monitoring</td></tr><tr><td>CDN delivery with signed URLs</td><td>Low download latency and much less origin egress</td><td>Signing complexity, cache configuration risk, and egress cost</td></tr><tr><td>Keeping original plus variants</td><td>Flexibility to re-render and support many devices and formats</td><td>Storage multiplies, and every variant needs its own lifecycle</td></tr><tr><td>Content-addressed deduplication</td><td>One stored object for identical files and natural integrity checking</td><td>An extra lookup and careful reference counting before deletion</td></tr></tbody></table></div>
+        <ul><li>Move bytes off the app tier with presigned uploads scoped to a server-generated key and a short expiry.</li><li>Use multipart upload with 8 to 16 MB parts and bounded parallelism so only failed parts are retried.</li><li>Persist an upload session so a resumed client asks which parts are missing instead of restarting from zero.</li><li>Verify a checksum per part and for the whole file server-side before the object can become visible.</li><li>Run scanning, thumbnails, and transcoding from a queue so upload latency stays flat.</li><li>Cache immutable, versioned objects at the CDN for a long time and keep origin egress small.</li><li>Support HTTP range requests so video can seek and downloads can resume without refetching the whole object.</li><li>Abort incomplete multipart uploads and tier or expire cold objects with lifecycle rules.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why not upload large files through the application servers?</strong> It holds memory, worker slots, and connections for the whole transfer, hits gateway timeouts, and makes retries expensive, which is exactly what object storage is built to avoid.</div><div class="followup"><strong>How does a presigned URL work?</strong> The backend signs a URL that grants one operation on one object for a short time, so the client talks to storage directly and no credentials ever reach the client.</div><div class="followup"><strong>What do you scope in a presigned upload URL?</strong> The exact object key, the allowed method, a short expiry, and where supported the content type and maximum size, with the key always chosen by the server.</div><div class="followup"><strong>How do you make an upload resumable?</strong> Split the file into parts, record which parts succeeded in an upload session, and have the client query the session and send only the missing parts.</div><div class="followup"><strong>Multipart versus a single PUT?</strong> A single PUT restarts from zero on failure and cannot use bandwidth in parallel, while multipart retries only failed parts and lets storage assemble the object.</div><div class="followup"><strong>How do you verify integrity?</strong> Send a checksum per part and for the whole file, store and compare them server-side, and fail closed rather than marking a mismatched object ready.</div><div class="followup"><strong>What happens after the bytes land?</strong> Completion enqueues scanning, validation, thumbnails, and transcoding; the file stays pending until those succeed and the client polls or subscribes for status.</div><div class="followup"><strong>How do you serve downloads at scale?</strong> Authorize the user, return a short-lived signed CDN URL, and serve immutable versioned objects from the edge with storage as the origin.</div><div class="followup"><strong>What are range requests for?</strong> Fetching part of an object, which enables video seeking, resumable downloads, and parallel fetching, as long as partial responses and authorization are correct.</div><div class="followup"><strong>How do you keep private files private?</strong> Private buckets, per-file authorization at signing time, short-lived signed URLs, content scanning, and access logging rather than public objects.</div><div class="followup"><strong>How do you control storage and egress cost?</strong> Lifecycle-tier or expire cold objects, abort incomplete multipart uploads, deduplicate by content hash, cap versions, and watch egress since media traffic usually dominates.</div><div class="followup"><strong>How do you avoid showing a half-uploaded file?</strong> Keep it pending or quarantined, verify size and checksum, finish processing, and only then mark it ready and expose a URL.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Proxying file bytes through the application tier and then wondering why memory and timeouts spike.</li><li>Letting the client choose the object key, which allows overwriting another user's file.</li><li>Issuing presigned URLs with long expiries or permissions broader than one object and one method.</li><li>Treating a single large PUT as reliable on a mobile network.</li><li>Not tracking upload state, so every failure restarts from byte zero.</li><li>Marking a file ready before checksum verification and scanning complete, or caching private objects publicly.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="fanout-updates.html"><span>← Previous</span><strong>Fan Out Updates</strong></a><a class="next" href="realtime-protocols.html"><span>Next →</span><strong>WebSockets vs SSE vs Polling</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

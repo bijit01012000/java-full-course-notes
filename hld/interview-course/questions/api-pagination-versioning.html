@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Pagination and Versioning — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 21 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · APIs</span></div>
+    <h1>API Pagination and Versioning</h1>
+    <p class="dek">Pagination and versioning are where API design meets database behaviour and long-lived clients. Interviewers test whether you can keep a page stable under writes, avoid deep-offset scans, and evolve a contract without breaking callers.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">7 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Use signed keyset cursors over a stable sort key, keep responses additive within a major version, and deprecate old versions with telemetry and a published timeline.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>List resources with a bounded page size and an opaque cursor for the next page.</li><li>Keep ordering stable when rows are inserted, updated, or deleted between requests.</li><li>Allow filtering and a small set of approved sort orders, with the filters preserved across pages.</li><li>Expose a major API version and let old and new clients call concurrently.</li><li>Signal deprecation and sunset dates in responses and documentation.</li><li>Support deep exports without holding a database transaction open.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>A page request stays within the read latency budget regardless of how deep the cursor is.</li><li>A client walking pages sees no duplicates or skipped rows under normal concurrent writes.</li><li>Cursors are opaque, tamper-evident, and expiring, so a client cannot forge another tenant's position.</li><li>A new minor release is backward compatible; a breaking change requires a new major version.</li><li>At most two major versions are supported at once, with a defined deprecation window.</li><li>Reads are idempotent and safe to retry, and page tokens do not leak internal SQL or primary keys.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 50M orders and a page size of 50: one million pages if a client walks the whole set, so cursor cost matters.</li><li>An offset of 500,000 makes the database scan and discard 500,000 rows before returning 50, so deep offset cost grows with depth.</li><li>Assume 2k list requests/s at peak; a 50 ms p95 budget leaves little room for a COUNT star on every page.</li><li>Keep the default page at 25 to 50 items and cap limit at 100 so one client cannot request a 10k-row page.</li><li>Support at most two or three major versions; each extra version multiplies test, documentation, and on-call surface.</li><li>A six-to-twelve-month deprecation window is common for public APIs; internal APIs can move faster with coordinated clients.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Order</span><span class="fields">order_id, tenant_id, created_at, updated_at, status, version</span></div><div class="entity"><span class="name">CursorPayload</span><span class="fields">sort_key, id, direction, filter_hash, tenant_id, issued_at, signature</span></div><div class="entity"><span class="name">ApiVersion</span><span class="fields">major, status, released_at, sunset_at, changelog_url</span></div><div class="entity"><span class="name">ClientApplication</span><span class="fields">client_id, name, pinned_version, last_seen_at, owner</span></div><div class="entity"><span class="name">DeprecationNotice</span><span class="fields">version, announced_at, sunset_at, migration_guide, affected_clients</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/v1/orders?limit=50&cursor=...</code></td><td>Return a keyset page in the default order with a next cursor.</td></tr><tr><td><code>GET</code></td><td><code>/v1/orders?status=shipped&sort=-created_at&cursor=...</code></td><td>Return a filtered and sorted page while preserving those inputs across pages.</td></tr><tr><td><code>GET</code></td><td><code>/v1/orders/{id}</code></td><td>Fetch one resource using the same representation and compatibility rules as the list.</td></tr><tr><td><code>GET</code></td><td><code>/v2/orders</code></td><td>Serve the new major shape with renamed fields and richer status values.</td></tr><tr><td><code>GET</code></td><td><code>/v1/meta/versions</code></td><td>List supported versions, sunset dates, and changelog links.</td></tr><tr><td><code>POST</code></td><td><code>/v1/orders/export</code></td><td>Start an asynchronous export for deep or full scans without walking millions of pages.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Pagination strategy</td><td>Keyset cursor over created_at descending plus a unique id tiebreaker; offset only for small, bounded admin sets</td><td>Keyset pagination seeks directly into the index, so cost stays flat as the cursor deepens and inserts do not shift the page boundary.</td></tr><tr><td>Cursor encoding</td><td>Base64url JSON containing sort key, id, direction, filter hash, tenant, and issue time, signed with HMAC</td><td>The client treats the cursor as opaque, the server can validate it cheaply, and a forged or cross-tenant cursor is rejected.</td></tr><tr><td>Supporting index</td><td>Composite index on tenant_id, created_at descending, and id descending, with filter columns as needed</td><td>The database can satisfy the WHERE clause and ORDER BY with one range scan instead of sorting or filtering after reading rows.</td></tr><tr><td>Total count</td><td>Omit it by default; return an approximate or cached count only when the product requires it</td><td>A COUNT star over a large filtered set is often more expensive than the page itself and changes on every request.</td></tr><tr><td>Versioning surface</td><td>Major version in the path, additive changes only within a major; header or content negotiation for internal APIs</td><td>A path version is explicit, cache-friendly, and easy to route, while additive changes avoid forcing clients to migrate for every release.</td></tr><tr><td>Deprecation mechanics</td><td>Sunset and Deprecation response headers plus per-version telemetry keyed by client application</td><td>Operators need to know which clients still call an old version before removal, and clients need a machine-readable deadline.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> G[🛡️ API Gateway]
+  G --> V[🔀 Version Router]
+  V -->|/v1| S1[⚙️ Orders v1]
+  V -->|/v2| S2[⚙️ Orders v2]
+  S1 --> K[📄 Cursor Codec]
+  S2 --> K
+  K --> DB[(🗄️ Indexed DB)]
+  S1 --> T[📊 Version Telemetry]
+  V --> D[📣 Deprecation Registry]
+  D --> T
+  T --> O[👷 Migration Owner]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef service fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef data fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef ops fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class C client;
+  class G,V,K edge;
+  class S1,S2 service;
+  class DB data;
+  class T,D,O ops;</div><div class="diagram-caption">A version router sends each major version to its own handler, both handlers share a signed keyset cursor codec, and telemetry on the deprecation registry shows which clients still need migration.</div></div>
+        <ul><li>Paginate in the database, not in the application: fetch limit plus one row to learn whether a next page exists.</li><li>The cursor must encode every input that changes the result set, including filters and sort direction, or page two can silently use different rules.</li><li>Never expose raw primary keys or SQL offsets as the cursor; sign the payload and bind it to the tenant.</li><li>Version the contract, not the implementation: a new database column does not require a new API version if the response stays compatible.</li><li>Deprecation is an operational process: announce, measure, migrate, then remove, with a named owner and a date.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Keyset pagination instead of offset</td><td>Constant cost with depth and stable pages when rows are inserted.</td><td>No random jump to page N, and the cursor must encode the sort and filters.</td></tr><tr><td>Return total count with every page</td><td>The UI can show a total and a page count.</td><td>An expensive COUNT on every large filtered request.</td></tr><tr><td>Path versioning</td><td>Visible, cache-friendly, and easy to route at the gateway.</td><td>URL churn and duplicated routes for each major version.</td></tr><tr><td>Header versioning</td><td>Cleaner URLs and content negotiation.</td><td>Easier for clients to omit and harder to test, share, and route.</td></tr><tr><td>Long deprecation window</td><td>Client goodwill and time for coordinated migrations.</td><td>Parallel maintenance, duplicated tests, and a larger security surface.</td></tr><tr><td>Opaque signed cursor</td><td>Tamper resistance and freedom to change the internal query shape.</td><td>Harder debugging and a server-side codec on every page request.</td></tr><tr><td>Snapshot export for full scans</td><td>A consistent copy without millions of interactive page calls.</td><td>Storage, job infrastructure, and data that is already stale when it finishes.</td></tr></tbody></table></div>
+        <ul><li>Fetch limit plus one row and drop the extra row instead of running a separate count.</li><li>Match the index to the exact WHERE and ORDER BY so a cursor seek is a range scan.</li><li>Return only the fields the list screen needs and move heavy detail to the single-resource endpoint.</li><li>Cache the first page of popular filters for a short TTL and bypass the cache for deep cursors.</li><li>Use ETag and If-None-Match for unchanged pages and conditional single-resource reads.</li><li>Use an asynchronous export job for full scans instead of walking millions of pages synchronously.</li><li>Emit a per-version request metric and a Sunset header so migration progress is visible.</li><li>Cap limit, cursor age, and pages per client to protect the database from abusive walks.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why not use offset pagination?</strong> A deep offset scans and discards every skipped row, and concurrent inserts or deletes shift rows across page boundaries.</div><div class="followup"><strong>How do you prevent duplicates and skips?</strong> Seek on a stable sort key plus a unique tiebreaker, so each page starts after an exact position rather than a row count.</div><div class="followup"><strong>How do you encode the cursor?</strong> As an opaque, signed payload containing the sort key, id, direction, filter hash, tenant, and issue time.</div><div class="followup"><strong>How do you support multi-column sorting?</strong> Include every sort column plus a unique id in the cursor and create a composite index matching that order.</div><div class="followup"><strong>Can the client jump to page 100?</strong> Not with keyset pagination; offer filters or search, use offset for small bounded sets, or provide an export for deep scans.</div><div class="followup"><strong>How do you return a total count?</strong> Omit it by default and return an approximate or cached count only when the product needs it, never on every request.</div><div class="followup"><strong>Path versus header versioning?</strong> Path versions are explicit and cache-friendly for public APIs, while header versions keep URLs clean but are easier to omit and harder to route.</div><div class="followup"><strong>What counts as a breaking change?</strong> Removing or renaming a field, changing a type, tightening validation, or changing status-code semantics breaks existing clients.</div><div class="followup"><strong>How do you deprecate an API version safely?</strong> Announce a sunset date, add Deprecation and Sunset headers, measure per-version usage, migrate clients, then remove the version.</div><div class="followup"><strong>How do you test backward compatibility?</strong> Run contract tests against the published schema and replay recorded client requests in CI for every supported major version.</div><div class="followup"><strong>Should cursors expire?</strong> Yes, a short TTL bounds stale snapshots and the damage from a leaked token, and an expired cursor returns 400 with a restart hint.</div><div class="followup"><strong>How do you export the full dataset?</strong> Use a point-in-time snapshot or an asynchronous export job rather than millions of sequential page calls.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Using a large OFFSET and calling it scalable because the first page is fast.</li><li>Building the next cursor from the last row without a unique tiebreaker, so rows duplicate or vanish.</li><li>Letting the client send a sort or filter that is not encoded in the cursor, so page two silently changes shape.</li><li>Running COUNT star on every list request over a large filtered table.</li><li>Calling a field rename a minor change and breaking clients without a new major version.</li><li>Keeping five major versions alive with no owner, telemetry, or sunset date.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="consistent-hashing.html"><span>← Previous</span><strong>Consistent Hashing</strong></a><a class="next" href="search-typeahead.html"><span>Next →</span><strong>Search and Typeahead</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

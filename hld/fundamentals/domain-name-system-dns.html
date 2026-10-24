@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Domain Name System (DNS) — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 10 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Domain Name System (DNS)</h1>
+    <p class="dek">Networking · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/domain-name-system-dns">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What DNS does</a>
+<a href="#s2">The DNS hierarchy</a>
+<a href="#s3">How DNS resolution works</a>
+<a href="#s4">Recursive vs iterative queries</a>
+<a href="#s5">DNS caching</a>
+<a href="#s6">TTL trade-offs</a>
+<a href="#s7">Common DNS record types</a>
+<a href="#s8">DNS propagation and record changes</a>
+<a href="#s9">Transport, response size, and encryption</a>
+<a href="#s10">Failure modes and response codes</a>
+<a href="#s11">DNS in system design</a>
+<a href="#s12">What to remember</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>DNS is the internet's hierarchical, heavily cached naming system: it turns a domain name into the records a client needs, and its TTLs decide how quickly a change can reach everyone.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>DNS</dt><dd>Domain Name System: a distributed hierarchy of name servers that maps names to records such as IP addresses.</dd></div><div class="term"><dt>Recursive resolver</dt><dd>The server that does the walking for the client: it queries root, TLD, and authoritative servers and returns one final answer.</dd></div><div class="term"><dt>Authoritative name server</dt><dd>The server that holds the real records for a zone and answers from its own configuration rather than from cache.</dd></div><div class="term"><dt>Delegation</dt><dd>A parent zone handing responsibility for a child zone to a specific set of name servers via NS records.</dd></div><div class="term"><dt>Zone</dt><dd>The portion of the namespace a single authority manages, for example <code>example.com</code> or <code>api.example.com</code>.</dd></div><div class="term"><dt>TTL</dt><dd>Time To Live: the number of seconds a resolver may reuse a cached record before it must fetch a fresh copy.</dd></div><div class="term"><dt>A / AAAA record</dt><dd>The records that map a name to an IPv4 address (A) or an IPv6 address (AAAA).</dd></div><div class="term"><dt>CNAME record</dt><dd>An alias that points one name at another name, so the target's records are followed instead of storing an address.</dd></div><div class="term"><dt>Negative caching</dt><dd>Caching the fact that a name or record type does not exist, so repeated failures do not re-query the authority.</dd></div><div class="term"><dt>Anycast</dt><dd>Announcing the same resolver or root address from many locations so queries land at a nearby instance.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What DNS does</h2>
+<p class="lede">Every connection begins with a lookup: the client has a name, but the network needs an address.</p>
+<ul><li>DNS translates a <strong>human-readable name</strong> such as <code>api.example.com</code> into the records a client needs, usually an IPv4 or IPv6 address.</li><li>It is a <strong>distributed directory</strong>, not one central database: each zone is served by its own authoritative name servers.</li><li>The name is a stable <strong>indirection layer</strong>; the address behind it can change without any client changing configuration.</li><li>That indirection is what makes blue-green deploys, regional failover, and CDN steering possible.</li><li>DNS answers are <strong>cached</strong>, so what a client sees can lag the authoritative record by up to one TTL.</li><li>DNS serves more than web traffic: mail routing (MX), service location (SRV), and ownership or policy metadata (TXT) all live here.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The DNS hierarchy</h2>
+<p class="lede">DNS is organized as a tree of delegations, and each level only needs to know where the next level lives.</p>
+<ul><li>The <strong>root</strong> sits at the top and refers queries for a TLD to that TLD's servers.</li><li>Below it are the <strong>top-level domains</strong> such as <code>.com</code>, <code>.org</code>, and <code>.io</code>.</li><li>Below the TLD is the registered domain, such as <code>example.com</code>.</li><li>Below that are subdomains such as <code>api.example.com</code> or <code>blog.example.com</code>.</li><li>Each level is responsible only for <strong>pointing at the next level</strong>, which is why no single server holds every record.</li><li>Root servers do not know the address of every website; they know which servers are authoritative for each TLD.</li><li>The <code>.com</code> servers do not know your address either; they know which name servers are authoritative for your domain.</li><li>Only the <strong>authoritative name servers</strong> for a zone hold its actual records.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Level</th><th>Example</th><th>Responsibility</th></tr></thead><tbody><tr><td>Root</td><td>.</td><td>Refers queries to the correct TLD servers</td></tr>
+<tr><td>TLD</td><td>.com, .io</td><td>Refers queries to a domain's authoritative name servers</td></tr>
+<tr><td>Domain</td><td>example.com</td><td>Holds records for the domain and its subdomains</td></tr>
+<tr><td>Subdomain</td><td>api.example.com</td><td>Either a record in the parent zone or its own delegated zone</td></tr></tbody></table></div>
+
+<div class="note">This hierarchy is why DNS can scale to billions of names without a central database: work is delegated and repeated lookups are cached.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>How DNS resolution works</h2>
+<p class="lede">A cold lookup walks the tree from the client's caches down to the authoritative server and back.</p>
+<ul><li>The <strong>browser cache</strong> is checked first, keyed by hostname.</li><li>On a miss, the <strong>operating system</strong> checks its own cache and the local hosts file.</li><li>On another miss, the query goes to a <strong>recursive resolver</strong>, usually the ISP's or a public resolver.</li><li>The resolver asks a <strong>root server</strong>, which returns a referral to the relevant TLD servers.</li><li>The resolver asks the <strong>TLD server</strong>, which returns a referral to the domain's authoritative name servers.</li><li>The resolver asks the <strong>authoritative server</strong>, which returns the actual record with its TTL.</li><li>The answer is cached at each layer on the way back, so the next lookup is usually a cache hit.</li><li>Only after the address is known does the client open a TCP or QUIC connection to the server.</li></ul>
+
+<div class="flow"><span class="flow-step">Browser cache lookup</span><span class="flow-arrow">→</span><span class="flow-step">OS cache / hosts file lookup</span><span class="flow-arrow">→</span><span class="flow-step">Recursive resolver cache lookup</span><span class="flow-arrow">→</span><span class="flow-step">Root server: referral to the TLD</span><span class="flow-arrow">→</span><span class="flow-step">TLD server: referral to the authoritative name servers</span><span class="flow-arrow">→</span><span class="flow-step">Authoritative server: the actual record plus TTL</span><span class="flow-arrow">→</span><span class="flow-step">Answer cached and returned to the client</span><span class="flow-arrow">→</span><span class="flow-step">Client connects to the resolved address</span></div>
+<div class="note">A lookup is on the critical path of the first request. Every missed cache layer adds a network round trip before any application data moves.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Recursive vs iterative queries</h2>
+<p class="lede">The two query styles split the work differently: one asks for the final answer, the other asks for the next lead.</p>
+<ul><li><strong>Recursive</strong> means "find the final answer for me"; the server must resolve or return an error.</li><li><strong>Iterative</strong> means "tell me what you know, or point me at the next server to ask".</li><li>The <strong>client sends a recursive query</strong> to its resolver; it does not want to contact root, TLD, and authoritative servers itself.</li><li>The <strong>resolver performs iterative queries</strong>, walking root, TLD, and authoritative servers in turn.</li><li>The resolver then returns the single final answer to the client, hiding the walk.</li><li>Recursive resolvers therefore carry the caching and the query volume, which is why they are the main scaling point of DNS.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Query type</th><th>Who sends it</th><th>Behavior</th></tr></thead><tbody><tr><td>Recursive</td><td>Client to recursive resolver</td><td>"Find the final answer for me."</td></tr>
+<tr><td>Iterative</td><td>Resolver to root, TLD, and authoritative servers</td><td>"Tell me what you know, or point me to the next server."</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>DNS caching</h2>
+<p class="lede">Without caching, every request would repeat the full walk through root, TLD, and authoritative servers.</p>
+<ul><li>Caching happens at several layers: the <strong>browser</strong>, the <strong>operating system</strong>, and the <strong>recursive resolver</strong>.</li><li>A resolver cache is <strong>shared by many users</strong>, so one lookup can serve a large population.</li><li>A hundred clients behind the same resolver can collapse into <strong>one query</strong> to the authoritative server.</li><li>Caching makes lookups fast and keeps traffic off authoritative servers, which is what lets them stay small.</li><li>Each record carries a <strong>TTL</strong>; the cache may reuse it only until that timer expires.</li><li>When the entry expires, the next lookup fetches a fresh copy, so the cache is never authoritative.</li><li>Cached data is invisible to the operator: you cannot purge a public resolver's cache, only wait it out.</li></ul>
+
+
+<div class="note">Cache expiry is the reason "DNS propagation" is mostly a waiting game rather than an active push.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>TTL trade-offs</h2>
+<p class="lede">TTL is the single knob that trades caching efficiency against how fast a change takes effect.</p>
+<ul><li>A <strong>long TTL</strong> raises hit rates, cuts DNS traffic, and usually makes lookups faster.</li><li>A <strong>short TTL</strong> makes changes visible sooner, which helps failover and traffic shifting.</li><li>Short TTLs mean more queries reach authoritative servers and more chances for a lookup to fail.</li><li>Long TTLs mean a bad or stale record can keep serving traffic long after you fixed it.</li><li>Values in the range of tens of seconds to a few minutes are used for records that may need to move quickly.</li><li>Values of an hour or more are used for stable records where lookup cost matters more than flexibility.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>TTL range</th><th>Behavior</th><th>Trade-off</th></tr></thead><tbody><tr><td>30-60 seconds</td><td>Changes take effect quickly</td><td>Many more lookups reach DNS servers</td></tr>
+<tr><td>300-600 seconds</td><td>A common default for many services</td><td>Changes take a few minutes to appear</td></tr>
+<tr><td>3600+ seconds</td><td>High cache hit rate, low DNS traffic</td><td>Old answers can linger for hours</td></tr></tbody></table></div>
+
+<div class="note">Pick TTL per record: stable infrastructure can be cached for a long time; a record used for failover should be short well before you need to fail over.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Common DNS record types</h2>
+<ul><li><strong>A</strong> maps a name to an IPv4 address; <strong>AAAA</strong> does the same for IPv6.</li><li><strong>CNAME</strong> maps a name to another name, so the target's records are used and follow its changes.</li><li><strong>NS</strong> names the authoritative name servers for a zone and is the mechanism behind delegation.</li><li><strong>MX</strong> names the mail servers that receive email for the domain, with a preference value.</li><li><strong>TXT</strong> stores arbitrary text, widely used for domain verification, SPF, and policy metadata.</li><li><strong>SOA</strong> describes the zone itself: its primary server, contact, and the timers used for negative caching.</li><li>Each record type has its own TTL, so you can keep addresses short-lived while leaving mail records stable.</li></ul>
+<h3>CNAME rules that bite</h3>
+<ul><li>A CNAME cannot coexist with other records at the same name, because the name must resolve to exactly one target.</li><li>The zone apex normally holds NS and SOA records, so it usually cannot be a CNAME; use a provider-specific alias or flattening feature.</li><li>Aliasing many hostnames to one target means one address change updates all of them at once.</li><li>Long CNAME chains add lookups and make failures harder to trace; keep them one hop where possible.</li></ul>
+
+
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Value</th><th>Purpose</th></tr></thead><tbody><tr><td>example.com</td><td>A</td><td>203.0.113.10</td><td>IPv4 address</td></tr>
+<tr><td>example.com</td><td>AAAA</td><td>2001:db8::10</td><td>IPv6 address</td></tr>
+<tr><td>www.example.com</td><td>CNAME</td><td>example.com</td><td>Alias to another name</td></tr>
+<tr><td>example.com</td><td>NS</td><td>ns1.example.com</td><td>Authoritative name server</td></tr>
+<tr><td>example.com</td><td>MX</td><td>10 mail.example.com</td><td>Mail server with preference</td></tr>
+<tr><td>example.com</td><td>TXT</td><td>"v=spf1 -all"</td><td>Policy / verification text</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>DNS propagation and record changes</h2>
+<p class="lede">When you change a record, the new value does not appear everywhere at once.</p>
+<ul><li>What people call <strong>propagation</strong> is mostly <strong>cache expiration</strong>; nothing pushes the new value to resolvers.</li><li>Resolvers with no cached copy see the new value immediately.</li><li>Resolvers still holding the old record keep answering with it until that record's TTL runs out.</li><li>For a period, different users legitimately receive different answers for the same name.</li><li>Before a planned migration, <strong>lower the TTL first</strong>, wait for the old longer TTL to expire, then change the record.</li><li>Waiting matters: lowering the TTL only affects new cache entries, not copies already stored with the old TTL.</li><li>After the change stabilizes, raise the TTL again so normal traffic is cheap to serve.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Resolver state</th><th>Answer right after the change</th></tr></thead><tbody><tr><td>No cached entry</td><td>New value</td></tr>
+<tr><td>Cached old value, TTL still running</td><td>Old value</td></tr>
+<tr><td>Cached old value, TTL expired</td><td>New value after a fresh lookup</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Lower the TTL well before the change</span><span class="flow-arrow">→</span><span class="flow-step">Wait at least the previous TTL</span><span class="flow-arrow">→</span><span class="flow-step">Change the record</span><span class="flow-arrow">→</span><span class="flow-step">Monitor queries until old answers disappear</span><span class="flow-arrow">→</span><span class="flow-step">Raise the TTL back to normal</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Transport, response size, and encryption</h2>
+<ul><li>DNS conventionally uses <strong>UDP port 53</strong>, because a small query and answer fit in one datagram with no handshake.</li><li>It falls back to <strong>TCP port 53</strong> when an answer is too large or when the client sets the truncated flag.</li><li>TCP is also required for zone transfers between primary and secondary name servers.</li><li>EDNS(0) advertises a larger UDP buffer so large answers do not immediately force a TCP retry.</li><li><strong>DNS over TLS</strong> and <strong>DNS over HTTPS</strong> encrypt the lookup path and hide it from the local network.</li><li><strong>DNS over QUIC</strong> applies the same idea over UDP with stream multiplexing.</li><li>Encrypted DNS protects the query in transit but does not change caching, delegation, or TTL behavior.</li></ul>
+
+
+<div class="note"><strong>Anycast</strong> lets many physical resolver instances share one address, so a query is routed to a nearby instance and DDoS traffic is spread across the footprint.</div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Failure modes and response codes</h2>
+<ul><li><strong>NXDOMAIN</strong> means the name does not exist; <strong>NODATA</strong> means the name exists but has no record of that type.</li><li>Negative answers are cached too, using the zone's SOA minimum, so a typo can stay broken after you fix it.</li><li><strong>SERVFAIL</strong> means the resolver could not get a usable answer: broken delegation, unreachable authority, or DNSSEC validation failure.</li><li>A <strong>lame delegation</strong> points at a name server that is not actually authoritative for the zone, producing timeouts and SERVFAIL.</li><li>Because DNS precedes every connection, a resolver outage looks like a total outage of everything downstream.</li><li>Clients and libraries cache independently, so two processes on one host can disagree about an address.</li><li>A dangling CNAME or forgotten subdomain can be claimed by someone else and served under your domain.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>DNS in system design</h2>
+<ul><li><strong>Round-robin</strong> A records spread clients across addresses, but DNS has no idea which backend is healthy or busy.</li><li><strong>Weighted</strong> record sets shift a share of traffic, which is useful for canaries and gradual migrations.</li><li><strong>Health-checked failover</strong> DNS removes a failed endpoint, but only after the record's TTL and the health-check interval.</li><li><strong>Geo-steering</strong> returns a regional endpoint so users connect to a nearer point of presence.</li><li><strong>SRV records</strong> advertise host and port for service discovery, used by protocols that support them.</li><li><strong>Split-horizon</strong> DNS returns internal addresses to internal clients and public addresses to everyone else.</li><li>DNS is a coarse routing signal: it decides which address a client learns, not which instance handles each request.</li></ul>
+
+
+<div class="note">For fast failover, pair a short TTL with an actual load balancer or anycast layer. DNS alone keeps sending some clients to the dead address until their caches expire.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>What to remember</h2>
+<ul><li>DNS is a hierarchy of delegations: root to TLD to authoritative, with each level only pointing at the next.</li><li>Clients send one recursive query; the resolver performs the iterative walk.</li><li>Caching at browser, OS, and resolver is what makes DNS fast and authoritative servers small.</li><li>TTL is the trade-off between cache efficiency and how fast a change can take effect.</li><li>Record types describe intent: A/AAAA for addresses, CNAME for aliases, NS for delegation, MX for mail, TXT for metadata.</li><li>Changes are not pushed; they appear as caches expire, so lower the TTL before a planned move.</li><li>DNS is a dependency of everything else, so treat resolver availability and record correctness as production concerns.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Long TTLs</strong> improve cache hit rate and reduce DNS traffic but keep stale or wrong answers alive for longer after a change.</li><li><strong>Short TTLs</strong> make failover and migrations fast but increase lookup volume and expose clients to more resolver failures.</li><li><strong>A hierarchical delegation</strong> lets DNS scale to billions of names but makes a single broken delegation break an entire zone.</li><li><strong>Resolver caching</strong> cuts latency and authoritative load but removes the operator's ability to force an immediate update.</li><li><strong>DNS-based load balancing</strong> is simple and globally distributed but blind to backend health, load, and connection state.</li><li><strong>CNAME aliases</strong> centralize address changes but add a lookup hop, cannot coexist with other records, and are awkward at the zone apex.</li><li><strong>Encrypted DNS</strong> protects queries from local observers but adds setup cost and can bypass enterprise or parental controls.</li><li><strong>Aggressive negative caching</strong> protects authoritative servers from repeated bad lookups but makes a fixed typo linger for users.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does DNS solve?</summary><div class="answer"><p>It maps stable human-readable names to the addresses and records clients need. That indirection lets the address behind a name change — for a deploy, a failover, or a CDN — without clients changing anything.</p></div></details>
+<details><summary>2. Walk me through resolving <code>example.com</code> with empty caches.</summary><div class="answer"><p>The browser checks its cache, then the OS checks its cache and hosts file. The OS sends a recursive query to a resolver, which asks a root server for <code>.com</code>, asks the <code>.com</code> servers for <code>example.com</code>'s name servers, then asks those authoritative servers for the record. The answer comes back with a TTL and is cached at each layer before the client connects.</p></div></details>
+<details><summary>3. Recursive versus iterative query — what is the difference?</summary><div class="answer"><p>A recursive query asks a server to produce the final answer or an error. An iterative query asks for the best information the server has, typically a referral to the next server. Clients send recursive queries to resolvers; resolvers send iterative queries to root, TLD, and authoritative servers.</p></div></details>
+<details><summary>4. Why can root servers handle the load of the entire internet?</summary><div class="answer"><p>Because they only answer referrals for TLDs, not individual domains, and resolvers cache those referrals for a long time. Anycast spreads queries across many instances, so most traffic never reaches a single physical server.</p></div></details>
+<details><summary>5. What is a TTL and how do you choose one?</summary><div class="answer"><p>TTL is how long a cache may reuse a record. Choose it from how fast the record may need to change: stable infrastructure can use a long TTL, while records used for failover or migration should be short. Short TTLs cost more lookups and more exposure to resolver failures.</p></div></details>
+<details><summary>6. A teammate says DNS is propagating. What is actually happening?</summary><div class="answer"><p>Nothing is being pushed. Each resolver keeps answering from its cache until the record's TTL expires, then fetches the new value. Until then, different users can legitimately get different answers.</p></div></details>
+<details><summary>7. How do you make a DNS change roll out quickly?</summary><div class="answer"><p>Lower the TTL before the change, wait at least the old TTL so existing cached copies expire, then change the record. After things settle, raise the TTL again. Trying to rush the change without pre-lowering means waiting out whatever TTL was already cached.</p></div></details>
+<details><summary>8. Explain A, AAAA, CNAME, NS, MX, and TXT.</summary><div class="answer"><p><strong>A</strong> and <strong>AAAA</strong> map a name to an IPv4 or IPv6 address. <strong>CNAME</strong> aliases one name to another. <strong>NS</strong> names the authoritative servers for a zone and implements delegation. <strong>MX</strong> names mail servers. <strong>TXT</strong> holds arbitrary text used for verification, SPF, and similar metadata.</p></div></details>
+<details><summary>9. Why can't you put a CNAME at the zone apex?</summary><div class="answer"><p>Because the apex must also carry NS and SOA records, and a CNAME cannot coexist with other records at the same name. Providers work around this with alias or CNAME-flattening features that resolve the target at query time.</p></div></details>
+<details><summary>10. What is the difference between NXDOMAIN and SERVFAIL?</summary><div class="answer"><p>NXDOMAIN is a definitive negative answer: the name does not exist. NODATA means the name exists but has no record of the requested type. SERVFAIL means resolution failed — a broken delegation, an unreachable authority, or a validation error — and the client should consider retrying or trying another resolver.</p></div></details>
+<details><summary>11. How would you use DNS for failover, and what are its limits?</summary><div class="answer"><p>Use health-checked records with a short TTL and remove the failed endpoint so new lookups get a healthy address. The limits are caching and detection delay: clients that already resolved the dead address keep using it until their TTL expires, and DNS cannot see per-connection load or health.</p></div></details>
+<details><summary>12. Why is DNS a common cause of total outages?</summary><div class="answer"><p>Every connection depends on a lookup first. If the resolver is unreachable, the zone is misconfigured, or the delegation is lame, clients cannot even reach a healthy service. That is why resolvers are usually redundant and DNS changes are treated as high-risk.</p></div></details>
+<details><summary>13. How can DNS be abused for subdomain takeover?</summary><div class="answer"><p>A CNAME or delegated subdomain can point at a resource that no longer exists, such as a deleted cloud bucket or app. An attacker who claims that target can serve content under your domain, so dangling records must be removed.</p></div></details>
+<details><summary>14. What is negative caching and why does it matter?</summary><div class="answer"><p>Resolvers cache the fact that a name or type does not exist, using the zone's SOA timer. It protects authoritative servers from repeated bad queries, but it also means a typo or a record you just created can stay invisible for the negative TTL.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Describing DNS changes as a push and assuming every resolver updates immediately.</li><li>Leaving a long TTL on a record you intend to fail over, then discovering clients keep hitting the dead address.</li><li>Lowering the TTL at the same moment as the change instead of well before it, and not waiting out the old TTL.</li><li>Treating DNS round-robin as a health-aware load balancer that reacts to backend failures.</li><li>Placing a CNAME at the zone apex or creating long CNAME chains that are hard to debug.</li><li>Ignoring resolver and OS caching during testing, then concluding a change worked because one machine saw it.</li><li>Assuming all resolvers return the same answer at the same time across regions and providers.</li><li>Hardcoding IP addresses in clients to avoid DNS, which silently defeats failover and migration.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="proxy-vs-reverse-proxy.html"><span>← Previous</span><strong>Proxy vs Reverse Proxy</strong></a><a class="next" href="http-https.html"><span>Next →</span><strong>HTTP/HTTPS</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/domain-name-system-dns">AlgoMaster — Domain Name System (DNS)</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

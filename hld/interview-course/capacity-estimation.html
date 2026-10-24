@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Capacity Estimation — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Must-Know Topics</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Capacity Estimation</h1>
+    <p class="dek">Back-of-the-envelope numbers that change design decisions — request rates, storage, bandwidth, cache memory, and server count.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> reference tables</span>
+      <span class="pill">Worked social-media example</span>
+      <span class="pill">3–5 YOE focus</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/estimation-cheatsheet">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#when">When to estimate</a>
+      <a href="#powers">Powers of ten</a>
+      <a href="#time">Time conversions</a>
+      <a href="#latency">Latency numbers</a>
+      <a href="#sizes">Data sizes</a>
+      <a href="#components">Component capacity</a>
+      <a href="#worked">Worked example</a>
+      <a href="#present">Presenting estimates</a>
+      <a href="#mistakes">Common mistakes</a>
+      <a href="#recap">Recap</a>
+      <a href="#traps">Traps</a>
+    </nav>
+
+    <main>
+      <div class="one-liner">
+        <span class="label">The purpose</span>
+        Estimation is not a math test. It is a way to decide whether data fits on one machine, whether the database can handle the traffic, whether you need a CDN, and where the architecture will break first.
+      </div>
+
+      <dl class="key-terms">
+        <div class="term"><dt>QPS</dt><dd>Queries or requests per second; distinguish average from peak.</dd></div>
+        <div class="term"><dt>DAU</dt><dd>Daily active users — a starting point for request-rate estimates.</dd></div>
+        <div class="term"><dt>Peak traffic</dt><dd>Common assumption: 2–3× average, depending on the product.</dd></div>
+        <div class="term"><dt>Throughput</dt><dd>Work completed per second; limited by the bottleneck component.</dd></div>
+        <div class="term"><dt>Bandwidth</dt><dd>Data carried per second; bits vs bytes matters by a factor of 8.</dd></div>
+        <div class="term"><dt>Replication factor</dt><dd>Number of copies of data; multiplies raw storage.</dd></div>
+      </dl>
+
+      <section class="section-block" id="when">
+        <h2><span class="n">01</span>When to estimate</h2>
+        <ul>
+          <li>Estimate when the number changes a design decision: single machine vs distributed, cache size, CDN, sharding.</li>
+          <li>Skip detailed math when it will not change the architecture — e.g. total storage for a ticket-booking system may not matter.</li>
+          <li>For a video platform, storage and bandwidth are central: they decide object storage, transcoding, and CDN design.</li>
+          <li>Ask: <strong>“What decision will this estimate help me make?”</strong> If there is no answer, skip it.</li>
+          <li>A few minutes of estimation is usually enough; do not spend the interview doing arithmetic.</li>
+        </ul>
+        <div class="flow">
+          <span class="flow-step">DAU</span><span class="flow-arrow">→</span>
+          <span class="flow-step">actions/day</span><span class="flow-arrow">→</span>
+          <span class="flow-step">average QPS</span><span class="flow-arrow">→</span>
+          <span class="flow-step">peak QPS</span><span class="flow-arrow">→</span>
+          <span class="flow-step">storage / bandwidth / servers</span>
+        </div>
+      </section>
+
+      <section class="section-block" id="powers">
+        <h2><span class="n">02</span>Powers of ten</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Number</th><th>Power</th><th>Data size</th></tr></thead>
+          <tbody>
+            <tr><td>Thousand</td><td>10³</td><td>1 KB = 1,000 bytes</td></tr>
+            <tr><td>Million</td><td>10⁶</td><td>1 MB = 1 million bytes</td></tr>
+            <tr><td>Billion</td><td>10⁹</td><td>1 GB = 1 billion bytes</td></tr>
+            <tr><td>Trillion</td><td>10¹²</td><td>1 TB = 1 trillion bytes</td></tr>
+            <tr><td>Quadrillion</td><td>10¹⁵</td><td>1 PB = 1,000 TB</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li>Use powers of ten for quick estimates; keep the leading digits and add exponents.</li>
+          <li>Binary units (KiB, MiB, GiB) are based on 1,024; they matter for memory but not rough interview math.</li>
+          <li>Example: 1 billion records × 1 KB = 10⁹ × 10³ bytes = 10¹² bytes = 1 TB.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="time">
+        <h2><span class="n">03</span>Time conversions</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Requests per day</th><th>Using 86,400 s</th><th>Using 100,000 s</th></tr></thead>
+          <tbody>
+            <tr><td>1 million</td><td>≈ 12/sec</td><td>10/sec</td></tr>
+            <tr><td>100 million</td><td>≈ 1,200/sec</td><td>1,000/sec</td></tr>
+            <tr><td>1 billion</td><td>≈ 12,000/sec</td><td>10,000/sec</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li>Round a day to <strong>100,000 seconds</strong> for quick math; it is close enough and easy to divide.</li>
+          <li>Round a year to <strong>400 days</strong> for annual storage; it adds a safety margin.</li>
+          <li><strong>Peak is not average.</strong> Multiply average QPS by 2–3 for typical peaks, more for event-driven products.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="latency">
+        <h2><span class="n">04</span>Latency numbers</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Operation</th><th>Approximate latency</th></tr></thead>
+          <tbody>
+            <tr><td>Read from main memory</td><td>~100 ns</td></tr>
+            <tr><td>Random read from SSD</td><td>~100 μs (about 1,000× memory)</td></tr>
+            <tr><td>Network round trip within one data centre</td><td>~0.5 ms</td></tr>
+            <tr><td>Random seek on a hard disk</td><td>Several ms</td></tr>
+            <tr><td>Network round trip US ↔ Europe</td><td>~100–150 ms</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li>Memory is far faster than disk; this is why caches such as Redis can serve sub-millisecond reads.</li>
+          <li>Cross-region round trips dominate user latency; CDNs and regional deployments reduce the distance.</li>
+          <li>You do not need exact values; know the order of magnitude and the relative gaps.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="sizes">
+        <h2><span class="n">05</span>Data sizes</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Data type</th><th>Approximate size</th></tr></thead>
+          <tbody>
+            <tr><td>ASCII character (UTF-8)</td><td>1 byte</td></tr>
+            <tr><td>Non-ASCII character (UTF-8)</td><td>2–4 bytes</td></tr>
+            <tr><td>32-bit integer</td><td>4 bytes</td></tr>
+            <tr><td>64-bit integer / timestamp</td><td>8 bytes</td></tr>
+            <tr><td>UUID</td><td>16 bytes binary; 36 bytes string</td></tr>
+            <tr><td>Compressed photo</td><td>A few hundred KB to several MB</td></tr>
+            <tr><td>1 minute of 1080p video at 5 Mbps</td><td>~40 MB</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li>A social post with an ID, author ID, timestamp, and ~280 characters is a few hundred bytes; round to <strong>1 KB</strong> with metadata overhead.</li>
+          <li>Media dominates storage. Video platforms often store multiple resolutions, multiplying the raw size.</li>
+          <li>Always include replication, indexes, and metadata overhead in production storage estimates.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="components">
+        <h2><span class="n">06</span>Component capacity</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Component</th><th>Approximate capacity</th></tr></thead>
+          <tbody>
+            <tr><td>Application server (simple requests)</td><td>A few thousand to tens of thousands of requests/sec</td></tr>
+            <tr><td>Relational database (PostgreSQL/MySQL)</td><td>Several thousand to tens of thousands of simple queries/sec</td></tr>
+            <tr><td>Redis single instance</td><td>~100,000 simple operations/sec</td></tr>
+            <tr><td>Kafka broker</td><td>Hundreds of MB/sec</td></tr>
+            <tr><td>Server RAM</td><td>Hundreds of GB to a few TB</td></tr>
+            <tr><td>Server disk</td><td>Tens of TB</td></tr>
+            <tr><td>Network interface</td><td>10–25 Gbps</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li>These are rough guidelines; hardware, workload, and data size change the real number.</li>
+          <li>Complex requests and downstream calls reduce app-server throughput.</li>
+          <li>Database writes are usually more expensive than reads, especially with multiple indexes.</li>
+          <li>500 writes/sec may fit one primary; 500,000 writes/sec likely needs sharding or a write-optimized design.</li>
+        </ul>
+      </section>
+
+      <section class="section-block" id="worked">
+        <h2><span class="n">07</span>Worked example: social media platform</h2>
+        <p class="lede">Assume 200 million daily active users, 2 posts per user per day, and 50 feed views per user per day. Peak traffic is 2–3× average.</p>
+        <h3>Requests per second</h3>
+        <ul>
+          <li>Posts per day = 200M × 2 = 400M.</li>
+          <li>Average posts/sec = 400M ÷ 86,400 ≈ 4,600; peak ≈ <strong>10,000 posts/sec</strong>.</li>
+          <li>Feed reads per day = 200M × 50 = 10B.</li>
+          <li>Average feed reads/sec ≈ 115,000; peak ≈ <strong>250,000–300,000/sec</strong>.</li>
+          <li>The read rate is about <strong>25×</strong> the write rate → optimize for reads.</li>
+        </ul>
+        <h3>Storage, bandwidth, cache, servers</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Estimate</th><th>Approximate result</th><th>Design decision</th></tr></thead>
+          <tbody>
+            <tr><td>Post text over 5 years</td><td>~800 TB</td><td>Partition across multiple database nodes</td></tr>
+            <tr><td>Images over 5 years</td><td>~40 PB</td><td>Object storage; database stores references</td></tr>
+            <tr><td>Outgoing image bandwidth</td><td>~50 GB/sec</td><td>CDN to distribute traffic</td></tr>
+            <tr><td>Cached feeds</td><td>~1–1.5 TB</td><td>Distribute across ~10–15 Redis nodes</td></tr>
+            <tr><td>Peak feed requests</td><td>~300,000/sec</td><td>~80–90 app servers with 30–50% headroom</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><strong>What the numbers tell you:</strong> read-heavy → precompute/cache feeds; huge images → object storage; huge outbound bandwidth → CDN; cache too large for one node → distributed cache; ~300k req/sec → horizontal app tier.</div>
+      </section>
+
+      <section class="section-block" id="present">
+        <h2><span class="n">08</span>Presenting your estimates</h2>
+        <ul>
+          <li><strong>State assumptions first:</strong> “200M DAU, 2 posts/day, 1 KB per post.” Let the interviewer correct you.</li>
+          <li><strong>Round aggressively:</strong> 86,400 → 100,000; one or two significant digits.</li>
+          <li><strong>Show the decision:</strong> “This is ~800 TB, so it will not fit on one database node.”</li>
+          <li><strong>Do not calculate everything:</strong> focus on the numbers that change the architecture.</li>
+          <li><strong>Separate average and peak;</strong> peak drives capacity.</li>
+          <li><strong>Include overhead:</strong> replication, indexes, metadata, and safety headroom.</li>
+        </ul>
+        <div class="note"><strong>Interview line:</strong> “These are rough numbers, but the ratio is what matters: reads are ~25× writes, so I’ll design for read scale first.”</div>
+      </section>
+
+      <section class="section-block" id="mistakes">
+        <h2><span class="n">09</span>Common mistakes</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Mistake</th><th>Why it hurts</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>Confusing bits and bytes</td><td>Off by 8×</td><td>Bandwidth in bits/sec; storage in bytes</td></tr>
+            <tr><td>Designing for average traffic</td><td>Peak overload</td><td>Use 2–3× average or a stated peak assumption</td></tr>
+            <tr><td>Forgetting replication</td><td>Storage estimate is too low</td><td>Multiply by replication factor; add index/metadata overhead</td></tr>
+            <tr><td>False precision</td><td>Wastes time; implies certainty you do not have</td><td>Round to one or two significant digits</td></tr>
+            <tr><td>Estimating irrelevant numbers</td><td>No design impact</td><td>Ask what decision the estimate supports</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section class="section-block" id="recap">
+        <h2><span class="n">10</span>Recap</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Reference</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td>Seconds in a day</td><td>~100,000</td></tr>
+            <tr><td>1 billion events/day</td><td>~10,000 events/sec</td></tr>
+            <tr><td>Memory read</td><td>~100 ns</td></tr>
+            <tr><td>Random SSD read</td><td>~100 μs</td></tr>
+            <tr><td>Cross-continent RTT</td><td>100–150 ms</td></tr>
+            <tr><td>Text record</td><td>A few hundred bytes to 1 KB</td></tr>
+            <tr><td>Compressed photo</td><td>A few hundred KB to several MB</td></tr>
+            <tr><td>1 minute HD video</td><td>Tens of MB</td></tr>
+            <tr><td>Redis single instance</td><td>~100,000 simple ops/sec</td></tr>
+            <tr><td>Relational DB node</td><td>Thousands to tens of thousands of simple queries/sec</td></tr>
+            <tr><td>Peak traffic</td><td>2–3× average</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><strong>For 3–5 YOE:</strong> use two or three estimates to justify a component choice. You do not need a perfect model; you need a defensible direction.</div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps">
+          <ul>
+            <li>Doing math for ten minutes without connecting it to a design decision.</li>
+            <li>Using daily average as peak capacity.</li>
+            <li>Forgetting replication and metadata overhead.</li>
+            <li>Mixing bits and bytes.</li>
+            <li>Assuming one database or one cache node can hold everything.</li>
+            <li>Quoting overly precise numbers that imply false confidence.</li>
+            <li>Ignoring read/write ratio — it changes the whole architecture.</li>
+            <li>Estimating storage but forgetting bandwidth and cache memory.</li>
+          </ul>
+        </div>
+      </section>
+
+      <nav class="page-nav">
+        <a class="prev" href="../networking-concepts.html"><span>← Previous</span><strong>Networking Concepts</strong></a>
+        <a class="next" href="index.html"><span>Course index →</span><strong>Interview concepts</strong></a>
+      </nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/estimation-cheatsheet">AlgoMaster — Capacity Estimation for System Design Interviews</a>.</p>
+        <p><strong>Note:</strong> capacities are rough guidelines; real limits depend on hardware, workload, and data size.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

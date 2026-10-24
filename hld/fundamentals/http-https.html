@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTTP/HTTPS — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 11 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>HTTP/HTTPS</h1>
+    <p class="dek">Networking · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/http-https">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What HTTP is</a>
+<a href="#s2">Anatomy of an HTTP request</a>
+<a href="#s3">Anatomy of an HTTP response</a>
+<a href="#s4">Caching headers</a>
+<a href="#s5">Methods, safety, and idempotency</a>
+<a href="#s6">Statelessness</a>
+<a href="#s7">The problem with plain HTTP</a>
+<a href="#s8">What HTTPS adds — and what it does not</a>
+<a href="#s9">The TLS 1.3 handshake</a>
+<a href="#s10">Certificates and trust</a>
+<a href="#s11">HTTP/1.1, HTTP/2, and HTTP/3</a>
+<a href="#s12">HTTPS in system design</a>
+<a href="#s13">What to remember</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>HTTP is a stateless request-response protocol carried over TCP or QUIC; HTTPS is the same protocol wrapped in TLS, which adds encryption, integrity, and proof of the server's identity.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>HTTP</dt><dd>HyperText Transfer Protocol: an application-layer request-response protocol built from a method, a path, headers, and an optional body.</dd></div><div class="term"><dt>TLS</dt><dd>Transport Layer Security: the protocol that encrypts and authenticates a connection; it replaced SSL, which is obsolete.</dd></div><div class="term"><dt>SNI</dt><dd>Server Name Indication: the hostname sent in the TLS ClientHello so one server can present the right certificate for many domains.</dd></div><div class="term"><dt>ALPN</dt><dd>Application-Layer Protocol Negotiation: the TLS extension that lets client and server agree on HTTP/1.1, HTTP/2, or HTTP/3.</dd></div><div class="term"><dt>Idempotency</dt><dd>The property that repeating the same request has the same effect as sending it once, which makes safe retries possible.</dd></div><div class="term"><dt>Idempotency key</dt><dd>A unique client-generated key sent with a POST so the server can recognize a retry and return the original result instead of repeating the operation.</dd></div><div class="term"><dt>TLS termination</dt><dd>Decrypting TLS at the edge — load balancer, reverse proxy, or CDN — then routing the plaintext request to backends.</dd></div><div class="term"><dt>mTLS</dt><dd>Mutual TLS: both client and server present certificates, so each side verifies the other's identity.</dd></div><div class="term"><dt>Head-of-line blocking</dt><dd>When one lost or slow unit of data holds up everything queued behind it, even unrelated requests.</dd></div><div class="term"><dt>QUIC</dt><dd>A transport built on UDP with integrated TLS 1.3, per-stream reliability, and connection migration; it carries HTTP/3.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What HTTP is</h2>
+<p class="lede">HTTP is the application-layer protocol that browsers, mobile apps, and backend services use to talk to web servers and APIs.</p>
+<ul><li>It follows a simple <strong>request-response</strong> model: the client asks for something, the server answers.</li><li>A page load is many requests: HTML first, then images, scripts, and stylesheets discovered in it.</li><li>HTTP does not move bytes itself; it relies on a transport underneath.</li><li><strong>HTTP/1.1 and HTTP/2</strong> run over TCP; <strong>HTTP/3</strong> runs over QUIC, which is built on UDP.</li><li>Plain HTTP defaults to <strong>port 80</strong>; HTTPS defaults to <strong>port 443</strong>.</li><li>Before the first request, the client usually resolves the name with DNS, opens a connection, and for HTTPS performs a TLS handshake.</li><li>The same connection can be reused for later requests, which is why connection setup cost is amortized rather than paid per call.</li></ul>
+
+<div class="flow"><span class="flow-step">Resolve the hostname with DNS</span><span class="flow-arrow">→</span><span class="flow-step">Open a transport connection (TCP, or QUIC over UDP)</span><span class="flow-arrow">→</span><span class="flow-step">Perform the TLS handshake for HTTPS</span><span class="flow-arrow">→</span><span class="flow-step">Send the HTTP request</span><span class="flow-arrow">→</span><span class="flow-step">Route to the application and produce a response</span><span class="flow-arrow">→</span><span class="flow-step">Return the response; keep the connection for reuse</span></div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Anatomy of an HTTP request</h2>
+<ul><li>The <strong>request line</strong> carries three things: the method, the path (with query string), and the HTTP version.</li><li>Headers follow as <code>Name: value</code> pairs, each describing some aspect of the request.</li><li><strong>Host</strong> names the domain the client wants, which lets one server or IP host many sites.</li><li><strong>Content-Type</strong> tells the server how to parse the body, for example JSON.</li><li><strong>Authorization</strong> carries credentials such as a bearer token; <strong>Cookie</strong> carries session state.</li><li><strong>Accept</strong>, <strong>Accept-Language</strong>, and similar headers state what representations the client can handle.</li><li>A blank line separates headers from an optional <strong>body</strong>; GET requests typically have no body.</li><li>HTTP/2 and HTTP/3 do not send this text on the wire; they use binary frames with pseudo-headers such as <code>:method</code> and <code>:path</code>, but the same parts exist.</li></ul>
+
+
+<pre class="code"><code>POST /api/orders HTTP/1.1
+Host: api.example.com
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOi...
+Content-Length: 42
+
+{&quot;sku&quot;:&quot;A-1&quot;,&quot;quantity&quot;:2}</code></pre>
+<div class="note"><code>Content-Length</code> or chunked transfer encoding tells the receiver where the body ends. Without a framing rule, the server cannot know when the request is complete.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Anatomy of an HTTP response</h2>
+<ul><li>The <strong>status line</strong> contains the version and a three-digit status code, followed by headers and a body.</li><li>Status codes are grouped into five classes: 1xx informational, 2xx success, 3xx redirection, 4xx client error, 5xx server error.</li><li>Response headers describe the result: content type, length, caching policy, cookies, and request IDs.</li><li>The body carries the content, or is empty for responses such as <code>304</code> and <code>204</code>.</li><li>A <strong>4xx</strong> says the client sent something wrong; repeating the same request will usually fail again.</li><li>A <strong>5xx</strong> says the server or a dependency failed; retrying later may succeed.</li><li><strong>429 Too Many Requests</strong> is a client error that is still retryable, usually after the delay in <code>Retry-After</code>.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Range</th><th>Meaning</th><th>Examples</th></tr></thead><tbody><tr><td>1xx</td><td>Informational</td><td>100 Continue</td></tr>
+<tr><td>2xx</td><td>Success</td><td>200 OK, 201 Created, 204 No Content</td></tr>
+<tr><td>3xx</td><td>Redirection</td><td>301 Moved Permanently, 304 Not Modified</td></tr>
+<tr><td>4xx</td><td>Client error</td><td>400 Bad Request, 401 Unauthorized, 404 Not Found, 429 Too Many Requests</td></tr>
+<tr><td>5xx</td><td>Server error</td><td>500 Internal Server Error, 502 Bad Gateway, 503 Service Unavailable</td></tr></tbody></table></div>
+
+<div class="note">Returning <code>200 OK</code> with an error object in the body breaks caches, metrics, SDKs, and retry logic, because all of them read the status code first.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Caching headers</h2>
+<ul><li><strong>Cache-Control: max-age</strong> lets the client reuse a response for a number of seconds without asking again.</li><li><strong>ETag</strong> is a version tag for the response; the client sends it back as <code>If-None-Match</code> to ask whether it changed.</li><li><strong>304 Not Modified</strong> answers that question with no body, saving the download but still costing a round trip.</li><li><strong>Last-Modified</strong> and <code>If-Modified-Since</code> do the same with timestamps, at coarser resolution.</li><li><strong>Vary</strong> names the request headers a response depends on, so caches store a separate copy per value.</li><li><strong>private</strong> allows only the browser to cache; <strong>no-store</strong> forbids caching entirely for sensitive responses.</li><li><strong>s-maxage</strong> lets shared caches such as CDNs use a different lifetime from browser caches.</li></ul>
+
+
+<div class="note">Without <code>Vary: Accept-Language</code>, a shared cache can serve a French page to an English reader because it keyed only on the URL.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Methods, safety, and idempotency</h2>
+<ul><li>A method is <strong>safe</strong> if it does not modify server state; GET and HEAD are safe.</li><li>A method is <strong>idempotent</strong> if repeating the same request has the same effect as sending it once.</li><li>GET, PUT, and DELETE are idempotent; PUT replaces a resource, so applying it twice leaves the same value.</li><li>POST is neither safe nor idempotent by default: sending it twice can create two orders or charge a card twice.</li><li>PATCH is not guaranteed idempotent, because a patch can be a relative operation such as "increment".</li><li>The distinction matters most on timeout: the client cannot tell whether the server processed the request.</li><li>Retrying an idempotent request is generally safe; retrying a POST requires an <strong>idempotency key</strong>.</li><li>With an idempotency key, the server stores the key and the original result, then returns that result when the same key arrives again.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Method</th><th>Common use</th><th>Safe</th><th>Idempotent</th></tr></thead><tbody><tr><td>GET</td><td>Retrieve a resource</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>POST</td><td>Create a resource or trigger an action</td><td>No</td><td>No by default</td></tr>
+<tr><td>PUT</td><td>Replace a resource</td><td>No</td><td>Yes</td></tr>
+<tr><td>PATCH</td><td>Update part of a resource</td><td>No</td><td>Not guaranteed</td></tr>
+<tr><td>DELETE</td><td>Remove a resource</td><td>No</td><td>Yes</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Statelessness</h2>
+<ul><li>HTTP is <strong>stateless</strong>: each request is handled independently and the protocol remembers nothing about the previous one.</li><li>That makes horizontal scaling easy, because any server can handle any request.</li><li>Applications still need identity, so the client sends a <strong>cookie</strong> or <strong>token</strong> on every request.</li><li>Additional session data lives in a shared store such as Redis or a database, not in one server's memory.</li><li>The protocol is stateless; the system around it is stateful, and the design decision is <strong>where that state lives</strong>.</li><li>State in a shared store keeps any instance able to serve any request and makes rolling deploys trivial.</li><li>State pinned to one instance forces sticky routing and breaks when that instance dies.</li></ul>
+
+
+<div class="note">Ask two questions of every design: where does state live, and what happens when a request is retried or lands on a different server?</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The problem with plain HTTP</h2>
+<p class="lede">A request does not go straight to the server; it crosses a home router, an ISP, and several other networks.</p>
+<ul><li>Plain HTTP sends requests and responses <strong>without encryption</strong>, so anyone on the path can read them.</li><li><strong>Eavesdropping</strong>: someone on public Wi-Fi can capture passwords, session cookies, or card details.</li><li><strong>Tampering</strong>: an attacker can modify the response, injecting ads or malicious scripts into a page.</li><li><strong>Impersonation</strong>: traffic can be redirected to a lookalike site that captures credentials.</li><li>Any middlebox on the path can also read or rewrite headers, which may leak internal identifiers.</li><li>These risks are not theoretical on shared networks, which is why browsers mark plain HTTP as not secure.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>What HTTPS adds — and what it does not</h2>
+<p class="lede">HTTPS is not a different protocol. It is HTTP carried over a connection secured by TLS.</p>
+<ul><li><strong>Encryption</strong> stops eavesdropping: an observer sees ciphertext, not credentials or content.</li><li><strong>Integrity</strong> stops tampering: a modified record fails its authentication check and is rejected.</li><li><strong>Authentication</strong> stops impersonation: the server presents a certificate the client can validate.</li><li>The methods, headers, status codes, and bodies are unchanged; TLS only protects their transmission.</li><li>HTTPS does <strong>not</strong> authenticate the user; the application still needs logins, tokens, or other checks.</li><li>HTTPS does <strong>not</strong> make a vulnerable API safe, and it does not protect data once it reaches a compromised endpoint.</li><li>HTTPS does <strong>not</strong> fully hide which server you contact: the destination IP is visible, and the hostname often leaks through DNS and SNI.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Guarantee</th><th>Prevents</th><th>Mechanism</th></tr></thead><tbody><tr><td>Encryption</td><td>Eavesdropping</td><td>Symmetric encryption of the record payload</td></tr>
+<tr><td>Integrity</td><td>Tampering</td><td>Authentication tag over the data; receiver rejects a failed check</td></tr>
+<tr><td>Authentication</td><td>Impersonation</td><td>Certificate chain binding the domain to a public key, plus proof of the private key</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>The TLS 1.3 handshake</h2>
+<ul><li>The client first establishes a transport connection, normally TCP for HTTPS over HTTP/1.1 or HTTP/2.</li><li>It sends a <strong>ClientHello</strong> listing supported cipher suites, a public key share, the <strong>SNI</strong> hostname, and ALPN protocol preferences.</li><li>The server replies with a <strong>ServerHello</strong>, choosing the parameters and providing its own key share.</li><li>Both sides derive the same <strong>shared secret</strong> from the exchanged key shares; the secret itself is never sent.</li><li>The server sends its <strong>certificate chain</strong> and a signature made with its private key, proving it controls the matching key.</li><li><strong>Finished</strong> messages from both sides verify that the handshake transcript was not altered.</li><li>Application data is then encrypted with <strong>symmetric keys</strong> derived from the shared secret, which is far cheaper than public-key operations.</li></ul>
+
+<div class="flow"><span class="flow-step">TCP connection established</span><span class="flow-arrow">→</span><span class="flow-step">ClientHello: cipher suites, key share, SNI, ALPN</span><span class="flow-arrow">→</span><span class="flow-step">ServerHello: chosen parameters, server key share</span><span class="flow-arrow">→</span><span class="flow-step">Both sides derive the shared secret</span><span class="flow-arrow">→</span><span class="flow-step">Server sends certificate + signature</span><span class="flow-arrow">→</span><span class="flow-step">Both sides send Finished and verify the transcript</span><span class="flow-arrow">→</span><span class="flow-step">Encrypted HTTP request and response</span></div>
+<div class="note">Because key shares are fresh per connection, TLS 1.3 provides <strong>forward secrecy</strong>: stealing the server's private key later does not decrypt previously recorded traffic.</div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Certificates and trust</h2>
+<ul><li>A certificate binds a <strong>domain name</strong> to a <strong>public key</strong> and is signed by a Certificate Authority.</li><li>The client checks that the certificate matches the requested hostname, such as <code>shop.example.com</code>.</li><li>It checks the validity period; an expired certificate causes connection failures.</li><li>It checks that the chain leads to a <strong>trusted root CA</strong>, possibly through intermediate certificates.</li><li>The handshake signature proves the server holds the matching private key, so a stolen certificate file alone cannot impersonate it.</li><li>Revocation checking (OCSP or CRLs) attempts to catch certificates that were compromised before expiry.</li><li>The client's trust store is the root of the whole model: an unknown or misconfigured CA breaks every connection.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Setup</th><th>Round trips before the first request</th></tr></thead><tbody><tr><td>TCP + TLS 1.2</td><td>Three</td></tr>
+<tr><td>TCP + TLS 1.3</td><td>Two</td></tr>
+<tr><td>QUIC (HTTP/3)</td><td>One</td></tr></tbody></table></div>
+
+<div class="note">For a new HTTPS connection over TCP, one round trip establishes TCP and another completes TLS 1.3 before the first HTTP byte is sent. Resumption can cut this further.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>HTTP/1.1, HTTP/2, and HTTP/3</h2>
+<ul><li><strong>HTTP/1.1</strong> added persistent connections (keep-alive), so one connection serves multiple requests.</li><li>Requests on an HTTP/1.1 connection are handled one at a time, so a slow response blocks those behind it — <strong>head-of-line blocking</strong>.</li><li>Browsers work around this by opening several connections per domain, which multiplies handshakes and server state.</li><li><strong>HTTP/2</strong> uses a binary framing layer and <strong>multiplexing</strong>, interleaving many requests on one connection.</li><li>HTTP/2 adds <strong>HPACK</strong> header compression, which matters when every request repeats large cookies and tokens.</li><li>HTTP/2 still runs over TCP, so a lost packet stalls every stream until it is retransmitted — TCP-level head-of-line blocking remains.</li><li><strong>HTTP/3</strong> replaces TCP with <strong>QUIC</strong> over UDP, giving each stream independent reliability so one loss blocks only its own stream.</li><li>QUIC integrates TLS 1.3, so a new secure connection needs one round trip, and connection IDs let a session survive a network change.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Version</th><th>Transport</th><th>Wire format</th><th>Main improvement</th><th>Main limitation</th></tr></thead><tbody><tr><td>HTTP/1.1</td><td>TCP</td><td>Text</td><td>Persistent connections</td><td>One request at a time per connection</td></tr>
+<tr><td>HTTP/2</td><td>TCP</td><td>Binary frames</td><td>Multiplexing and header compression</td><td>TCP-level head-of-line blocking</td></tr>
+<tr><td>HTTP/3</td><td>QUIC over UDP</td><td>Binary frames</td><td>Independent streams, faster setup</td><td>Some networks block or throttle UDP</td></tr></tbody></table></div>
+
+<div class="note">0-RTT resumption lets a returning client send data immediately, but that early data can be replayed, so it should only carry requests that are safe to repeat, such as GET.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>HTTPS in system design</h2>
+<ul><li><strong>TLS termination</strong> at a load balancer, reverse proxy, or CDN centralizes certificates and removes encryption work from application servers.</li><li>Termination also lets the edge route on HTTP paths and headers, which it could not inspect on an encrypted connection.</li><li>Backends may receive plain HTTP on a private network, or a new TLS connection, or <strong>mTLS</strong> in a service mesh.</li><li>The edge must forward client details in trusted headers: <code>X-Forwarded-For</code> for the client IP and <code>X-Forwarded-Proto</code> for the original scheme.</li><li>Only trust those headers when your own infrastructure sets them; a client can send fake values otherwise.</li><li><strong>Connection reuse</strong> and pooling avoid paying TCP and TLS setup on every call, which is significant on long-haul paths.</li><li>CDNs terminate TLS close to users, shortening the network path for the handshake.</li><li>Certificates must be automated (ACME / managed services) and expiry must be monitored, because an expired certificate is a self-inflicted outage.</li></ul>
+<h3>Timeouts and retries</h3>
+<ul><li>Every outbound call needs a timeout; without one, a slow dependency ties up threads and connections until the caller fails too.</li><li>Retry only idempotent requests, or POSTs protected by an idempotency key.</li><li>Add exponential backoff with jitter so many clients do not retry in the same instant.</li><li>Cap retries and use a circuit breaker so a failing dependency is not hammered.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>What to remember</h2>
+<ul><li>HTTP is a stateless request-response protocol: method, path, headers, optional body in; status, headers, body out.</li><li>Status codes drive retry and caching behavior: 4xx for client mistakes, 5xx for server failures, 429 with Retry-After.</li><li>Idempotency decides what is safe to retry: GET, PUT, and DELETE yes; POST only with an idempotency key.</li><li>Plain HTTP is readable and modifiable by anyone on the path; HTTPS adds encryption, integrity, and server authentication.</li><li>TLS 1.3 completes in one round trip and gives forward secrecy through per-connection key shares.</li><li>HTTP/1.1 added keep-alive, HTTP/2 added multiplexing over TCP, HTTP/3 moved to QUIC to remove TCP head-of-line blocking.</li><li>In production, the key decisions are where TLS terminates, how internal traffic is protected, and how connections are reused.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>TLS termination at the edge</strong> centralizes certificates and offloads crypto but means traffic inside the network may be plaintext unless you re-encrypt.</li><li><strong>End-to-end TLS or mTLS</strong> protects service-to-service traffic but adds certificate distribution, rotation, and CPU cost.</li><li><strong>Long-lived cached responses</strong> cut bandwidth and latency but risk serving stale content after a deploy or data change.</li><li><strong>Short cache lifetimes</strong> keep content fresh but increase origin traffic and user-visible latency.</li><li><strong>Aggressive retries</strong> improve success rates on transient failures but amplify load and can turn a blip into an outage.</li><li><strong>HTTP/2 multiplexing</strong> reduces connection count and handshakes but concentrates all streams on one TCP connection where a lost packet stalls everything.</li><li><strong>HTTP/3 over QUIC</strong> removes TCP head-of-line blocking and speeds up setup but depends on UDP being allowed and adds operational complexity.</li><li><strong>0-RTT resumption</strong> lowers latency for returning clients but exposes the server to replayed requests, so it must be limited to safe methods.</li><li><strong>Fine-grained status codes</strong> make APIs predictable for caches and retries but require discipline to keep error semantics consistent.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is HTTP and what layer does it run at?</summary><div class="answer"><p>A stateless application-layer request-response protocol used by browsers, apps, and services. It defines the message format and semantics but relies on a transport: TCP for HTTP/1.1 and HTTP/2, QUIC over UDP for HTTP/3.</p></div></details>
+<details><summary>2. What are the parts of an HTTP request and response?</summary><div class="answer"><p>A request is a method, path, version, headers, and an optional body. A response is a status code, headers, and an optional body. In HTTP/2 and HTTP/3 the same parts travel as binary frames rather than text.</p></div></details>
+<details><summary>3. Why does the difference between 4xx and 5xx matter for retries?</summary><div class="answer"><p>A 4xx means the client's request is wrong, so an identical retry will fail again. A 5xx means a server or dependency failed, so retrying later may succeed. 429 is the exception: a client error that should be retried after the Retry-After delay.</p></div></details>
+<details><summary>4. What is idempotency and why does it matter?</summary><div class="answer"><p>An idempotent request has the same effect whether sent once or many times. That matters on timeouts, when the client cannot tell whether the server processed the request. GET, PUT, and DELETE are idempotent; POST is not, so retrying it can create duplicates or double-charge a customer.</p></div></details>
+<details><summary>5. How do idempotency keys work?</summary><div class="answer"><p>The client sends a unique key with each POST. The server stores the key alongside the result of the first attempt. If the same key arrives again, the server returns the stored result instead of repeating the operation.</p></div></details>
+<details><summary>6. HTTP is stateless — how do applications track users?</summary><div class="answer"><p>The client sends a cookie or a token on every request, and the server looks up any extra session data in a shared store such as Redis. The protocol stays stateless, which lets any server handle any request.</p></div></details>
+<details><summary>7. What three risks does plain HTTP expose?</summary><div class="answer"><p>Eavesdropping, because anyone on the path can read the traffic; tampering, because they can modify responses; and impersonation, because traffic can be redirected to a fake server. TLS addresses all three with encryption, integrity checks, and certificates.</p></div></details>
+<details><summary>8. Does HTTPS make an API secure?</summary><div class="answer"><p>No. It protects data in transit and authenticates the server, but it does not authenticate the user, fix authorization bugs, or protect data at rest or on a compromised endpoint.</p></div></details>
+<details><summary>9. Walk through the TLS 1.3 handshake.</summary><div class="answer"><p>The client sends a ClientHello with cipher suites, a key share, SNI, and ALPN. The server responds with ServerHello and its key share, then sends its certificate and a signature. Both sides derive the same shared secret and exchange Finished messages to verify the transcript. Application data then flows under symmetric keys.</p></div></details>
+<details><summary>10. What does the client check in a certificate?</summary><div class="answer"><p>That the certificate matches the requested hostname, that it is within its validity period, and that it chains to a trusted root CA. The handshake signature then proves the server holds the matching private key.</p></div></details>
+<details><summary>11. What is forward secrecy and why does it matter?</summary><div class="answer"><p>Because TLS 1.3 derives keys from ephemeral key shares, recorded traffic cannot be decrypted later even if the server's long-term private key is stolen. It limits the damage of a future key compromise.</p></div></details>
+<details><summary>12. Compare HTTP/1.1, HTTP/2, and HTTP/3.</summary><div class="answer"><p>HTTP/1.1 added persistent connections but handles one request at a time per connection. HTTP/2 multiplexes many streams over one TCP connection with binary framing and header compression, but a lost TCP packet still blocks all streams. HTTP/3 runs over QUIC, so streams are independent and setup takes one round trip.</p></div></details>
+<details><summary>13. What is TLS termination and what are the trade-offs?</summary><div class="answer"><p>The edge — load balancer, proxy, or CDN — decrypts the connection, then routes the request to backends. It centralizes certificate management and enables HTTP-aware routing, but backend traffic may be plaintext unless you re-encrypt or use mTLS.</p></div></details>
+<details><summary>14. How do you design retries safely?</summary><div class="answer"><p>Set timeouts on every call, retry only idempotent operations or POSTs with idempotency keys, use exponential backoff with jitter, cap attempts, and add a circuit breaker so a failing dependency is not overwhelmed.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating POST as retryable and creating duplicate orders or double charges.</li><li>Returning 200 OK with an error payload, which hides failures from caches, metrics, and retry logic.</li><li>Forgetting Vary on a response that depends on Accept-Language or another request header.</li><li>Assuming HTTPS authenticates the user rather than only the server.</li><li>Saying TLS 1.3 removes all head-of-line blocking while HTTP/2 still runs over TCP.</li><li>Trusting X-Forwarded-For from the public internet without stripping client-supplied values at the edge.</li><li>Shipping without certificate expiry monitoring or automated renewal.</li><li>Claiming HTTP/3 is always faster when some networks block or throttle UDP.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="domain-name-system-dns.html"><span>← Previous</span><strong>Domain Name System (DNS)</strong></a><a class="next" href="tcp-vs-udp.html"><span>Next →</span><strong>TCP vs UDP</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/http-https">AlgoMaster — HTTP/HTTPS</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Object Storage — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 19 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Object Storage</h1>
+    <p class="dek">Databases &amp; Storage · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>11</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/object-storage">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What object storage is</a>
+<a href="#s2">Objects, buckets, and keys</a>
+<a href="#s3">Metadata and the flat namespace</a>
+<a href="#s4">The HTTP API and access control</a>
+<a href="#s5">How object storage scales internally</a>
+<a href="#s6">Durability and repair</a>
+<a href="#s7">Consistency, versioning, and concurrent writes</a>
+<a href="#s8">Upload and delivery patterns</a>
+<a href="#s9">Cost model and lifecycle</a>
+<a href="#s10">Where object storage does not fit</a>
+<a href="#s11">Failure modes and operational rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Object storage is a flat, HTTP-addressable store for whole blobs — images, video, backups, model datasets — built to scale capacity and durability far beyond a single filesystem, at the cost of POSIX semantics and cheap queries.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Object</dt><dd>The stored unit: the data bytes plus system metadata and user metadata, addressed as one indivisible blob.</dd></div><div class="term"><dt>Bucket</dt><dd>A namespace that holds objects and defines region, access policy, versioning, and lifecycle rules.</dd></div><div class="term"><dt>Key</dt><dd>The unique name of an object inside a bucket; it looks like a path but the store does not treat it as one.</dd></div><div class="term"><dt>Flat namespace</dt><dd>There are no real directories — prefixes are just parts of the key, and listing is a lexicographic range scan.</dd></div><div class="term"><dt>Erasure coding</dt><dd>Splitting data into fragments plus parity so a subset of nodes can rebuild a lost fragment without a full copy.</dd></div><div class="term"><dt>ETag</dt><dd>An identifier for a specific object version, used for caching and for conditional writes.</dd></div><div class="term"><dt>Presigned URL</dt><dd>A time-limited, signed URL that lets a client upload or download directly from storage without holding credentials.</dd></div><div class="term"><dt>Multipart upload</dt><dd>Splitting a large object into parts uploaded in parallel and assembled on commit, so one failure does not restart everything.</dd></div><div class="term"><dt>Storage class</dt><dd>A durability/availability/retrieval-cost tier; colder classes are cheaper to keep and more expensive to read.</dd></div><div class="term"><dt>Lifecycle rule</dt><dd>A policy that transitions, expires, or deletes objects automatically based on age or prefix.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What object storage is</h2>
+<p class="lede">Modern applications store enormous volumes of unstructured data: images, video, documents, backups, logs, and machine-learning datasets. Object storage is the model behind S3, Google Cloud Storage, Azure Blob Storage, and MinIO.</p>
+<ul><li>Data is stored as <strong>whole objects</strong> addressed by a key, not as blocks on a device or files in a mounted directory.</li><li>Clients talk to it over <strong>HTTP</strong> with simple verbs: put, get, head, delete, list.</li><li>It is built for <strong>capacity and durability</strong>, spreading objects across many machines and failure domains.</li><li>There is no filesystem to mount in the normal case and no partial in-place edit of an object.</li><li>It holds <strong>unstructured or opaque bytes</strong>; the service does not interpret the contents.</li><li>It is the default home for large binary assets and for data-lake style analytical input.</li><li>It is not a database: it offers no joins, no secondary indexes, and no multi-object transactions.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Block storage</th><th>File storage</th><th>Object storage</th></tr></thead><tbody><tr><td>Unit</td><td>Fixed-size block</td><td>File in a directory tree</td><td>Whole object + metadata</td></tr>
+<tr><td>Access</td><td>Attached volume, OS filesystem</td><td>Network share, POSIX calls</td><td>HTTP API by bucket and key</td></tr>
+<tr><td>Scaling</td><td>Per volume, bounded</td><td>Per server or share</td><td>Effectively unbounded namespace</td></tr>
+<tr><td>Best for</td><td>Databases, VM disks</td><td>Shared config, home directories</td><td>Media, backups, lakes, static assets</td></tr>
+<tr><td>Weak at</td><td>Sharing across many hosts</td><td>Massive scale and metadata load</td><td>Random edits, low latency, transactions</td></tr></tbody></table></div>
+
+<div class="note">Memory aid: block storage is a disk, file storage is a directory tree, object storage is a giant key-value map for blobs.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Objects, buckets, and keys</h2>
+<ul><li>A <strong>bucket</strong> is the top-level namespace and the unit of policy, region, and billing.</li><li>Bucket names are globally unique in most public clouds, because the name becomes part of the URL.</li><li>An <strong>object</strong> consists of the bytes, system metadata (size, content type, ETag, timestamps), and optional user metadata.</li><li>The <strong>key</strong> is an arbitrary string; <code>users/42/avatar.png</code> is one key, not a directory plus a file.</li><li>Prefixes are a naming convention that the service exploits for listing and policy, not a real hierarchy.</li><li>Objects are immutable in practice: an overwrite replaces the whole object, it does not patch bytes.</li><li>A common layout puts a high-cardinality component early in the key, such as a tenant or hash prefix, to spread load.</li><li>Object size limits exist per service; large files must be uploaded in parts rather than as one request.</li></ul>
+
+
+<pre class="code"><code>PUT /bucket/users/42/avatar.png HTTP/1.1
+Content-Type: image/png
+Content-Length: 48213
+
+&lt;bytes&gt;</code></pre>
+<div class="note">Rename is a copy plus a delete, and it is not atomic. Design keys so objects rarely need to move.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Metadata and the flat namespace</h2>
+<ul><li>System metadata covers size, content type, checksum, storage class, and timestamps; user metadata is a small set of key-value pairs.</li><li>Metadata is what a HEAD request returns and what lifecycle and policy rules evaluate.</li><li>You cannot efficiently filter a bucket by user metadata at scale; that requires an external index.</li><li>Listing returns keys in lexicographic order, which makes prefix scans and date-prefixed keys cheap.</li><li>A deep hierarchy is only simulated: deleting a prefix is a bulk operation over matching keys.</li><li>Because there are no directories, an object can exist under a key whose 'parent folder' was never created.</li><li>Search over object contents is not provided; text search needs a separate search index built from the objects.</li><li>Store queryable business attributes in a database row that <em>points</em> to the key, not in object metadata.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>You want to</th><th>Object storage answer</th><th>What you actually need</th></tr></thead><tbody><tr><td>Find objects by owner</td><td>Not supported efficiently</td><td>A database column with the key</td></tr>
+<tr><td>List a 'folder'</td><td>Prefix listing</td><td>Works, but is a range scan not a tree</td></tr>
+<tr><td>Search inside files</td><td>Not supported</td><td>Search engine or analytics pipeline</td></tr>
+<tr><td>Atomically update one field</td><td>Not supported</td><td>Rewrite the object or store fields in a database</td></tr>
+<tr><td>Move/rename</td><td>Copy then delete</td><td>Key design that avoids moves</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The HTTP API and access control</h2>
+<ul><li><code>PUT</code> writes or replaces a whole object; <code>GET</code> reads it; <code>HEAD</code> returns metadata; <code>DELETE</code> removes it.</li><li><strong>Range requests</strong> return a byte range, which is how video players seek and how large files resume.</li><li>Every request is authenticated and authorized; bucket policies and IAM decide who may read or write which prefix.</li><li>A <strong>presigned URL</strong> delegates a single operation for a limited time, so browsers upload without long-lived credentials.</li><li>Conditional requests use <code>If-Match</code> or <code>If-None-Match</code> with an ETag to avoid overwriting a concurrent change.</li><li>Errors distinguish missing objects from denied access, and clients must handle both without leaking existence information.</li><li>The API is intentionally small, which is why almost every language and tool can integrate with it.</li><li>Server-side encryption and TLS are configured at the bucket or request level, not invented per application.</li></ul>
+
+<div class="flow"><span class="flow-step">Client asks app for upload slot</span><span class="flow-arrow">→</span><span class="flow-step">App checks permission</span><span class="flow-arrow">→</span><span class="flow-step">App returns presigned PUT URL</span><span class="flow-arrow">→</span><span class="flow-step">Client uploads bytes directly</span><span class="flow-arrow">→</span><span class="flow-step">Storage confirms, app records the key</span></div>
+<div class="note">The direct-upload pattern keeps large payloads off the application servers and out of their memory.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>How object storage scales internally</h2>
+<p class="lede">The reason object storage reaches huge scale is that it separates the namespace and metadata from the bytes, and spreads both across many machines.</p>
+<ul><li>A <strong>metadata layer</strong> maps bucket plus key to object location, size, and attributes; it is the part that must be highly available.</li><li>A <strong>data layer</strong> stores immutable chunks on many storage nodes, often with its own local redundancy.</li><li>Placement usually hashes the key or an object id to choose a set of nodes, so no central directory tracks every byte.</li><li>Because objects are immutable, replicas never need in-place reconciliation of divergent writes.</li><li>Large objects are chunked so they can be spread across nodes and rebuilt in parallel.</li><li>Adding capacity means adding nodes and rebalancing chunks; the namespace does not have to be repartitioned like a B-tree.</li><li>Metadata operations (list, head, policy check) are the usual bottleneck under many small objects.</li><li>Hot keys or a poorly distributed prefix can concentrate traffic on a small set of nodes.</li></ul>
+
+<div class="flow"><span class="flow-step">Request: bucket + key</span><span class="flow-arrow">→</span><span class="flow-step">Metadata service resolves location</span><span class="flow-arrow">→</span><span class="flow-step">Client or gateway reads chunks</span><span class="flow-arrow">→</span><span class="flow-step">Response streamed back</span></div>
+<div class="note">This is the same separation of concerns as a database with a primary index and separate heap files, applied to blobs.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Durability and repair</h2>
+<ul><li>Durability comes from <strong>redundancy across independent failure domains</strong>, not from one reliable disk.</li><li>Replication keeps full copies on different nodes or zones; simple to reason about, but storage cost multiplies.</li><li><strong>Erasure coding</strong> stores data fragments plus parity, so a lost fragment can be recomputed from the others at lower storage overhead.</li><li>Erasure coding saves capacity but makes reads and repairs more CPU- and network-intensive than a plain replica read.</li><li>Background scrubbing compares checksums and rebuilds damaged or missing fragments before a second failure compounds.</li><li>Cross-region replication protects against losing an entire region, at the cost of bandwidth and write latency.</li><li>Durability is not backup: an application bug or a bad delete propagates instantly to every replica.</li><li>Versioning and object lock are the practical defenses against accidental or malicious deletion.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Scheme</th><th>Storage overhead</th><th>Read cost</th><th>Best for</th></tr></thead><tbody><tr><td>Full replication</td><td>High</td><td>Low, read any copy</td><td>Hot data, simple operations</td></tr>
+<tr><td>Erasure coding</td><td>Lower</td><td>Higher, reconstruct fragments</td><td>Large cold objects, archives</td></tr>
+<tr><td>Cross-region copy</td><td>Highest</td><td>Low locally</td><td>Regional disaster recovery</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Consistency, versioning, and concurrent writes</h2>
+<ul><li>Modern object stores generally give <strong>strong read-after-write consistency</strong> for new objects and overwrites, but you must verify the guarantee for your provider and operation.</li><li>Listing is the operation most likely to lag, so a client that just wrote a key may not see it in a prefix listing immediately.</li><li>With versioning on, an overwrite creates a new version and the old bytes remain recoverable until a lifecycle rule expires them.</li><li>Concurrent writers to the same key follow <strong>last-writer-wins</strong> unless conditional writes or versioning are used.</li><li>Two clients can each believe they wrote the object; the loser is silently overwritten.</li><li>A common fix is a unique key per write (content hash or UUID) plus a database pointer to the current one.</li><li>Delete markers in a versioned bucket make an object look absent while its versions remain, which confuses naive tooling.</li><li>Cross-region replication is asynchronous, so a reader in another region can briefly see the old version.</li></ul>
+
+
+<div class="note">If two users can edit the same asset, treat the object as immutable and store the authoritative pointer with a compare-and-set in the database.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Upload and delivery patterns</h2>
+<ul><li>Upload <strong>directly from the client</strong> with a presigned URL so application servers never buffer large files.</li><li>For large assets, use <strong>multipart upload</strong>: parts upload in parallel, retries are per part, and the commit is explicit.</li><li>An abandoned multipart upload leaves invisible parts that still cost money until an abort lifecycle rule cleans them up.</li><li>Validate content type and size after upload; never trust the client's declared metadata.</li><li>Process asynchronously: the upload event triggers a queue, and workers generate thumbnails, transcode video, or extract text.</li><li>Serve public or cacheable content through a <strong>CDN</strong> so repeat reads never touch the origin store.</li><li>Use signed CDN URLs for private content, so authorization happens before the edge serves bytes.</li><li>Stream large downloads with range support instead of loading the whole object into memory.</li></ul>
+
+<div class="flow"><span class="flow-step">Presign</span><span class="flow-arrow">→</span><span class="flow-step">Multipart upload</span><span class="flow-arrow">→</span><span class="flow-step">Commit</span><span class="flow-arrow">→</span><span class="flow-step">Event to queue</span><span class="flow-arrow">→</span><span class="flow-step">Derived assets written</span><span class="flow-arrow">→</span><span class="flow-step">CDN serves reads</span></div>
+<div class="note">The object store is the durable blob layer; the database holds the row that says which blob is current and who may see it.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Cost model and lifecycle</h2>
+<ul><li>You pay for <strong>stored bytes per month</strong>, and the rate depends on the storage class.</li><li>You also pay per <strong>request</strong>, which makes millions of tiny objects expensive in a way that one large object is not.</li><li>Cold classes have cheaper storage but charge for retrieval and impose a minimum retention period.</li><li>Egress — bytes leaving the provider's network — is often the largest surprise in the bill, especially for media.</li><li>Lifecycle rules transition objects to colder classes, expire old versions, and abort incomplete multipart uploads automatically.</li><li>A common policy keeps recent data hot, moves older data to infrequent-access tiers, then expires it or archives it.</li><li>Small-file workloads cost more per byte because metadata and request overhead dominate.</li><li>Aggregating small records into larger objects before writing usually cuts both request count and metadata pressure.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Cost driver</th><th>Grows with</th><th>Cheap mitigation</th></tr></thead><tbody><tr><td>Storage</td><td>Bytes retained, including old versions</td><td>Lifecycle expiry, deduplication by content hash</td></tr>
+<tr><td>Requests</td><td>Number of PUT/GET/LIST calls</td><td>Batch, cache, avoid list-heavy designs</td></tr>
+<tr><td>Retrieval</td><td>Bytes read from cold tiers</td><td>Keep actively read data in a warm tier</td></tr>
+<tr><td>Egress</td><td>Bytes served outside the network</td><td>CDN, same-region processing, compression</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Where object storage does not fit</h2>
+<ul><li>There are <strong>no multi-object transactions</strong>: writing two objects can partially succeed.</li><li>There is <strong>no in-place partial update</strong>; changing one byte means rewriting the object or using a different store.</li><li>Rename and move are copy plus delete, so directory-style workloads become slow and error-prone.</li><li>Latency per request is network-bound, so it is a poor fit for hot metadata lookups or per-request small reads.</li><li>There is no file locking, no append in the POSIX sense, and no memory-mapped file access.</li><li>Querying is limited to listing by prefix; anything richer needs a database or an external index.</li><li>Running a traditional database on top of object storage adds latency and complexity; it is a backup or tiering target, not a local disk.</li><li>Small-file-heavy workloads suffer from per-object overhead and listing costs.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Need</th><th>Use</th></tr></thead><tbody><tr><td>Random writes, fsync, locks</td><td>Block storage or a local filesystem</td></tr>
+<tr><td>Shared POSIX directory</td><td>Network file system</td></tr>
+<tr><td>Transactions and secondary indexes</td><td>Relational or document database</td></tr>
+<tr><td>Full-text search inside files</td><td>Search engine built from extracted text</td></tr>
+<tr><td>Large immutable blobs served to users</td><td>Object storage plus CDN</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes and operational rules</h2>
+<ul><li>A failed upload can leave an <strong>orphaned object</strong> with no database row; reconcile with a periodic sweep or a write-then-commit ordering.</li><li>A failed database write after a successful upload leaves bytes nobody references — the mirror image of the same problem.</li><li>Deleting the database row first and the object second risks leaking bytes; deleting the object first risks broken references.</li><li>A 403 is often a policy or signing problem, not a missing file — do not map every error to 404.</li><li>Listing an entire bucket to find one object is a scalability bug; keep an index in the database.</li><li>Public buckets are a recurring data-leak cause; default to private and grant per prefix.</li><li>Retries must be idempotent: a repeated PUT of the same key is fine, a repeated 'create new key' is not.</li><li>Monitor request error rates, multipart aborts, lifecycle transitions, and egress, not just stored bytes.</li></ul>
+
+<div class="flow"><span class="flow-step">Write object to a temporary key</span><span class="flow-arrow">→</span><span class="flow-step">Commit database row</span><span class="flow-arrow">→</span><span class="flow-step">Mark key current</span><span class="flow-arrow">→</span><span class="flow-step">Async cleanup of stale temporary keys</span></div>
+<div class="note">Pick an ordering and a reconciliation job. Two systems cannot be updated atomically, so eventual repair is part of the design.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Object storage</strong> gives near-unlimited capacity and high durability but gives up POSIX semantics, low latency, and partial updates.</li><li><strong>Flat keys</strong> make prefix listing cheap but make renames, moves, and hierarchy-wide operations expensive.</li><li><strong>Erasure coding</strong> lowers storage cost versus replication but increases read and repair work.</li><li><strong>Immutability</strong> simplifies replication and caching but turns every edit into a full rewrite.</li><li><strong>Versioning</strong> protects against overwrites and deletion but multiplies storage cost and hides old bytes in the bill.</li><li><strong>Direct client uploads</strong> keep application servers light but require presigning, validation, and orphan cleanup.</li><li><strong>CDN in front of storage</strong> cuts latency and egress but adds invalidation and cache-key design work.</li><li><strong>Cold storage tiers</strong> reduce retention cost but add retrieval charges, latency, and minimum-stay rules.</li><li><strong>Storing blobs outside the database</strong> keeps rows small and backups fast but creates a two-system consistency problem.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is object storage?</summary><div class="answer"><p>A flat, HTTP-addressable store for whole blobs. Each object has a key, its bytes, and metadata, and lives in a bucket. It scales capacity and durability across many machines instead of exposing a filesystem or a block device.</p></div></details>
+<details><summary>2. How is it different from a file system?</summary><div class="answer"><p>A file system has real directories, in-place edits, appends, locks, and POSIX calls. Object storage has a flat key namespace, immutable whole-object writes over HTTP, and much higher latency per operation. Prefixes only look like folders because listing is lexicographic.</p></div></details>
+<details><summary>3. How is it different from block storage?</summary><div class="answer"><p>Block storage exposes fixed-size blocks that a host formats with a filesystem, which is what databases and VM disks need. Object storage exposes whole named objects over a network API and is meant for large unstructured data, not for random small writes.</p></div></details>
+<details><summary>4. How does object storage achieve durability?</summary><div class="answer"><p>By keeping redundant copies or erasure-coded fragments across independent nodes and failure domains, then continuously scrubbing checksums and rebuilding lost fragments. Durability protects against hardware loss, not against application bugs or bad deletes.</p></div></details>
+<details><summary>5. What is erasure coding, and why use it?</summary><div class="answer"><p>Data is split into fragments with parity fragments added, so any sufficient subset can reconstruct the object. It achieves redundancy with less storage overhead than full replication, at the cost of more CPU and network work on reads and repairs.</p></div></details>
+<details><summary>6. Why can't you rename an object cheaply?</summary><div class="answer"><p>Because the key is the address and there is no directory entry to update. A rename is a copy of the bytes to a new key plus a delete of the old one, which costs time and is not atomic. Key designs that embed mutable fields make this worse.</p></div></details>
+<details><summary>7. How do you upload a large file?</summary><div class="answer"><p>Use multipart upload from the client with a presigned URL: split the file, upload parts in parallel, retry individual failures, then commit. Abort incomplete uploads with a lifecycle rule so orphaned parts do not accumulate cost.</p></div></details>
+<details><summary>8. How do you serve private media at scale?</summary><div class="answer"><p>Authorize in the application, then redirect to a signed CDN URL with a short expiry. The edge caches the bytes, so repeat views do not hit the origin, and the signature prevents sharing outside the allowed window.</p></div></details>
+<details><summary>9. How do you keep object storage and a database consistent?</summary><div class="answer"><p>You cannot make them atomic, so pick an ordering and reconcile. A common approach writes the object under a temporary or unique key, commits the database row, then marks it current, with a background job deleting unreferenced bytes and repairing missing ones.</p></div></details>
+<details><summary>10. What happens when two clients write the same key?</summary><div class="answer"><p>By default the last write wins and the earlier object is lost. Use conditional writes with an ETag, versioning, or a unique key per write plus a compare-and-set pointer in the database when concurrent edits matter.</p></div></details>
+<details><summary>11. Why is listing objects a scalability concern?</summary><div class="answer"><p>Listing is a metadata range scan, not a cheap directory read, and it returns paginated results. Calling it per request to find an object turns a key lookup into a scan. Keep a searchable index in a database instead.</p></div></details>
+<details><summary>12. When would you not use object storage?</summary><div class="answer"><p>When you need random writes, fsync, file locks, low-latency small reads, multi-object transactions, or rich queries. A database, block volume, or file system fits those better. Object storage is for large immutable blobs and bulk data.</p></div></details>
+<details><summary>13. How do storage costs get out of control?</summary><div class="answer"><p>Old versions, incomplete multipart uploads, millions of tiny objects with per-request charges, cold-tier retrieval fees, and egress. Lifecycle rules, content-hash deduplication, batching small records, and a CDN address most of them.</p></div></details>
+<details><summary>14. Design the image pipeline for a photo app.</summary><div class="answer"><p>Client requests a presigned upload, uploads directly, and the app records the key only after the object exists. An event triggers a queue; workers generate resized variants and write them back under derived keys. Reads go through a CDN with signed URLs, and originals are kept in a colder tier with lifecycle expiry for temporary uploads.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating object storage as a filesystem and building logic around cheap rename or directory operations.</li><li>Storing queryable business attributes only in object metadata, then discovering you cannot filter on them.</li><li>Forgetting to abort incomplete multipart uploads, which quietly accumulate storage charges.</li><li>Assuming a successful upload means the database row exists — or the reverse — without a reconciliation job.</li><li>Making buckets public for convenience and exposing user data through predictable keys.</li><li>Listing a bucket on every request instead of maintaining an index in a database.</li><li>Assuming cross-region replication is synchronous and reading stale bytes during failover.</li><li>Ignoring egress and request pricing when estimating the cost of a media-heavy design.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="database-types.html"><span>← Previous</span><strong>Database Types</strong></a><a class="next" href="query-optimization.html"><span>Next →</span><strong>Query Optimization</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/object-storage">AlgoMaster — Object Storage</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

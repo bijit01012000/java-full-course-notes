@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Content Delivery Network (CDN) — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 27 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Content Delivery Network (CDN)</h1>
+    <p class="dek">Caching · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/content-delivery-network-cdn">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Edge locations</a>
+<a href="#s3">Life of a CDN request</a>
+<a href="#s4">What CDNs cache</a>
+<a href="#s5">HTTP caching headers</a>
+<a href="#s6">TTLs</a>
+<a href="#s7">Purging and versioned URLs</a>
+<a href="#s8">Pull CDNs and push CDNs</a>
+<a href="#s9">Origin shield</a>
+<a href="#s10">How requests are routed to an edge</a>
+<a href="#s11">Cache keys</a>
+<a href="#s12">Cache stampedes and cold misses</a>
+<a href="#s13">Personalized content and API responses</a>
+<a href="#s14">Operating a CDN: large files, reliability, and metrics</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A CDN is a globally distributed cache that serves content from an edge location near the user, so latency and origin load drop — as long as the content is shareable, cacheable, and safely invalidated.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Edge location (PoP)</dt><dd>A CDN site close to users that accepts requests, stores cached responses, and forwards misses to the origin.</dd></div><div class="term"><dt>Origin</dt><dd>The authoritative source of content — an application server, object storage bucket, load balancer, or API gateway.</dd></div><div class="term"><dt>Origin shield</dt><dd>An intermediate cache layer between edge servers and the origin that collapses duplicate misses into one origin fetch.</dd></div><div class="term"><dt>Cache key</dt><dd>The set of request attributes — usually URL plus selected query parameters, headers, or cookies — that decides whether two requests share a cached response.</dd></div><div class="term"><dt>TTL</dt><dd>Time to live: how long an edge may reuse a cached object before treating it as stale.</dd></div><div class="term"><dt>Cache-Control</dt><dd>The HTTP response header that tells browsers and shared caches whether, and for how long, a response may be stored.</dd></div><div class="term"><dt>Purge</dt><dd>An explicit invalidation that removes or stops serving a cached object before its TTL expires.</dd></div><div class="term"><dt>Pull CDN</dt><dd>A CDN that fetches content from the origin on the first request for it at each edge, then caches it.</dd></div><div class="term"><dt>Push CDN</dt><dd>A CDN that the application uploads content to ahead of time, distributing it to edges before users ask for it.</dd></div><div class="term"><dt>Cache hit ratio</dt><dd>The share of requests served from the edge instead of the origin; the primary measure of CDN effectiveness.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">One origin in one region is the simplest deployment, and it works until users are far away or traffic is large.</p>
+<ul><li>Distance is latency: a request from India to a Virginia origin crosses a long network path in both directions, and TCP plus TLS setup multiplies the round trips.</li><li>Popular static files are byte-identical for every user, so the origin re-sends the same image, script, or video segment millions of times.</li><li>Origin bandwidth, connection counts, and CPU saturate first during launches, sales, and viral traffic.</li><li>Writes, personalized responses, and uncached objects still must reach the origin, so a CDN reduces backend load rather than removing the backend.</li><li>The fix is to keep copies of popular content near users and let the origin handle only misses, dynamic requests, and writes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Edge locations</h2>
+<ul><li>CDN servers are deployed in many cities; each site is an <strong>edge location</strong> or point of presence (PoP).</li><li>An edge accepts user requests, stores cached responses, and forwards requests it cannot satisfy to the origin.</li><li>Proximity usually shortens the network path, which lowers round-trip latency and improves throughput.</li><li>Because most requests terminate at the edge, the origin sees far fewer connections and much less egress traffic.</li><li>Edge sites differ in capacity and health, so a nearby PoP that is saturated or degraded may be bypassed for another.</li><li>Edges are also where TLS termination, WAF rules, bot filtering, and DDoS absorption usually run.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Life of a CDN request</h2>
+<ul><li>The client resolves the CDN hostname and receives the address of a nearby edge, not the origin.</li><li>On a <strong>cache hit</strong>, the edge returns the stored response and the origin never sees the request.</li><li>On a <strong>cache miss</strong>, the edge fetches the object from the origin, returns it, and stores it if the response is cacheable.</li><li>Whether a response may be stored depends on the method, status code, caching headers, and provider rules; a POST or a <code>Set-Cookie</code> response is normally not shared.</li><li>The next request for that object in the same region becomes a hit, which is the entire point of the layer.</li><li>Encrypted or authenticated responses add a wrinkle: the edge may terminate TLS but still must not share one user's private response with another.</li></ul>
+
+<div class="flow"><span class="flow-step">Client resolves static.example.com to a nearby edge address</span><span class="flow-arrow">→</span><span class="flow-step">Client sends GET /logo.png to the edge</span><span class="flow-arrow">→</span><span class="flow-step">Hit: the edge returns the cached response</span><span class="flow-arrow">→</span><span class="flow-step">Miss: the edge requests the object from the origin</span><span class="flow-arrow">→</span><span class="flow-step">Origin returns the object; the edge stores it if allowed</span><span class="flow-arrow">→</span><span class="flow-step">Edge returns the response to the client</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>What CDNs cache</h2>
+<ul><li>Static assets are the natural fit: images, JavaScript, CSS, fonts, video segments, and software downloads are read often and rarely change.</li><li>The decisive test is <strong>shareability</strong>: can many different users reuse exactly the same response?</li><li>The second test is <strong>staleness tolerance</strong>: can this content be a little old for a known period?</li><li>Some dynamic content qualifies too — a public product page or a list of supported countries may be identical for everyone.</li><li>Poor fits are account pages, carts, checkout, payment flows, admin pages, and anything that depends on a private cookie or login state.</li><li>Video is usually delivered as many small segments rather than one huge file, so each segment behaves like a cacheable static object.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>HTTP caching headers</h2>
+<p class="lede">The origin declares cacheability with response headers; the CDN enforces them unless its own configuration overrides them.</p>
+<ul><li><code>public</code> permits shared caches such as a CDN to store the response; <code>private</code> restricts it to the end user's browser.</li><li><code>max-age</code> is freshness in seconds; <code>s-maxage</code> overrides it for shared caches only.</li><li><code>no-store</code> forbids storage entirely; <code>no-cache</code> permits storage but requires revalidation before each reuse.</li><li><code>immutable</code> tells caches the bytes at that URL will not change while fresh, so revalidation is pointless.</li><li><code>stale-while-revalidate</code> allows a stale copy to be served briefly while a background refresh runs.</li><li><code>ETag</code> and <code>Last-Modified</code> enable conditional requests: an unchanged object returns a small <code>304 Not Modified</code> instead of the full body.</li><li>Headers are a contract, not a suggestion — a CDN rule that overrides them can keep serving content the origin considers private.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Directive</th><th>Meaning</th><th>Typical use</th></tr></thead><tbody><tr><td>public</td><td>Shared caches may store it</td><td>Static assets, public pages</td></tr>
+<tr><td>private</td><td>Only the user's browser may store it</td><td>Account and session-bound data</td></tr>
+<tr><td>max-age</td><td>Freshness in seconds</td><td>Browser and CDN default</td></tr>
+<tr><td>s-maxage</td><td>Freshness for shared caches only</td><td>Edge TTL longer than browser TTL</td></tr>
+<tr><td>no-store</td><td>Never write it to a cache</td><td>Checkout, tokens, private APIs</td></tr>
+<tr><td>stale-while-revalidate</td><td>Serve stale briefly while refreshing</td><td>Popular content with mild staleness tolerance</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>TTLs</h2>
+<ul><li>The TTL is how long an edge may reuse an object before it must revalidate or refetch it.</li><li>A <strong>long TTL</strong> raises the hit ratio and cuts origin traffic, but widens the window in which users see old content.</li><li>A <strong>short TTL</strong> keeps content fresher but sends more requests to the origin and lowers the hit ratio.</li><li>Versioned or content-hashed assets can carry a very long TTL because the URL itself changes when the content changes.</li><li>Fast-moving API responses may need only seconds or minutes, and some should not be cached at all.</li><li>Set the TTL from how often the object changes and how much staleness the product tolerates — not from a single global default.</li><li>The cost of one stale response, not engineering habit, should drive the number.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Purging and versioned URLs</h2>
+<ul><li>Sometimes you cannot wait for a TTL, because a wrong image, a bad config, or a security fix is already cached around the world.</li><li>There are two answers: force the old copy out (purge), or never reuse the same key for new content (versioned URLs).</li><li>Purging is an operational action with propagation delay; versioning is a design choice made at build time.</li><li>Versioned URLs are the default for build artifacts; purging is the exception for stable URLs that must change immediately.</li><li>Both approaches must handle the traffic that follows: a purge creates misses, and a new version creates a new cold key.</li></ul>
+<h3>Purging</h3>
+<ul><li>A <strong>purge</strong> (invalidation) removes or stops serving the cached object; the next request becomes a miss and refetches from the origin.</li><li>Scope can be a single URL, a path prefix, or a group of objects tagged together.</li><li>Global purges propagate through many PoPs and can take time to reach every edge.</li><li>Providers limit purge volume and often charge for it, so purging cannot be the normal update path.</li><li>Every purged object turns a hit into a miss; a mass purge can send a burst of traffic straight to the origin.</li></ul>
+
+
+<h3>Versioned URLs</h3>
+<ul><li>Publish <code>logo.v2.png</code> or <code>app.a7b9.js</code> instead of overwriting <code>logo.png</code>.</li><li>A new URL is a new cache entry, so nothing needs to be invalidated and old copies stop being requested.</li><li>Content-addressed names let you cache for a very long time with <code>immutable</code>, giving both strong caching and reliable updates.</li><li>The build system should generate the hash so a human cannot forget to bump it.</li><li>Some URLs must stay stable, such as HTML entry points: give those a short TTL, purge on deploy, or rely on ETag revalidation.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Pull CDNs and push CDNs</h2>
+<ul><li>A <strong>pull CDN</strong> fills each edge on demand: the first request is a miss that fetches from the origin and caches the result.</li><li>Pull is simple because the CDN manages content automatically; the application does nothing per file.</li><li>Its cost is a <strong>cold miss</strong>: the first user in a region waits for the full origin round trip, and every new edge repeats it.</li><li>A <strong>push CDN</strong> uploads content ahead of time and the CDN distributes it to the edge network.</li><li>Push removes the first-request miss and suits large, known releases such as software downloads, media, or a launch catalog.</li><li>Push costs coordination: the application must track what was uploaded, when it changed, and which version is live.</li><li>Pull is the default for general web content; push is a deliberate choice for large or pre-announced content.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Pull CDN</th><th>Push CDN</th></tr></thead><tbody><tr><td>When content reaches the edge</td><td>On the first request</td><td>Before users request it</td></tr>
+<tr><td>First request in a region</td><td>Cache miss, higher latency</td><td>Already cached</td></tr>
+<tr><td>Who manages content</td><td>The CDN, automatically</td><td>The application</td></tr>
+<tr><td>Best fit</td><td>General web content</td><td>Large, planned releases</td></tr>
+<tr><td>Main failure mode</td><td>Cold misses at new edges</td><td>Stale or missing uploads</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Origin shield</h2>
+<ul><li>An <strong>origin shield</strong> is an extra cache layer between the edges and the origin, often called a mid-tier or shielding layer.</li><li>Without it, one hundred edges that all miss the same object can produce one hundred origin requests.</li><li>With it, the edges miss to the shield, and the shield fetches from the origin once and serves the rest.</li><li>It is most valuable when many regions need the same content at roughly the same time — a launch, a news event, or a synchronized expiry.</li><li>The costs are an extra hop on shield misses and a regional component whose failure can affect many edges at once.</li><li>Place the shield near the origin or where traffic concentrates so its own cache is likely to be warm.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>How requests are routed to an edge</h2>
+<ul><li><strong>DNS-based routing:</strong> the CDN's authoritative DNS answers the hostname with an edge address chosen by geography, measured latency, or load.</li><li><strong>Anycast:</strong> many PoPs advertise the same IP address, so internet routing delivers the user to a nearby available site.</li><li>The closest PoP on a map is not always chosen; network path, peering, edge capacity, and health all influence the result.</li><li>Routing happens before the object is known, so content-aware steering — such as sending video to a streaming tier — is configured separately.</li><li>Bad routing shows up as consistently high latency for one region even though the cache itself is healthy.</li><li>Validate routing with real user monitoring from the regions that matter, not with assumptions about distance.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Cache keys</h2>
+<ul><li>The <strong>cache key</strong> decides when two requests may share one cached response; the URL is almost always part of it.</li><li>A key that is <strong>too narrow</strong> — every query parameter, every cookie — stores duplicates of the same bytes and destroys the hit ratio.</li><li>A key that is <strong>too broad</strong> — ignoring the image width or <code>Accept-Language</code> — serves the wrong content.</li><li>Normalize what is safe: drop tracking parameters, sort the remaining ones, and lowercase the host.</li><li>Leave cookies out unless the response genuinely varies by cookie.</li><li>Vary on a header only when the response body actually differs by that header.</li><li>Cache key design is a correctness decision first and a hit-ratio decision second; most CDNs let you configure exactly which attributes count.</li></ul>
+
+
+<div class="note">Example: <code>/img.png?w=200&amp;utm_source=news</code> should usually key on <code>w</code> and ignore <code>utm_source</code>.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Cache stampedes and cold misses</h2>
+<ul><li>A <strong>stampede</strong> is many edges missing the same object at once, usually right after it expires, producing a spike at the origin.</li><li><strong>TTL jitter</strong> adds small random variation so copies in different locations do not expire together.</li><li><strong>Request coalescing</strong> lets one origin fetch satisfy all concurrent misses for the same key.</li><li><strong>Stale-while-revalidate</strong> keeps serving the old copy while a single background refresh runs.</li><li><strong>Origin shielding</strong> reduces the number of independent fetches the origin must handle.</li><li>Cold content has no cached copy anywhere, so a launch needs pre-warming or a push rather than a clever TTL.</li><li>The origin must also be sized for the miss path, because that path is the only one it still serves.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Personalized content and API responses</h2>
+<ul><li>A CDN only pays off when many users can share one response; personalization removes exactly that property.</li><li>A response containing a name, balance, cart, or account state is unique per user, and caching it in a shared cache leaks data between users.</li><li>Putting user identity into the cache key avoids the leak but creates one entry per user, so the hit ratio collapses.</li><li>The common split is shared assets and public data at the edge, with personalized requests continuing to the application backend.</li><li>Public API responses such as a country list or catalog metadata can be cached at the edge if the key covers authentication, locale, and location.</li><li>Endpoints like <code>/api/me</code> or <code>/checkout</code> should skip the shared cache entirely.</li><li>Never store a response to a request carrying a session cookie or <code>Authorization</code> header unless the design has been reviewed for privacy.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Operating a CDN: large files, reliability, and metrics</h2>
+<ul><li><strong>Range requests</strong> let a client fetch part of a file, which is how video players seek without downloading the whole object.</li><li>Serving large downloads from edges removes bandwidth that would otherwise dominate origin cost and connection capacity.</li><li>If the origin is briefly unavailable, some CDNs keep serving cached content, so static parts of the site survive a backend outage.</li><li>CDNs absorb DDoS traffic and add WAF rules, bot filtering, rate limits, and TLS management — useful, but not a replacement for application security.</li><li>Track <strong>cache hit ratio</strong> overall and per important route, plus origin request volume, latency, bandwidth, evictions, error rate, and stale-served traffic.</li><li>Response headers such as <code>Age</code> and provider-specific hit/miss headers show what actually happened to a request; names vary by provider.</li><li>Choose a provider on user geography, cloud fit, cache-rule flexibility, purge speed, shielding and coalescing support, observability, security, and egress pricing.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Long TTLs</strong> raise the hit ratio and cut origin load but widen the window for stale or wrong content.</li><li><strong>Short TTLs</strong> keep content fresh but push more requests to the origin and can erase the CDN's cost benefit.</li><li><strong>Versioned URLs</strong> give safe long-lived caching without purge risk, but require build-time discipline and stable entry points that cannot be versioned.</li><li><strong>Purging</strong> gives immediate corrections at the cost of propagation delay, provider limits, and a burst of origin misses.</li><li><strong>Pull CDNs</strong> remove per-file management but expose a cold miss for the first user at each edge; <strong>push CDNs</strong> remove that miss but add upload coordination.</li><li><strong>Origin shielding</strong> reduces duplicate origin fetches and protects against expiry bursts but adds a hop and another component to operate.</li><li><strong>Narrow cache keys</strong> protect correctness while lowering the hit ratio; <strong>broad keys</strong> raise the ratio while risking wrong or leaked responses.</li><li><strong>Edge caching in general</strong> improves latency, availability, and cost, but adds configuration surface, provider dependency, and harder debugging of what version a user actually received.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a CDN and why does it reduce latency?</summary><div class="answer"><p>A CDN is a network of edge caches deployed close to users. The client connects to a nearby PoP instead of a distant origin, so the network path is shorter and repeated round trips for static content disappear. It also removes load from the origin because most requests never reach it.</p></div></details>
+<details><summary>2. Walk me through a CDN request on a hit and on a miss.</summary><div class="answer"><p>The hostname resolves to an edge address. On a hit, the edge returns the stored response and the origin is untouched. On a miss, the edge fetches from the origin, optionally stores the response according to its headers and cache rules, and returns it. Later requests in that region then hit.</p></div></details>
+<details><summary>3. Pull CDN versus push CDN — when do you choose which?</summary><div class="answer"><p>Pull fills edges on first request; it is the default for general web content because the CDN manages everything. Push uploads content ahead of time, avoiding the first-request miss and suiting large planned releases like software or media. The cost of push is that the application must manage uploads and versions.</p></div></details>
+<details><summary>4. What is the difference between max-age, s-maxage, and no-cache?</summary><div class="answer"><p><code>max-age</code> is freshness in seconds for any cache. <code>s-maxage</code> overrides it for shared caches such as a CDN, which is how you can cache longer at the edge than in the browser. <code>no-cache</code> allows storage but requires revalidation before each reuse; it is not the same as <code>no-store</code>, which forbids storage.</p></div></details>
+<details><summary>5. How do you choose a TTL?</summary><div class="answer"><p>From the object's change frequency and the product's tolerance for staleness. Hash-named assets can be cached for a very long time, HTML needs a short TTL or purge-on-deploy, and volatile APIs may need seconds or no caching at all. The cost of one stale response should drive the number.</p></div></details>
+<details><summary>6. How do you make an urgent content change visible immediately?</summary><div class="answer"><p>Purge the affected URLs, prefixes, or tags and accept propagation delay and origin refetches. For static assets, the better long-term answer is a versioned URL: publish a new filename, reference it from the deployment, and let the old entry age out.</p></div></details>
+<details><summary>7. Why are versioned URLs better than purging?</summary><div class="answer"><p>A new URL is a new key, so there is nothing to invalidate, no provider purge limits, no propagation window, and no correctness risk from an old edge copy. It also allows <code>immutable</code> caching for a year. Purging remains necessary for stable URLs such as HTML entry points.</p></div></details>
+<details><summary>8. What is an origin shield and when does it help?</summary><div class="answer"><p>It is an intermediate cache between edges and the origin. It helps when many edges miss the same object at once: the edges fetch from the shield and the shield fetches from the origin once. It also reduces origin load during launches and synchronized expiries, at the cost of an extra hop.</p></div></details>
+<details><summary>9. How do you design a CDN cache key?</summary><div class="answer"><p>Start from the URL, include only the query parameters and headers that actually change the response, and exclude tracking parameters and cookies that do not. Too broad serves wrong content; too narrow duplicates entries and lowers the hit ratio. Validate with real request variants, not guesses.</p></div></details>
+<details><summary>10. What is a cache stampede and how do you prevent it?</summary><div class="answer"><p>It is a burst of misses for the same popular object, usually after it expires, which hits the origin all at once. Mitigate with TTL jitter, request coalescing, stale-while-revalidate, and origin shielding. Cold content also needs pre-warming because no technique can serve a copy that does not exist.</p></div></details>
+<details><summary>11. How do you handle personalized content at the edge?</summary><div class="answer"><p>Normally you do not cache it in the shared layer. Serve it from the application, or split the page into a shared shell at the edge and personalized fragments from the backend. Putting user identity in the cache key is safe only if every entry is truly per-user, which usually destroys the benefit.</p></div></details>
+<details><summary>12. Which CDN metrics matter?</summary><div class="answer"><p>Cache hit ratio overall and per important route, origin request volume, latency, bandwidth, evictions, error rate, and how much traffic is served stale. A high global hit ratio can hide a bad path, so segment by route and region.</p></div></details>
+<details><summary>13. How does a CDN route a user to an edge?</summary><div class="answer"><p>Usually by authoritative DNS that returns a nearby or least-latency edge, or by anycast where many PoPs advertise the same IP and BGP picks a nearby path. Capacity, health, and network conditions matter, so the geographically closest site is not guaranteed.</p></div></details>
+<details><summary>14. What happens when the origin goes down?</summary><div class="answer"><p>Cached content can still be served, so static pages may keep working for the TTL window. Anything not cached, and all writes, fail. This is why the CDN reduces blast radius but never replaces backend availability, and why a stale-serving policy should be an explicit decision.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Caching a response that contains user-specific data in a shared edge cache and leaking it to other users.</li><li>Putting every cookie and tracking parameter in the cache key, then blaming the CDN for a poor hit ratio.</li><li>Assuming a purge is instant and global when it propagates asynchronously across PoPs.</li><li>Overwriting a static filename in place and expecting every user to receive the new bytes immediately.</li><li>Giving HTML a long TTL while asset filenames are versioned, so users keep loading an old page that references old assets.</li><li>Planning a launch without pre-warming or accounting for cold misses at every edge.</li><li>Measuring only the global hit ratio and missing a critical route or region with a terrible one.</li><li>Treating the CDN as a substitute for backend availability, authentication, or application-level security.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="cache-eviction-policies.html"><span>← Previous</span><strong>Cache Eviction Policies</strong></a><a class="next" href="pub-sub.html"><span>Next →</span><strong>Pub/Sub</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/content-delivery-network-cdn">AlgoMaster — Content Delivery Network (CDN)</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

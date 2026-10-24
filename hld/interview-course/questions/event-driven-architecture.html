@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Event-Driven Architecture — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 28 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p2">P2 · Architecture</span></div>
+    <h1>Event-Driven Architecture</h1>
+    <p class="dek">It tests whether you can decouple services without hand-waving away the hard parts: delivery semantics, ordering, schema contracts, replay, and debugging a flow that has no single call stack.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Producers publish immutable past-tense facts to a partitioned broker, and consumers subscribe and react idempotently, trading immediate consistency and simple debugging for temporal decoupling, buffering, and independent evolution.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Producers publish domain events to a topic without knowing which consumers exist.</li><li>The broker durably stores events for a retention window, and consumers subscribe in groups and can replay.</li><li>Guarantee ordering per entity by choosing a partition key that matches that entity.</li><li>Deliver at least once, with idempotent consumers, capped retries, and a dead-letter queue with replay.</li><li>Register and version event schemas with compatibility checks before publication.</li><li>Build projections or read models for queries, and keep an event timeline per entity for audit and debugging.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Publish latency must stay low, while consumption is asynchronous and scales with partitions.</li><li>No event is lost after it is acknowledged, and duplicates must not corrupt state.</li><li>Consumer lag must be bounded, monitored, and able to trigger backpressure or scale-out.</li><li>Consumers must deploy and scale independently without changing the producer.</li><li>Schema changes must not break existing consumers during a rolling migration.</li><li>Topics need authentication, authorization, encryption, and data minimization for sensitive payloads.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 1M events per day, about 12/s average; a 20x peak reaches roughly 240/s, so partition count is sized for peak consumer parallelism rather than average traffic.</li><li>With 12 partitions and a key such as order_id, events for one order stay ordered while twelve consumers can process in parallel.</li><li>Keep event payloads under about 100 KB and pass large blobs by object-storage reference; a fatter event raises broker storage, network, and consumer cost.</li><li>Retain events on the broker for 7 days for replay and archive older history to object storage for audit instead of paying for hot retention.</li><li>Target projection lag under a minute for user-facing read models, and alert on sustained lag rather than a single spike.</li><li>Keep DLQ depth at zero; alert on any growth, because a DLQ without an owner becomes a graveyard.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Event</span><span class="fields">event_id, type, version, occurred_at, producer, correlation_id, partition_key, payload_ref</span></div><div class="entity"><span class="name">Topic</span><span class="fields">topic_id, name, partitions, retention, schema_id, owner, acl</span></div><div class="entity"><span class="name">ConsumerGroup</span><span class="fields">group_id, topic_id, members, committed_offsets, lag</span></div><div class="entity"><span class="name">Schema</span><span class="fields">schema_id, version, compatibility_mode, fields, owner</span></div><div class="entity"><span class="name">Projection</span><span class="fields">projection_id, consumer_group, store, last_event_offset, updated_at</span></div><div class="entity"><span class="name">DeadLetter</span><span class="fields">dlq_id, event_id, consumer_group, error, attempts, replay_status</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/topics/{topic}/events</code></td><td>Publish one event with a producer-assigned event_id and a partition key.</td></tr><tr><td><code>GET</code></td><td><code>/v1/topics/{topic}/events?cursor={partition}:{offset}</code></td><td>Read a range of events for replay or for bootstrapping a new consumer.</td></tr><tr><td><code>POST</code></td><td><code>/v1/subscriptions</code></td><td>Create a consumer group with a topic, optional filter, and starting offset.</td></tr><tr><td><code>POST</code></td><td><code>/v1/subscriptions/{group}/offsets</code></td><td>Commit processed offsets per partition after the side effect succeeds.</td></tr><tr><td><code>POST</code></td><td><code>/v1/schemas</code></td><td>Register a new schema version and run backward and forward compatibility checks.</td></tr><tr><td><code>POST</code></td><td><code>/v1/dlq/{dlq_id}/replay</code></td><td>Replay a failed event to its original topic after the bug or configuration is fixed.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Event log</td><td>An append-only partitioned log per topic with offsets and time-based retention</td><td>Append-only storage gives durable replay and per-partition ordering, which a destructive queue cannot provide to new consumers.</td></tr><tr><td>Partition key</td><td>The entity ID whose ordering matters, such as order_id or user_id</td><td>Ordering is guaranteed only within a partition, so the key must match the business entity, while a coarse key concentrates load.</td></tr><tr><td>Event envelope</td><td>A standard envelope with event_id, type, version, occurred_at, producer, correlation_id, and partition_key</td><td>A stable envelope supports routing, tracing, deduplication, and schema evolution without changing every consumer.</td></tr><tr><td>Duplicate handling</td><td>A dedupe table keyed by event_id and consumer group, with a bounded TTL</td><td>At-least-once delivery and offset-commit crashes both produce duplicates, and unbounded dedupe history is itself a storage problem.</td></tr><tr><td>Publish consistency</td><td>A transactional outbox written in the same database transaction as the state change, with a relay publishing afterward</td><td>Publishing directly risks a commit without an event or an event without a commit, leaving state and consumers permanently inconsistent.</td></tr><tr><td>Read models</td><td>Materialized projections keyed by entity and advanced by consumer offsets</td><td>The event log is history, not a query surface; projections give fast current-state reads and can be rebuilt by replay.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  P[⚙️ Order Service] --> O[📤 Outbox]
+  O --> B[📬 Event Broker]
+  B --> C1[👷 Payment Consumer]
+  B --> C2[👷 Inventory Consumer]
+  B --> C3[👷 Notification Consumer]
+  C1 --> D1[🗄️ Payment DB]
+  C2 --> D2[🗄️ Inventory DB]
+  C3 --> N[📨 Email Provider]
+  C1 --> R[📊 Read Projection]
+  C2 -.->|Retries exhausted| X[☠️ Dead-letter Queue]
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef ext fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef bad fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class P,O,B,C1,C2,C3 svc;
+  class D1,D2,R store;
+  class N ext;
+  class X bad;</div><div class="diagram-caption">The order service writes state and an outbox record together, a relay publishes to partitioned topics, and independent consumer groups update their own databases or projections, with exhausted retries isolated in a dead-letter queue.</div></div>
+        <ul><li>Publish after the local transaction commits, ideally through an outbox and relay, so consumers never read a state change that was rolled back or miss one that committed.</li><li>Separate events from commands: an event is a past-tense fact with many possible consumers, while a command has one intended recipient and can be refused.</li><li>Choose the event style per case: a thin notification for triggers, event-carried state for read models, and event sourcing only where full history is a real requirement.</li><li>Ordering is per partition, so pick the key from the entity whose order matters and accept the hot-key and parallelism limits that follow.</li><li>Process a partition sequentially inside a consumer; parallel threads or unordered batches break the ordering the broker preserved.</li><li>Operate the broker as a first-class stateful system: monitor lag, retention, disk, replication, and schema compatibility, and rehearse replay before you need it.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Asynchronous decoupling</td><td>Producers and consumers do not need to be available at the same time, and new consumers subscribe without producer changes</td><td>The end-to-end flow is emergent and much harder to see than a call stack</td></tr><tr><td>Eventual consistency</td><td>Absorbs spikes and isolates consumer outages</td><td>Read models lag, so the UI must show pending states and some reads need the source of truth</td></tr><tr><td>At-least-once delivery</td><td>Avoids silent event loss during failures</td><td>Every consumer needs idempotency or deduplication, and duplicate side effects are a real risk</td></tr><tr><td>Partitioned ordering</td><td>Scales consumption while preserving per-entity order</td><td>No global order, and one hot key can limit parallelism for that partition</td></tr><tr><td>Event-carried state</td><td>Consumers avoid callback calls and runtime coupling</td><td>Duplicated data, larger payloads, and a wider contract to evolve</td></tr><tr><td>Event sourcing</td><td>A complete audit trail and the ability to rebuild any projection</td><td>Snapshots, projection rebuilds, and schema migration across all historical events</td></tr><tr><td>Replay</td><td>Recovers projections and bootstraps new consumers</td><td>Re-triggers side effects unless consumers are idempotent and replay is scoped</td></tr><tr><td>Choreography</td><td>Flexible, loosely coupled reactions with no central controller</td><td>The workflow is implicit, so failures and timeouts are harder to trace and compensate</td></tr></tbody></table></div>
+        <ul><li>Batch consume and commit offsets after the batch, while handling per-record failures so one poison event does not block the partition.</li><li>Compress payloads and keep them small, referencing large objects by key instead of embedding bytes.</li><li>Size partition count for peak consumer parallelism, and remember that increasing partitions later changes key-to-partition mapping and ordering.</li><li>Autoscale consumers on lag rather than CPU, and use backpressure when the downstream store is saturated.</li><li>Cache projections or materialized views for the hottest reads instead of querying the broker or replaying events per request.</li><li>Use compacted topics when only the latest value per key matters, such as a configuration or entity snapshot.</li><li>Reply to failures into a DLQ with the original event, error, attempts, and consumer version so replay is deterministic.</li><li>Propagate the correlation ID and event ID through logs and traces, and keep an event timeline per entity for debugging.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>What is the difference between an event and a command?</strong> An event is a past-tense fact that already happened and can have many consumers, while a command is a request to one recipient that can be refused.</div><div class="followup"><strong>Notification, state transfer, or event sourcing?</strong> Notification carries an ID and makes consumers call back, state transfer carries the changed fields, and sourcing stores events as the source of truth replayed into projections.</div><div class="followup"><strong>How do you guarantee ordering?</strong> Guarantee it per partition by keying on the entity, and process each partition sequentially; global ordering is expensive and rarely needed.</div><div class="followup"><strong>How do you handle duplicate events?</strong> Assume at-least-once delivery, use an event ID or natural key with a conditional write, and keep a dedupe table with a bounded retention window.</div><div class="followup"><strong>What does exactly-once delivery actually mean?</strong> Usually at-least-once delivery plus idempotent or transactional processing inside one broker ecosystem, not a guarantee that spans an arbitrary external database.</div><div class="followup"><strong>How do you deal with eventual consistency?</strong> Expose pending states, route reads that must see the latest write to the source, wait for a version marker, and reconcile projections that fall behind.</div><div class="followup"><strong>How do you evolve event schemas?</strong> Add optional fields, avoid renames and removals, register versions in a schema registry with compatibility checks, and support two versions during migration.</div><div class="followup"><strong>What happens when a consumer keeps failing?</strong> Retry transient errors with backoff, cap attempts, then move the event to a dead-letter queue so it stops blocking the partition.</div><div class="followup"><strong>How do you debug an event-driven system?</strong> Propagate correlation and event IDs through logs and traces, record which consumer version processed what, and keep a per-entity event timeline.</div><div class="followup"><strong>What is the transactional outbox?</strong> It writes the state change and the event record in one local transaction, then a relay publishes the event, avoiding the dual-write inconsistency.</div><div class="followup"><strong>Choreography or orchestration?</strong> Choreography suits simple fan-out and independent reactions, while orchestration gives a visible coordinator for multi-step workflows with compensation.</div><div class="followup"><strong>How do you stop a consumer from falling permanently behind?</strong> Monitor lag and processing rate, scale consumers up to the partition count, reduce per-event work, and add backpressure or repartition if lag is structural.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Using events as remote procedure calls and expecting an immediate reply from a consumer.</li><li>Publishing the event before the database transaction commits, so consumers see stale state or the event is lost on rollback.</li><li>Assuming ordering across a whole topic instead of only within a partition.</li><li>Writing consumers that are not idempotent on an at-least-once broker.</li><li>Treating a dead-letter queue as a solution without an owner, alerting, and a replay procedure.</li><li>Changing a field's meaning without versioning the schema, silently corrupting replays and historical data.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="serverless-architecture.html"><span>← Previous</span><strong>Serverless Architecture</strong></a><a class="next" href="long-running-tasks.html"><span>Next →</span><strong>Long-Running Tasks and Scheduling</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

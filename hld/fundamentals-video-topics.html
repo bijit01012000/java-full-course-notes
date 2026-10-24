@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Design Fundamentals — Video Topics</title>
+<style>
+  :root{
+    --bg:#f6f4ee; --paper:#fffdf8; --ink:#17211f; --muted:#5d6a66;
+    --line:#d8ded6; --teal:#0f766e; --teal-soft:#e2f4ef;
+    --amber:#a85b00; --amber-soft:#fff2d6; --blue:#1d4ed8; --blue-soft:#e8efff;
+    --shadow:0 16px 48px rgba(23,33,31,.07);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; color:var(--ink);
+    background:radial-gradient(circle at 8% 0%,rgba(15,118,110,.07),transparent 34rem),
+               radial-gradient(circle at 100% 8%,rgba(29,78,216,.05),transparent 30rem),var(--bg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--teal);text-decoration:none} a:hover{text-decoration:underline}
+  .wrap{max-width:1120px;margin:0 auto;padding:28px 24px 72px}
+  .hero{
+    position:relative; overflow:hidden; padding:40px 44px 34px;
+    background:linear-gradient(135deg,#fffdf8 0%,#f4faf7 58%,#eef6f4 100%);
+    border:1px solid var(--line); border-radius:24px; box-shadow:var(--shadow);
+  }
+  .hero::after{
+    content:""; position:absolute; right:-90px; top:-130px; width:380px; height:380px;
+    border-radius:50%; background:radial-gradient(circle,rgba(15,118,110,.14),transparent 68%);
+  }
+  .eyebrow{display:flex;align-items:center;gap:10px;color:var(--teal);font-size:.76rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;margin-bottom:14px}
+  .eyebrow::before{content:"";width:30px;height:2px;background:var(--teal);border-radius:2px}
+  h1{margin:0;max-width:780px;font-family:Georgia,"Times New Roman",serif;font-size:clamp(2.3rem,5vw,4rem);line-height:1.03;letter-spacing:-.035em;font-weight:600}
+  .dek{max-width:720px;margin:16px 0 0;color:#3f4d49;font-size:1.06rem;line-height:1.55}
+  .stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}
+  .stat{background:rgba(255,253,248,.82);border:1px solid var(--line);border-radius:14px;padding:11px 15px;min-width:112px}
+  .stat .n{display:block;font-family:Georgia,serif;font-size:1.7rem;line-height:1;font-weight:600;color:var(--teal)}
+  .stat .l{display:block;margin-top:5px;color:var(--muted);font-size:.7rem;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
+  .stat.alt .n{color:var(--amber)} .stat.blue .n{color:var(--blue)}
+  .print-btn{position:absolute;right:24px;bottom:24px;border:1px solid #b9d8d0;background:#fff;color:var(--teal);border-radius:999px;padding:8px 13px;font:inherit;font-size:.76rem;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(23,33,31,.07)}
+  .print-btn:hover{background:var(--teal-soft)}
+
+  .note{
+    margin:26px 0 0; padding:15px 18px; border:1px solid #d2ddf8; border-left:4px solid var(--blue);
+    background:var(--blue-soft); border-radius:0 12px 12px 0; font-size:.9rem; color:#3f4d49;
+  }
+  .note strong{color:#1e3a8a}
+  .callout{
+    margin:24px 0 0; padding:18px 20px; border:1px solid #c3e2db; border-left:4px solid var(--teal);
+    background:var(--teal-soft); border-radius:0 12px 12px 0;
+  }
+  .callout .label{display:block;margin-bottom:5px;color:var(--teal);font-size:.68rem;font-weight:800;letter-spacing:.11em;text-transform:uppercase}
+  .callout p{margin:0;color:#2f4741;font-size:.94rem}
+  .callout a{font-weight:750}
+
+  .section-block{margin-top:40px}
+  .section-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line);padding-bottom:9px;margin-bottom:14px}
+  h2{margin:0;font-family:Georgia,"Times New Roman",serif;font-size:1.48rem;line-height:1.2;letter-spacing:-.015em;font-weight:600}
+  .count{color:var(--muted);font-size:.73rem;font-weight:750;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+  .table-wrap{border:1px solid var(--line);border-radius:12px;overflow:auto;background:var(--paper)}
+  table{width:100%;border-collapse:collapse;font-size:.9rem;line-height:1.45}
+  th{background:#f0f5f2;color:#34423e;text-align:left;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;font-weight:800;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:11px 14px;border-bottom:1px solid #e8ede9;vertical-align:middle}
+  tr:last-child td{border-bottom:0}
+  tbody tr:nth-child(even){background:#fcfdfb}
+  .num{width:42px;color:#94a29d;font-variant-numeric:tabular-nums;font-weight:700;text-align:center}
+  .access{width:130px;white-space:nowrap}
+  .open{width:58px;text-align:center}
+  .topic{color:#1d2b27;font-weight:650}
+  .topic:hover{color:var(--teal)}
+  .badge{display:inline-block;border-radius:999px;padding:3px 8px;font-size:.66rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+  .badge.premium{background:var(--amber-soft);color:var(--amber);border:1px solid #f0d8ae}
+  .badge.free{background:var(--teal-soft);color:var(--teal);border:1px solid #b9ddd5}
+  .arrow{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;border:1px solid var(--line);border-radius:50%;color:var(--muted);font-size:.9rem}
+  .arrow:hover{background:var(--teal-soft);border-color:#b9ddd5;color:var(--teal);text-decoration:none}
+
+  .summary{margin-top:48px;padding-top:26px;border-top:1px solid var(--line)}
+  .summary h2{font-size:1.25rem;margin-bottom:12px}
+  .summary table{font-size:.84rem;background:var(--paper);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .summary td{padding:8px 13px} .summary .right{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+  .summary tfoot td{background:#f0f5f2;border-top:1px solid var(--line);font-weight:800}
+  .no-video{margin-top:18px;color:var(--muted);font-size:.82rem}
+  .footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:.76rem;line-height:1.55}
+  .footer strong{color:#3a4844}
+
+  @media(max-width:720px){
+    .wrap{padding:14px 12px 48px}
+    .hero{padding:28px 20px 22px;border-radius:18px}
+    .print-btn{position:static;margin-top:18px}
+    .stats{gap:8px} .stat{min-width:96px;padding:9px 12px}
+    h2{font-size:1.3rem}
+    .section-head{align-items:flex-start;flex-direction:column;gap:3px}
+    .access{width:110px} .open{width:44px}
+    th,td{padding:9px 10px}
+  }
+  @media print{
+    @page{margin:15mm 13mm}
+    body{background:#fff;font-size:10pt}
+    .wrap{max-width:none;padding:0}
+    .hero{box-shadow:none;border:0;border-bottom:2px solid #17211f;border-radius:0;padding:0 0 14px;background:#fff}
+    .hero::after,.print-btn{display:none}
+    h1{font-size:28pt} .dek{font-size:10.5pt}
+    .section-block{break-inside:auto;margin-top:22px}
+    .table-wrap,.summary table,.callout,.note{break-inside:avoid;box-shadow:none}
+    .section-head{break-after:avoid}
+    a{color:inherit;text-decoration:none}
+    .badge{border:0;padding:0;background:none!important;color:#333!important}
+    .footer{font-size:8pt}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">AlgoMaster · System Design Fundamentals</div>
+    <h1>Video Topics Index</h1>
+    <p class="dek">Every topic in the fundamentals course that has a video attached, in course order. Built for planning and revision — the full notes will follow topic by topic.</p>
+    <div class="stats">
+      <div class="stat"><span class="n">49</span><span class="l">video topics</span></div>
+      <div class="stat blue"><span class="n">121</span><span class="l">course topics</span></div>
+      <div class="stat alt"><span class="n">41</span><span class="l">premium videos</span></div>
+      <div class="stat"><span class="n">8</span><span class="l">free videos</span></div>
+    </div>
+    <button class="print-btn" type="button" onclick="window.print()">Print / save PDF</button>
+  </header>
+
+  <div class="note">
+    <strong>Count:</strong> 49 of the 121 course topics have a video. 41 are premium videos and 8 are free.
+    Video presence was verified from each topic page (Mux player or “Watch Video Explanation”), not guessed from the topic list.
+  </div>
+
+  <div class="callout">
+    <span class="label">Notes</span>
+    <p><a href="fundamentals/index.html">Detailed notes — one page per topic →</a><br>
+    Quick guide: <a href="fundamentals-video-concepts.html">all 49 video concepts in one HTML</a> · Deep dive: <a href="01-what-is-system-design.html">What is System Design?</a></p>
+  </div>
+
+  
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Introduction</h2>
+          <span class="count">2 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/what-is-system-design" target="_blank" rel="noopener">What is System Design?</a></td>
+                <td class="access"><span class="badge free">Free</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/what-is-system-design" target="_blank" rel="noopener" aria-label="Open What is System Design?">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/top-30-system-design-concepts" target="_blank" rel="noopener">Top 30 System Design Concepts</a></td>
+                <td class="access"><span class="badge free">Free</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/top-30-system-design-concepts" target="_blank" rel="noopener" aria-label="Open Top 30 System Design Concepts">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Core Concepts</h2>
+          <span class="count">5 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/scalability" target="_blank" rel="noopener">Scalability</a></td>
+                <td class="access"><span class="badge free">Free</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/scalability" target="_blank" rel="noopener" aria-label="Open Scalability">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/availability" target="_blank" rel="noopener">Availability</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/availability" target="_blank" rel="noopener" aria-label="Open Availability">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/cap-theorem" target="_blank" rel="noopener">CAP Theorem</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/cap-theorem" target="_blank" rel="noopener" aria-label="Open CAP Theorem">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/consistent-hashing" target="_blank" rel="noopener">Consistent Hashing</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/consistent-hashing" target="_blank" rel="noopener" aria-label="Open Consistent Hashing">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">5</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/latency-vs-throughput" target="_blank" rel="noopener">Latency vs Throughput</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/latency-vs-throughput" target="_blank" rel="noopener" aria-label="Open Latency vs Throughput">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Networking</h2>
+          <span class="count">6 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/load-balancers" target="_blank" rel="noopener">Load Balancers</a></td>
+                <td class="access"><span class="badge free">Free</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/load-balancers" target="_blank" rel="noopener" aria-label="Open Load Balancers">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/proxy-vs-reverse-proxy" target="_blank" rel="noopener">Proxy vs Reverse Proxy</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/proxy-vs-reverse-proxy" target="_blank" rel="noopener" aria-label="Open Proxy vs Reverse Proxy">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/domain-name-system-dns" target="_blank" rel="noopener">Domain Name System (DNS)</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/domain-name-system-dns" target="_blank" rel="noopener" aria-label="Open Domain Name System (DNS)">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/http-https" target="_blank" rel="noopener">HTTP/HTTPS</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/http-https" target="_blank" rel="noopener" aria-label="Open HTTP/HTTPS">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">5</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/tcp-vs-udp" target="_blank" rel="noopener">TCP vs UDP</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/tcp-vs-udp" target="_blank" rel="noopener" aria-label="Open TCP vs UDP">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">6</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/checksums" target="_blank" rel="noopener">Checksums</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/checksums" target="_blank" rel="noopener" aria-label="Open Checksums">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>API Fundamentals</h2>
+          <span class="count">4 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/what-is-an-api" target="_blank" rel="noopener">What is an API?</a></td>
+                <td class="access"><span class="badge free">Free</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/what-is-an-api" target="_blank" rel="noopener" aria-label="Open What is an API?">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/api-styles" target="_blank" rel="noopener">API Architectural Styles</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/api-styles" target="_blank" rel="noopener" aria-label="Open API Architectural Styles">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/websockets" target="_blank" rel="noopener">WebSockets</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/websockets" target="_blank" rel="noopener" aria-label="Open WebSockets">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/webhooks" target="_blank" rel="noopener">Webhooks</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/webhooks" target="_blank" rel="noopener" aria-label="Open Webhooks">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Databases &amp; Storage</h2>
+          <span class="count">3 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/database-types" target="_blank" rel="noopener">Database Types</a></td>
+                <td class="access"><span class="badge free">Free</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/database-types" target="_blank" rel="noopener" aria-label="Open Database Types">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/object-storage" target="_blank" rel="noopener">Object Storage</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/object-storage" target="_blank" rel="noopener" aria-label="Open Object Storage">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/query-optimization" target="_blank" rel="noopener">Query Optimization</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/query-optimization" target="_blank" rel="noopener" aria-label="Open Query Optimization">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Database Scaling Techniques</h2>
+          <span class="count">3 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/indexing" target="_blank" rel="noopener">Indexing</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/indexing" target="_blank" rel="noopener" aria-label="Open Indexing">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/sharding" target="_blank" rel="noopener">Sharding</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/sharding" target="_blank" rel="noopener" aria-label="Open Sharding">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/denormalization" target="_blank" rel="noopener">Denormalization</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/denormalization" target="_blank" rel="noopener" aria-label="Open Denormalization">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Caching</h2>
+          <span class="count">4 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/what-is-caching" target="_blank" rel="noopener">What is Caching?</a></td>
+                <td class="access"><span class="badge free">Free</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/what-is-caching" target="_blank" rel="noopener" aria-label="Open What is Caching?">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/caching-strategies" target="_blank" rel="noopener">Caching Strategies</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/caching-strategies" target="_blank" rel="noopener" aria-label="Open Caching Strategies">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/cache-eviction-policies" target="_blank" rel="noopener">Cache Eviction Policies</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/cache-eviction-policies" target="_blank" rel="noopener" aria-label="Open Cache Eviction Policies">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/content-delivery-network-cdn" target="_blank" rel="noopener">Content Delivery Network (CDN)</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/content-delivery-network-cdn" target="_blank" rel="noopener" aria-label="Open Content Delivery Network (CDN)">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Asynchronous Communications</h2>
+          <span class="count">2 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/pub-sub" target="_blank" rel="noopener">Pub/Sub</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/pub-sub" target="_blank" rel="noopener" aria-label="Open Pub/Sub">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/message-queues" target="_blank" rel="noopener">Message Queues</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/message-queues" target="_blank" rel="noopener" aria-label="Open Message Queues">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Microservices</h2>
+          <span class="count">5 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/service-discovery" target="_blank" rel="noopener">Service Discovery</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/service-discovery" target="_blank" rel="noopener" aria-label="Open Service Discovery">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/sidecar-pattern" target="_blank" rel="noopener">Sidecar Pattern</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/sidecar-pattern" target="_blank" rel="noopener" aria-label="Open Sidecar Pattern">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/circuit-breaker-pattern" target="_blank" rel="noopener">Circuit Breaker Pattern</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/circuit-breaker-pattern" target="_blank" rel="noopener" aria-label="Open Circuit Breaker Pattern">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/saga-pattern" target="_blank" rel="noopener">SAGA Pattern</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/saga-pattern" target="_blank" rel="noopener" aria-label="Open SAGA Pattern">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">5</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/service-mesh" target="_blank" rel="noopener">Service Mesh</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/service-mesh" target="_blank" rel="noopener" aria-label="Open Service Mesh">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Big Data Processing</h2>
+          <span class="count">5 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/batch-vs-stream-processing" target="_blank" rel="noopener">Batch vs Stream Processing</a></td>
+                <td class="access"><span class="badge free">Free</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/batch-vs-stream-processing" target="_blank" rel="noopener" aria-label="Open Batch vs Stream Processing">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/etl-pipelines" target="_blank" rel="noopener">ETL Pipelines</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/etl-pipelines" target="_blank" rel="noopener" aria-label="Open ETL Pipelines">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/mapreduce" target="_blank" rel="noopener">MapReduce</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/mapreduce" target="_blank" rel="noopener" aria-label="Open MapReduce">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/data-lakes" target="_blank" rel="noopener">Data Lakes</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/data-lakes" target="_blank" rel="noopener" aria-label="Open Data Lakes">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">5</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/data-warehousing" target="_blank" rel="noopener">Data Warehousing</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/data-warehousing" target="_blank" rel="noopener" aria-label="Open Data Warehousing">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Architectural Patterns</h2>
+          <span class="count">5 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/client-server-architecture" target="_blank" rel="noopener">Client-Server Architecture</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/client-server-architecture" target="_blank" rel="noopener" aria-label="Open Client-Server Architecture">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/microservices-architecture" target="_blank" rel="noopener">Microservices Architecture</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/microservices-architecture" target="_blank" rel="noopener" aria-label="Open Microservices Architecture">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/serverless-architecture" target="_blank" rel="noopener">Serverless Architecture</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/serverless-architecture" target="_blank" rel="noopener" aria-label="Open Serverless Architecture">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/event-driven-architecture" target="_blank" rel="noopener">Event-Driven Architecture</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/event-driven-architecture" target="_blank" rel="noopener" aria-label="Open Event-Driven Architecture">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">5</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/peer-to-peer-p2p-architecture" target="_blank" rel="noopener">Peer-to-Peer (P2P) Architecture</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/peer-to-peer-p2p-architecture" target="_blank" rel="noopener" aria-label="Open Peer-to-Peer (P2P) Architecture">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Observability</h2>
+          <span class="count">2 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/logging" target="_blank" rel="noopener">Logging</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/logging" target="_blank" rel="noopener" aria-label="Open Logging">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/alert-monitoring" target="_blank" rel="noopener">Alert &amp; Monitoring</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/alert-monitoring" target="_blank" rel="noopener" aria-label="Open Alert &amp; Monitoring">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="section-block">
+        <div class="section-head">
+          <h2>Security</h2>
+          <span class="count">3 videos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">#</th><th>Topic</th><th class="access">Video access</th><th class="open">Open</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/jwt" target="_blank" rel="noopener">JWT</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/jwt" target="_blank" rel="noopener" aria-label="Open JWT">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/ssl-tls" target="_blank" rel="noopener">SSL/TLS</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/ssl-tls" target="_blank" rel="noopener" aria-label="Open SSL/TLS">↗</a></td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><a class="topic" href="https://algomaster.io/learn/system-design/rbac" target="_blank" rel="noopener">RBAC</a></td>
+                <td class="access"><span class="badge premium">Premium</span></td>
+                <td class="open"><a class="arrow" href="https://algomaster.io/learn/system-design/rbac" target="_blank" rel="noopener" aria-label="Open RBAC">↗</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+  <section class="summary">
+    <h2>Coverage by section</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Section</th><th class="right">Videos</th></tr></thead>
+        <tbody><tr><td>Introduction</td><td class="right">2</td></tr><tr><td>Core Concepts</td><td class="right">5</td></tr><tr><td>Networking</td><td class="right">6</td></tr><tr><td>API Fundamentals</td><td class="right">4</td></tr><tr><td>Databases &amp; Storage</td><td class="right">3</td></tr><tr><td>Database Scaling Techniques</td><td class="right">3</td></tr><tr><td>Caching</td><td class="right">4</td></tr><tr><td>Asynchronous Communications</td><td class="right">2</td></tr><tr><td>Microservices</td><td class="right">5</td></tr><tr><td>Big Data Processing</td><td class="right">5</td></tr><tr><td>Architectural Patterns</td><td class="right">5</td></tr><tr><td>Observability</td><td class="right">2</td></tr><tr><td>Security</td><td class="right">3</td></tr></tbody>
+        <tfoot><tr><td>Total</td><td class="right">49</td></tr></tfoot>
+      </table>
+    </div>
+    <p class="no-video"><strong>No videos:</strong> Tradeoffs · Distributed System Concepts · Interview Tips · Interview Questions.</p>
+  </section>
+
+  <footer class="footer">
+    <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design">AlgoMaster — Learn System Design</a>. Course order and section names follow the course page. Premium/free reflects the video block shown on the topic page.</p>
+    <p><strong>Link fix:</strong> the course page points “API Architectural Styles” at <code>/api-architectural-styles</code> (404); the working page is <code>/api-styles</code> and is linked correctly above.</p>
+  </footer>
+
+</div>
+</body>
+</html>

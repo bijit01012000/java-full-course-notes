@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Logging — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 45 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Logging</h1>
+    <p class="dek">Observability · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/logging">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What a good log entry answers</a>
+<a href="#s2">Structured logging</a>
+<a href="#s3">Consistent field names</a>
+<a href="#s4">Log levels</a>
+<a href="#s5">Choosing the right level</a>
+<a href="#s6">Context on every entry</a>
+<a href="#s7">Correlation IDs</a>
+<a href="#s8">What to log</a>
+<a href="#s9">What not to log, and redaction</a>
+<a href="#s10">Avoiding noise</a>
+<a href="#s11">Logging and performance</a>
+<a href="#s12">Centralizing logs</a>
+<a href="#s13">Volume, cost, and retention</a>
+<a href="#s14">Logs, metrics, and traces together</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Good logging is not more logging: it is structured events with consistent fields, honest levels, a correlation ID, and enough context to explain an incident — while keeping secrets out and volume affordable.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Structured logging</dt><dd>Emitting each entry as named fields, usually JSON, so machines can index, filter, and group without regex.</dd></div><div class="term"><dt>Log level</dt><dd>A severity label (DEBUG, INFO, WARN, ERROR, FATAL) that decides whether an entry is kept and how it is treated.</dd></div><div class="term"><dt>Log schema</dt><dd>The agreed set of field names and types every service uses, such as timestamp, level, service, and trace_id.</dd></div><div class="term"><dt>Correlation ID</dt><dd>An identifier generated at the edge and propagated through every service and message so one request can be reconstructed.</dd></div><div class="term"><dt>Trace ID</dt><dd>The identifier used by distributed tracing, which can double as the correlation ID and links logs to traces.</dd></div><div class="term"><dt>Redaction</dt><dd>Masking or removing sensitive fields in the logging library before an entry is written.</dd></div><div class="term"><dt>Asynchronous logging</dt><dd>Buffering entries in memory and writing them from a background thread so logging does not block requests.</dd></div><div class="term"><dt>Log aggregation</dt><dd>Shipping logs from every host into one central, searchable store with common indexing and retention.</dd></div><div class="term"><dt>Sampling</dt><dd>Keeping all errors and warnings but only a fraction of high-volume success logs to control cost.</dd></div><div class="term"><dt>Retention tier</dt><dd>A policy that keeps recent logs in fast storage and moves or deletes older logs based on age and purpose.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What a good log entry answers</h2>
+<p class="lede">Suppose you are paged because payments are failing. You open the payment service logs and search for errors.</p>
+<ul><li>Thousands of lines say only that something went wrong, with no order, user, or downstream call identified.</li><li>The opposite failure is just as bad: logging every cache lookup and health check buries the one error in noise.</li><li>A useful entry answers <strong>what happened, where, to whom, when, and with what outcome</strong>.</li><li>It should let an investigator start work without opening the code or reproducing the request.</li><li>The practical test: if I saw only this line during an incident, would I understand what happened?</li><li>Logs are for events and context; counts and trends belong in metrics, and request paths belong in traces.</li><li>The goal is not maximum volume but maximum signal per line.</li></ul>
+
+
+<div class="note">Compare <em>Something went wrong</em> with <em>Payment charge failed</em> plus order_id, amount, error_type, and duration_ms as fields.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Structured logging</h2>
+<ul><li>Unstructured logs mix values into a sentence, so extracting them requires fragile regex rules.</li><li>A small wording change then breaks every search, dashboard, and alert built on top of it.</li><li><strong>Structured logging</strong> writes each entry as named fields, most commonly JSON.</li><li>The log system can index those fields directly: filter by service, error type, user, or order.</li><li>You can group and count errors by field value instead of guessing at message text.</li><li>Fields stay stable even if the human-readable message is reworded.</li><li>Structured does not mean verbose: the same facts, just machine-readable.</li></ul>
+
+<div class="flow"><span class="flow-step">Emit named fields</span><span class="flow-arrow">→</span><span class="flow-step">Index fields centrally</span><span class="flow-arrow">→</span><span class="flow-step">Filter and group</span><span class="flow-arrow">→</span><span class="flow-step">Alert on a field value</span></div>
+<pre class="code"><code>{&quot;timestamp&quot;:&quot;2026-01-01T12:00:00Z&quot;,&quot;level&quot;:&quot;ERROR&quot;,&quot;service&quot;:&quot;payment-service&quot;,&quot;environment&quot;:&quot;prod&quot;,&quot;message&quot;:&quot;Payment charge failed&quot;,&quot;trace_id&quot;:&quot;req-8f2c1a&quot;,&quot;order_id&quot;:&quot;842&quot;,&quot;error_type&quot;:&quot;timeout&quot;,&quot;duration_ms&quot;:1204}</code></pre>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Consistent field names</h2>
+<ul><li>Structured logs only help if every service uses the same names for the same thing.</li><li>If one service logs user_id, another userId, and a third uid, every search must know all variants.</li><li>Teams agree a <strong>shared schema</strong> for the common fields and enforce it through a shared logging library.</li><li>Required fields should be set automatically so developers cannot forget them.</li><li>Optional fields are added when relevant, not filled with placeholders.</li><li>A shared library also centralizes redaction and formatting, which is where most mistakes happen.</li><li>Document the schema; a new service should not have to reverse-engineer field names from existing logs.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th><th>Required</th></tr></thead><tbody><tr><td>timestamp</td><td>ISO 8601</td><td>When the event occurred</td><td>Yes</td></tr>
+<tr><td>level</td><td>string</td><td>DEBUG, INFO, WARN, ERROR</td><td>Yes</td></tr>
+<tr><td>service</td><td>string</td><td>Name of the service</td><td>Yes</td></tr>
+<tr><td>environment</td><td>string</td><td>prod, staging, dev</td><td>Yes</td></tr>
+<tr><td>message</td><td>string</td><td>Short, constant description</td><td>Yes</td></tr>
+<tr><td>trace_id</td><td>string</td><td>Request or trace identifier</td><td>When available</td></tr>
+<tr><td>user_id</td><td>string</td><td>User involved</td><td>When relevant</td></tr>
+<tr><td>error_type</td><td>string</td><td>Error classification</td><td>For errors</td></tr>
+<tr><td>duration_ms</td><td>number</td><td>Operation duration</td><td>For timed operations</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Log levels</h2>
+<ul><li><strong>DEBUG</strong> is detailed development information: variable values, branches taken, internal steps.</li><li><strong>INFO</strong> is normal, meaningful events: service started, order placed, job finished.</li><li><strong>WARN</strong> is something unexpected that the system handled: a retry that succeeded, a fallback to default.</li><li><strong>ERROR</strong> is a failure that affected an operation: a payment could not be processed.</li><li><strong>FATAL</strong> means the process cannot continue, such as required configuration missing at startup.</li><li><strong>TRACE</strong> is finer than DEBUG, typically method entry and exit, and is rarely used in production.</li><li>Levels exist so you can keep INFO and above in production and raise one service to DEBUG temporarily.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Level</th><th>When to use</th><th>Example</th><th>Production</th></tr></thead><tbody><tr><td>FATAL</td><td>Process cannot continue</td><td>Required config missing</td><td>Always logged</td></tr>
+<tr><td>ERROR</td><td>A failure affected an operation</td><td>Payment could not be processed</td><td>Always logged</td></tr>
+<tr><td>WARN</td><td>Unexpected but handled</td><td>Retry succeeded, fallback used</td><td>Always logged</td></tr>
+<tr><td>INFO</td><td>Normal, meaningful event</td><td>Service started, order placed</td><td>Usually logged</td></tr>
+<tr><td>DEBUG</td><td>Detail for development</td><td>Variable value, path taken</td><td>Off unless investigating</td></tr>
+<tr><td>TRACE</td><td>Even finer detail</td><td>Entering and exiting methods</td><td>Rarely used</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Choosing the right level</h2>
+<ul><li>Wrong levels create alert fatigue, which is worse than missing logs.</li><li>A user typing the wrong password is expected behavior, not a system error; logging it at ERROR inflates the error rate.</li><li>Alerts built on error counts then fire for things that need no action, and the team learns to ignore them.</li><li>A useful rule: ask whether <strong>someone needs to act</strong>.</li><li>If yes, it is probably ERROR; if unusual but handled, WARN; if part of normal flow, INFO or DEBUG.</li><li>Log an error at the layer that handles it, not at every layer it passes through.</li><li>Log level should describe impact, not how surprised the developer was.</li></ul>
+
+<div class="flow"><span class="flow-step">Something happened</span><span class="flow-arrow">→</span><span class="flow-step">Does someone need to act?</span><span class="flow-arrow">→</span><span class="flow-step">Yes → ERROR</span><span class="flow-arrow">→</span><span class="flow-step">No → handled but unusual? → WARN</span><span class="flow-arrow">→</span><span class="flow-step">Normal flow → INFO or DEBUG</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Context on every entry</h2>
+<ul><li>A message alone is rarely enough; the surrounding context is what makes it actionable.</li><li><strong>Static context</strong> is the same for every entry: service name, version, environment, host or container.</li><li>The version is especially useful: if errors start right after a deploy, it isolates the affected build.</li><li><strong>Request context</strong> includes the request ID, user ID, and the main entity being processed, such as an order ID.</li><li>Static fields are attached when the logger is created; request fields are attached once per request.</li><li>The developer should only write the message and the few operation-specific fields.</li><li>Exceptions should include the error type, message, and stack trace — not just a generic database error.</li></ul>
+
+
+<div class="note">A request-scoped logger context means you attach the order ID once and every subsequent line in that flow carries it automatically.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Correlation IDs</h2>
+<ul><li>In a distributed system, one request produces log entries in many services.</li><li>A <strong>correlation ID</strong> (request ID) is generated when the request enters, typically at the API gateway or edge.</li><li>Each service passes it to the next through an HTTP header or a message attribute.</li><li>Every service includes it in every log entry for that request.</li><li>Searching one ID then reconstructs the full story across services, in order.</li><li>If distributed tracing is in place, the trace ID can serve as the correlation ID and link logs to traces.</li><li>Most logging libraries store the ID in request-scoped context so it is added automatically.</li></ul>
+
+<div class="flow"><span class="flow-step">Client request</span><span class="flow-arrow">→</span><span class="flow-step">Gateway generates req-8f2c1a</span><span class="flow-arrow">→</span><span class="flow-step">Header passed to each service</span><span class="flow-arrow">→</span><span class="flow-step">Every log line carries it</span><span class="flow-arrow">→</span><span class="flow-step">Search one ID across all logs</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>What to log</h2>
+<ul><li>Start at the <strong>boundaries</strong> of the system, where requests and external calls enter and leave.</li><li><strong>Requests:</strong> arrival and completion, with status code and duration.</li><li><strong>External calls:</strong> database, payment provider, and other services, especially failures and slow responses.</li><li><strong>Important state changes:</strong> order moved from pending to paid, account locked, subscription cancelled.</li><li><strong>Decisions the system made:</strong> retried a call, opened a circuit breaker, fell back to cached data.</li><li><strong>Key configuration at startup:</strong> enabled feature flags, active region, dependency endpoints.</li><li>Log the outcome and identifiers, not the full payload.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>What not to log, and redaction</h2>
+<ul><li>Never log passwords, API keys, access tokens, session cookies, or private keys.</li><li>Never log full credit card numbers or CVV values.</li><li>Be careful with personal data: email addresses, phone numbers, home addresses, and government identifiers.</li><li>Logs are often less protected than the database: they are copied, indexed, backed up, and read by many engineers.</li><li>A secret written once to a log can end up in far more places than the original record.</li><li>Regulations such as GDPR and PCI DSS cover logs too, not just primary storage.</li><li>Redact in the logging library: block known sensitive field names, mask values, and scan free text for token patterns.</li><li>Protection must not depend on every developer remembering it at every call site.</li></ul>
+
+<div class="flow"><span class="flow-step">Application code</span><span class="flow-arrow">→</span><span class="flow-step">Shared logger</span><span class="flow-arrow">→</span><span class="flow-step">Redaction rules</span><span class="flow-arrow">→</span><span class="flow-step">Safe log output</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Avoiding noise</h2>
+<ul><li>More logs do not mean more visibility; they dilute the signal and raise cost.</li><li><strong>Tight loops:</strong> a job processing a million records must not emit a million INFO lines; log a summary instead.</li><li>Summaries should include how many records were processed, how many failed, and how long it took.</li><li><strong>Same error at every layer:</strong> database logs and rethrows, service logs and rethrows, controller logs again — one failure becomes three.</li><li>Log an error once, at the place where it is actually handled.</li><li>Health checks and cache hits at INFO can dominate volume with almost no diagnostic value.</li><li>Keep messages short and constant, with changing values in separate fields, so identical events group together.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Logging and performance</h2>
+<ul><li>Every log line costs CPU to format, memory to buffer, and disk or network bandwidth to write.</li><li>In a high-traffic service, careless logging can measurably slow requests.</li><li><strong>Asynchronous logging</strong> puts entries in a buffer and writes them from a background thread, so slow disk or network does not block the request.</li><li>The trade-off: buffered entries can be lost if the process crashes.</li><li>The buffer needs a full policy: block the caller, or drop entries — usually DEBUG and INFO first.</li><li>Do not build expensive messages when the level is disabled; use parameterized logging or lazy suppliers.</li><li>Compute the cost at peak request rate, not at one request per second.</li></ul>
+
+<div class="flow"><span class="flow-step">Request</span><span class="flow-arrow">→</span><span class="flow-step">Process</span><span class="flow-arrow">→</span><span class="flow-step">Add to buffer</span><span class="flow-arrow">→</span><span class="flow-step">Response</span><span class="flow-arrow">→</span><span class="flow-step">Background writer flushes</span></div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Centralizing logs</h2>
+<ul><li>In containers, log files inside the container disappear when the container is replaced.</li><li>Applications should write to <strong>standard output</strong> and let the platform handle collection.</li><li>A log agent on each host, such as Fluent Bit or Vector, ships stdout to a central system.</li><li>The central store — Elasticsearch, Loki, or a managed service — indexes logs from every service in one place.</li><li>Writing to stdout keeps the app simple: no log files, rotation, or disk management.</li><li>Centralization enables one search across services and joins by correlation ID.</li><li>The pipeline itself needs monitoring: dropped batches and agent backlogs cause silent gaps.</li></ul>
+
+<div class="flow"><span class="flow-step">Service stdout</span><span class="flow-arrow">→</span><span class="flow-step">Host log agent</span><span class="flow-arrow">→</span><span class="flow-step">Central log store</span><span class="flow-arrow">→</span><span class="flow-step">Search, dashboards, alerts</span></div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Volume, cost, and retention</h2>
+<ul><li>Log volume can grow into terabytes per day, and so does the bill.</li><li><strong>Sampling:</strong> keep every error and warning, but only a fraction of successful request logs.</li><li><strong>Runtime log levels:</strong> raise one service to DEBUG for a short window without redeploying, then lower it.</li><li><strong>Retention tiers:</strong> recent logs in fast searchable storage, older logs in cheap object storage or deleted.</li><li><strong>Metrics for counting:</strong> requests per second belongs in a metric, not in one log line per request.</li><li>Compress, batch, and filter at the agent instead of shipping everything and discarding later.</li><li>Review the highest-volume log statements periodically; a single noisy line can dominate cost.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Log type</th><th>Hot (searchable)</th><th>Cold (object storage)</th><th>Reason</th></tr></thead><tbody><tr><td>Debug logs</td><td>1–3 days</td><td>None</td><td>Short-term investigation</td></tr>
+<tr><td>Application logs</td><td>7–30 days</td><td>Up to 90 days</td><td>Debugging recent issues</td></tr>
+<tr><td>Access logs</td><td>30 days</td><td>Up to 1 year</td><td>Traffic analysis, security</td></tr>
+<tr><td>Audit and security logs</td><td>30–90 days</td><td>1–7 years</td><td>Compliance requirements</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Logs, metrics, and traces together</h2>
+<ul><li><strong>Logs</strong> explain a specific event in detail: what happened to this order at this time.</li><li><strong>Metrics</strong> are cheap aggregates: rates, error ratios, latency percentiles, saturation.</li><li><strong>Traces</strong> show the path and timing of one request across services.</li><li>Use metrics to detect, traces to locate, and logs to explain.</li><li>A metric alert should link to the relevant logs and traces so investigation starts in one click.</li><li>Do not reconstruct rates by counting log lines; that is expensive and imprecise.</li><li>Instrument all three with the same service names and IDs so they can be correlated.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Logs</th><th>Metrics</th><th>Traces</th></tr></thead><tbody><tr><td>Question</td><td>What exactly happened?</td><td>How many, how fast?</td><td>Where did time go?</td></tr>
+<tr><td>Cost</td><td>High per event</td><td>Low per series</td><td>Sampled</td></tr>
+<tr><td>Cardinality</td><td>High</td><td>Must stay low</td><td>High but sampled</td></tr>
+<tr><td>Best for</td><td>Diagnosis</td><td>Detection and alerting</td><td>Locating the slow hop</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Metric alert fires</span><span class="flow-arrow">→</span><span class="flow-step">Open trace for a slow request</span><span class="flow-arrow">→</span><span class="flow-step">Jump to logs by trace ID</span><span class="flow-arrow">→</span><span class="flow-step">Find the failing dependency</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Structured JSON logs</strong> are searchable and stable but larger on disk and less pleasant to read raw.</li><li><strong>More context</strong> speeds investigation but increases payload size and the risk of leaking sensitive data.</li><li><strong>Verbose DEBUG logging</strong> helps development but inflates volume and cost in production.</li><li><strong>Asynchronous logging</strong> protects request latency but can lose buffered entries on a crash.</li><li><strong>Sampling success logs</strong> controls cost but reduces the ability to reconstruct rare successful flows.</li><li><strong>Long retention</strong> helps audits and slow-burn investigations but dominates storage cost.</li><li><strong>Central aggregation</strong> enables cross-service search but adds a pipeline that can drop or delay logs.</li><li><strong>Shared logging libraries</strong> enforce consistency and redaction but add a dependency every service must upgrade.</li><li><strong>Redacting aggressively</strong> protects privacy but can remove fields investigators later need.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What makes a log entry useful?</summary><div class="answer"><p>It answers what happened, where, to whom, when, and with what outcome. That means a constant message plus structured fields such as service, level, timestamp, trace ID, entity ID, error type, and duration. The test is whether one line is enough to start an investigation.</p></div></details>
+<details><summary>2. Why structured logging instead of plain text?</summary><div class="answer"><p>Structured entries are named fields, so the log system can index and filter them without fragile regex. Searches and alerts survive message rewording. Plain text forces guessing and breaks when wording changes.</p></div></details>
+<details><summary>3. How do you enforce consistent field names across services?</summary><div class="answer"><p>Define a shared schema for required and optional fields, and implement it in a shared logging library so names are set automatically. Centralizing the library also standardizes redaction, formatting, and level handling. Document the schema for new services.</p></div></details>
+<details><summary>4. How do you choose between WARN and ERROR?</summary><div class="answer"><p>Ask whether someone needs to act. A failure that affected an operation is ERROR; something unexpected that the system handled, such as a successful retry or a fallback, is WARN. Logging expected user mistakes as errors creates alert fatigue.</p></div></details>
+<details><summary>5. What is a correlation ID and where is it created?</summary><div class="answer"><p>An identifier generated when a request enters the system, usually at the gateway, then propagated through headers and message attributes. Every service logs it so one search reconstructs the request across services. A trace ID can serve the same purpose and link logs to traces.</p></div></details>
+<details><summary>6. What should you never log?</summary><div class="answer"><p>Passwords, API keys, tokens, session cookies, full card numbers, and unnecessary personal data. Logs are copied, indexed, and broadly accessible, and regulations cover them too. Redact in the logger rather than relying on every developer.</p></div></details>
+<details><summary>7. How do you prevent sensitive data leaks in logs?</summary><div class="answer"><p>Apply redaction rules in the shared logging library: block sensitive field names, mask values such as all but the last four digits, and detect token patterns in free text. Add tests for the redaction rules and review new fields during code review.</p></div></details>
+<details><summary>8. Why is logging inside a tight loop a problem?</summary><div class="answer"><p>It produces enormous volume with little per-line value, raises cost, and buries useful entries. Log a summary with counts, failures, and elapsed time instead. If per-record detail is truly needed, gate it behind DEBUG and sample.</p></div></details>
+<details><summary>9. Why is logging the same error at every layer harmful?</summary><div class="answer"><p>One failure appears as several errors, so error counts and alerts overstate impact. Log once where the error is handled, and let other layers add context or rethrow without logging. This keeps counts meaningful.</p></div></details>
+<details><summary>10. How does asynchronous logging work and what is the risk?</summary><div class="answer"><p>Entries go into an in-memory buffer and a background thread writes them, so slow disk or network does not block requests. The risk is losing buffered entries on a crash, plus a policy decision when the buffer fills: block the caller or drop lower-severity entries.</p></div></details>
+<details><summary>11. How do you keep logging costs under control?</summary><div class="answer"><p>Sample high-volume success logs while keeping all errors and warnings, raise DEBUG only temporarily at runtime, tier retention from hot searchable storage to cheap object storage, filter and compress at the agent, and use metrics for counting instead of log lines.</p></div></details>
+<details><summary>12. How should logs be collected in containers?</summary><div class="answer"><p>Write to standard output and let a per-host agent such as Fluent Bit or Vector ship logs to a central store. Container-local files vanish with the container. The app stays simple and the platform handles rotation and delivery.</p></div></details>
+<details><summary>13. When should you use a metric instead of a log?</summary><div class="answer"><p>When you need counts, rates, percentiles, or saturation over time. Metrics are cheap to aggregate and alert on. Logs are for individual events and context. Counting log lines to compute request rate is slow, expensive, and imprecise.</p></div></details>
+<details><summary>14. How do logs, metrics, and traces complement each other?</summary><div class="answer"><p>Metrics detect that something is wrong, traces locate which hop is slow or failing, and logs explain the specific event and its context. Correlate them with shared service names and trace IDs so an alert leads directly to the relevant trace and log lines.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Logging a generic message with no identifiers or error type.</li><li>Building messages by concatenating values, so every line is unique and impossible to group.</li><li>Logging everything at INFO in production and calling the resulting noise observability.</li><li>Logging the same exception at every layer and then alerting on the inflated error count.</li><li>Leaking tokens or personal data because redaction is optional and left to each developer.</li><li>Using synchronous logging on a hot path and adding latency to every request.</li><li>Computing expensive debug payloads before checking whether DEBUG is enabled.</li><li>Keeping every log forever in expensive searchable storage instead of tiering retention.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="peer-to-peer-p2p-architecture.html"><span>← Previous</span><strong>Peer-to-Peer (P2P) Architecture</strong></a><a class="next" href="alert-monitoring.html"><span>Next →</span><strong>Alert &amp; Monitoring</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/logging">AlgoMaster — Logging</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

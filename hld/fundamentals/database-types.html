@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Database Types — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 18 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Database Types</h1>
+    <p class="dek">Databases &amp; Storage · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/database-types">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why there is more than one type of database</a>
+<a href="#s2">Relational databases</a>
+<a href="#s3">Why relational databases are the default choice</a>
+<a href="#s4">Where relational databases struggle</a>
+<a href="#s5">Key-value stores</a>
+<a href="#s6">Document databases</a>
+<a href="#s7">Wide-column databases</a>
+<a href="#s8">Graph databases</a>
+<a href="#s9">Time-series databases</a>
+<a href="#s10">Search engines</a>
+<a href="#s11">Vector databases</a>
+<a href="#s12">How to choose a database</a>
+<a href="#s13">Polyglot persistence and a practical starting point</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>No single database is best at transactions, single-key lookups, text ranking, and time-window aggregates — pick the engine whose <strong>storage layout and index structure</strong> match how the data is actually queried.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Relational database</dt><dd>Stores rows in tables with a fixed schema and answers questions with SQL joins, filters, and aggregates.</dd></div><div class="term"><dt>ACID transaction</dt><dd>A group of writes that commits all-or-nothing, keeping the database consistent even when a step fails.</dd></div><div class="term"><dt>Key-value store</dt><dd>A hash map at cluster scale: one key maps to one opaque value, with no querying inside the value.</dd></div><div class="term"><dt>Document database</dt><dd>Stores each record as a JSON-like document with nested objects and arrays, and can index fields inside it.</dd></div><div class="term"><dt>Wide-column database</dt><dd>Rows are grouped by a <em>partition key</em> and sorted inside the partition by a <em>clustering key</em>.</dd></div><div class="term"><dt>Graph database</dt><dd>Stores entities as nodes and relationships as first-class edges, so multi-hop traversal does not need repeated joins.</dd></div><div class="term"><dt>Time-series database</dt><dd>Optimized for append-mostly timestamped measurements, with time-ordered storage, compression, and retention policies.</dd></div><div class="term"><dt>Inverted index</dt><dd>A map from each word to the documents containing it; the core structure behind ranked full-text search.</dd></div><div class="term"><dt>Embedding</dt><dd>A vector of numbers produced by a model, where items with similar meaning land close together in vector space.</dd></div><div class="term"><dt>ANN index</dt><dd>Approximate nearest neighbor structure (for example HNSW) that finds close vectors quickly by giving up exactness.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why there is more than one type of database</h2>
+<p class="lede">One e-commerce application already contains four very different data problems, and each one stresses a different part of the storage engine.</p>
+<ul><li>Payments and orders need <strong>correctness</strong>: a partial write must never leave money taken without an order.</li><li>Shopping carts and login sessions need <strong>lookup by a single key</strong> with very low latency.</li><li>The search bar needs to <strong>rank</strong> products by how well they match free text, tolerate typos, and match word variants.</li><li>Metrics arrive continuously and are almost always read as a <strong>time window aggregate</strong>, not as individual rows.</li><li>A database tuned for one of these jobs is usually mediocre at the others, which is why the categories exist.</li><li>The categories are <strong>not strict boxes</strong>: PostgreSQL stores JSON, runs full-text search, and supports vector indexes through extensions.</li><li>Choosing a database is one of the hardest decisions to undo, because the data model, queries, and operational tooling all grow around it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Workload</th><th>Dominant requirement</th><th>What a general-purpose engine struggles with</th></tr></thead><tbody><tr><td>Orders and payments</td><td>Atomic multi-row writes, constraints</td><td>Scaling writes past one primary</td></tr>
+<tr><td>Sessions and carts</td><td>Sub-millisecond get/put by key</td><td>Querying by value fields, joins</td></tr>
+<tr><td>Product search</td><td>Relevance ranking, stemming, fuzzy match</td><td>No ranked index, no text scoring</td></tr>
+<tr><td>Metrics</td><td>Time-range scans and rollups</td><td>Index bloat, poor compression of ordered data</td></tr></tbody></table></div>
+
+<div class="note">Start from the access pattern, not from the product name. The same table can be a good fit for one query and a bad fit for the next.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Relational databases</h2>
+<p class="lede">A relational database stores data in tables of rows and columns. The schema is fixed: every row in a table has the same columns and types, and the database rejects writes that violate them.</p>
+<ul><li>A <code>users</code> table holds <code>id</code>, <code>name</code>, <code>email</code>; an <code>orders</code> table holds <code>id</code>, <code>user_id</code>, <code>amount</code>, <code>status</code>.</li><li>The <code>orders.user_id</code> column is a <strong>foreign key</strong> pointing at <code>users.id</code>, which is how relationships are modeled.</li><li>SQL is declarative: you state the result you want and the planner decides which indexes, join order, and algorithms to use.</li><li>Joins let the same normalized data answer questions that were never anticipated when the schema was written.</li><li>Indexes on primary keys, foreign keys, and filter columns are what keep lookups fast as tables grow.</li><li>The table itself has no guaranteed row order; only indexes are sorted, and that distinction explains most performance behavior.</li></ul>
+
+
+<pre class="code"><code>CREATE TABLE users (
+  id     BIGINT PRIMARY KEY,
+  name   TEXT NOT NULL,
+  email  TEXT UNIQUE NOT NULL
+);
+
+CREATE TABLE orders (
+  id       BIGINT PRIMARY KEY,
+  user_id  BIGINT NOT NULL REFERENCES users(id),
+  amount   NUMERIC NOT NULL,
+  status   TEXT NOT NULL
+);</code></pre>
+<div class="note">Normalization removes duplication and puts each fact in one place; the cost is that reading a whole object may require a join.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Why relational databases are the default choice</h2>
+<p class="lede">Relational databases are the starting point for most applications because they solve the problems that are expensive to fix later: correctness, integrity, and unplanned queries.</p>
+<ul><li><strong>Transactions:</strong> creating an order, decrementing inventory, and recording payment commit together or not at all.</li><li><strong>Flexible querying:</strong> joins, filters, grouping, and aggregates answer new questions without a new data model.</li><li><strong>Data integrity:</strong> types, <code>NOT NULL</code>, <code>UNIQUE</code>, check constraints, and foreign keys keep invalid rows out.</li><li><strong>Mature operations:</strong> backup, point-in-time recovery, replication, monitoring, and tuning are well understood.</li><li><strong>Ecosystem:</strong> drivers, migration tools, ORMs, and experienced engineers are widely available.</li><li>The guarantee is <em>local</em> to one database: a transaction is atomic inside it, not across services.</li><li>Isolation levels trade concurrency against anomalies, so even ACID systems need thought about read phenomena.</li></ul>
+
+<div class="flow"><span class="flow-step">BEGIN</span><span class="flow-arrow">→</span><span class="flow-step">Create order</span><span class="flow-arrow">→</span><span class="flow-step">Reduce inventory</span><span class="flow-arrow">→</span><span class="flow-step">Record payment</span><span class="flow-arrow">→</span><span class="flow-step">COMMIT (all saved)</span></div>
+<div class="note">If any statement fails before COMMIT, the transaction rolls back and none of the three changes are visible.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Where relational databases struggle</h2>
+<ul><li>A traditional deployment is designed around a <strong>single primary</strong>; read replicas scale reads but not writes.</li><li>Scaling writes beyond one machine usually means <strong>sharding</strong>, which brings routing, cross-shard joins, and resharding.</li><li>A <strong>fixed schema</strong> makes frequent shape changes expensive; large migrations need planning, backfills, and lock awareness.</li><li>Deeply connected data turns into repeated self-joins whose cost grows with each additional hop.</li><li>Full-text relevance, high-volume timestamped data, and very wide sparse records do not map cleanly onto normalized tables.</li><li>Wide rows with many nullable columns often signal that the data wants a document or key-value model instead.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Strengths</th><th>Weaknesses</th></tr></thead><tbody><tr><td>ACID transactions keep multi-step changes all-or-nothing</td><td>Write scaling past one primary requires sharding</td></tr>
+<tr><td>SQL joins answer unplanned questions</td><td>Rigid schema needs migrations when the shape changes</td></tr>
+<tr><td>Constraints and foreign keys prevent invalid data</td><td>Deep relationship traversal and text ranking fit poorly</td></tr>
+<tr><td>Backups, replication, and tuning are well understood</td><td>Very high ingest rates strain a row-store primary</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Key-value stores</h2>
+<p class="lede">A key-value store is a hash map at cluster scale: every value is stored under a unique key, and reads happen only by that key.</p>
+<ul><li>Keys are independent, so the store can hash each key to a node and <strong>scale horizontally</strong> without coordination.</li><li>Lookups avoid query planning entirely: hash or tree lookup, then return the value.</li><li>Values are <strong>opaque</strong>; the database cannot filter on fields inside a serialized blob.</li><li>Many stores support <strong>TTL</strong>, which makes them natural for sessions, carts, and caches.</li><li>Common uses: session state, rate-limit counters, feature flags, and hot-object caching.</li><li>Without the key the database usually cannot help, so access paths must be designed by the application.</li><li>A single very popular key lands on one node and can create a <strong>hot key</strong> that no amount of sharding fixes.</li><li>Key-value stores usually sit <em>beside</em> a primary database, not in place of the durable source of truth.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody><tr><td>session:abc123</td><td>{user_id: 1001, expires_at: ...}</td></tr>
+<tr><td>cart:1001</td><td>{items: [sku_42, sku_77]}</td></tr>
+<tr><td>ratelimit:1001</td><td>17</td></tr>
+<tr><td>flag:new_checkout</td><td>true</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Document databases</h2>
+<p class="lede">Document databases extend the key-value idea: the value is a structured document, usually JSON-like, with nested objects and arrays.</p>
+<ul><li>Related data is stored <strong>together</strong>, so a product page with variants and shipping details can load in one read instead of several joins.</li><li>Unlike a key-value store, the engine understands the document shape and can index and query nested fields.</li><li>The schema is <strong>flexible</strong>: two documents in one collection may have different fields.</li><li>Documents map closely to the objects the application already uses, reducing mapping code.</li><li>The weakness is relationships: heavily connected data forces either duplication or application-side joins.</li><li>Duplicated facts embedded in many documents must be updated everywhere, which invites drift.</li><li>A flexible schema still needs conventions and validation, or the collection becomes impossible to reason about.</li><li>Good fits: catalogs, content management, user profiles, and event payloads that are read as a whole object.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Wide-column databases</h2>
+<p class="lede">Wide-column stores keep rows and columns but organize them by <strong>partition key</strong>, with rows inside a partition sorted by a <strong>clustering key</strong>.</p>
+<ul><li>All rows for one partition live on the same node set, so a partition read is local and predictable.</li><li>Within a partition, rows are already sorted by the clustering key, making <code>ORDER BY time DESC LIMIT 50</code> a sequential read.</li><li>Log-structured storage turns writes into sequential appends, which is why these systems absorb very high write throughput.</li><li>Tables are designed <strong>query-first</strong>: you write down the exact queries, then model a table for each one.</li><li>A second access path usually means a second table with the same data keyed differently, not a new index.</li><li>Ad hoc filters and joins are not the optimization target; expecting them leads to full partition scans.</li><li>Operations matter: compaction, repair, partition sizing, and hot partitions all need active attention.</li><li>Good fits: messaging, activity feeds, IoT telemetry, and write-heavy workloads spread across many machines.</li></ul>
+
+<div class="flow"><span class="flow-step">Partition key = conversation id</span><span class="flow-arrow">→</span><span class="flow-step">Clustering key = message timestamp</span><span class="flow-arrow">→</span><span class="flow-step">Messages co-located and time-sorted</span><span class="flow-arrow">→</span><span class="flow-step">Latest 50 read sequentially</span></div>
+<div class="note">To fetch messages by sender you would typically maintain a second table partitioned by sender, because the original partition layout cannot serve that query.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Graph databases</h2>
+<p class="lede">Some data is mostly relationships. A graph database stores entities as nodes and relationships as edges with their own types and properties.</p>
+<ul><li>Alice <code>FOLLOWS</code> Bob and <code>WORKS_AT</code> Acme; both the nodes and the edges are stored explicitly.</li><li>Multi-hop questions follow pointers from node to node instead of joining a table to itself once per hop.</li><li>In a relational database, each extra hop adds another join and the cost compounds; a graph index makes each hop a local lookup.</li><li>Traversal languages such as Cypher express the question directly: friends of friends who work at the same company.</li><li>Relationships are first-class, so edge properties (since, weight, role) are natural to store.</li><li>Strong fits: social networks, recommendations, fraud rings, dependency chains, and knowledge graphs.</li><li>Weak fits: bulk scans and aggregations where relationships are incidental — a column store or relational engine is cheaper.</li><li>Relationships cross machine boundaries, so partitioning a graph well is genuinely hard and limits horizontal scale.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Node / Edge</th><th>Meaning</th></tr></thead><tbody><tr><td>Alice, Bob, Carol, Acme</td><td>Nodes: people and a company</td></tr>
+<tr><td>Alice → Bob (FOLLOWS)</td><td>Edge: a directed social relationship</td></tr>
+<tr><td>Carol → Acme (WORKS_AT)</td><td>Edge: employment</td></tr>
+<tr><td>Alice → Acme (WORKS_AT)</td><td>Edge: employment, enabling the shared-employer query</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Time-series databases</h2>
+<p class="lede">Time-series data is a sequence of measurements, each tagged with a timestamp. Its access pattern is unusually predictable, and the storage engine is built around that.</p>
+<ul><li>New points are almost always <strong>appended at the current time</strong>; old points are rarely updated.</li><li>Queries usually ask for a <strong>time window</strong> and a summary: average CPU over the last hour, p99 latency today.</li><li>Points are stored in time order, so consecutive values compress very well and range scans read contiguous blocks.</li><li>Retention policies drop or downsample old data automatically, which keeps the working set bounded.</li><li>Common pattern: keep raw points briefly, then keep hourly rollups for much longer.</li><li>Tags or labels identify the series; grouping by a label is how dashboards aggregate across hosts.</li><li>High-cardinality labels — such as a user id on every metric — blow up the index and degrade the whole database.</li><li>Good fits: monitoring, sensor data, application metrics, and financial tick data.</li></ul>
+
+<div class="flow"><span class="flow-step">Servers report CPU every 10s</span><span class="flow-arrow">→</span><span class="flow-step">Raw points retained briefly</span><span class="flow-arrow">→</span><span class="flow-step">Downsample to hourly averages</span><span class="flow-arrow">→</span><span class="flow-step">Raw points expire</span></div>
+<div class="note">Downsampling is a design decision: you trade the ability to answer fine-grained historical questions for bounded storage and fast long-range queries.</div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Search engines</h2>
+<p class="lede">A search engine answers the query a relational <code>LIKE '%shoes%'</code> cannot: rank documents by how well they match free text.</p>
+<ul><li>An <strong>inverted index</strong> maps each term to the list of documents containing it, so the engine jumps straight to candidates.</li><li>Matches for each term are combined and <strong>scored by relevance</strong>; a document matching all three query words outranks one matching a single word.</li><li>Text is <strong>analyzed</strong> before indexing: lowercasing, tokenization, and stemming make <code>running</code> match <code>run</code>.</li><li>Fuzzy matching tolerates typos, and prefix structures support autocomplete.</li><li>Faceted filters (category, price, brand) are applied alongside relevance scoring, not instead of it.</li><li>A <code>LIKE '%term%'</code> predicate cannot use a normal B-tree index and cannot produce a relevance score.</li><li>The search index is usually <strong>not the source of truth</strong>; the primary database stays authoritative and changes are copied over.</li><li>That copy is asynchronous, so search results can lag behind writes — an accepted staleness window, not a bug to hide.</li></ul>
+
+<div class="flow"><span class="flow-step">Documents written to primary DB</span><span class="flow-arrow">→</span><span class="flow-step">Change stream or pipeline indexes them</span><span class="flow-arrow">→</span><span class="flow-step">Inverted index updated</span><span class="flow-arrow">→</span><span class="flow-step">Query scored and returned</span></div>
+<div class="note">Because the index lags, a just-created product may not be searchable yet. Design the UX for that window instead of pretending it does not exist.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Vector databases</h2>
+<p class="lede">A model converts text, images, or audio into an <strong>embedding</strong>: a vector where items with similar meaning are close together.</p>
+<ul><li><code>cheap flights</code> and <code>budget airfare</code> share almost no words but land near each other in vector space.</li><li>The core query is: given a vector, which stored vectors are most similar, usually by cosine or dot-product distance.</li><li>Comparing against every stored vector is too slow at millions of items, so engines build <strong>ANN indexes</strong> such as HNSW.</li><li>ANN trades exactness for speed: recall is high but not guaranteed, which is a product decision, not just a benchmark number.</li><li>Metadata filters (tenant, language, date) are applied with or around the vector search and can change recall behavior.</li><li>Embeddings are tied to the model that produced them; changing the model means re-embedding the corpus.</li><li>As with search, the vector store holds a derived representation, not the authoritative record.</li><li>Good fits: semantic search, recommendation candidates, deduplication, and retrieval-augmented generation.</li></ul>
+
+<div class="flow"><span class="flow-step">Query text</span><span class="flow-arrow">→</span><span class="flow-step">Embedding model</span><span class="flow-arrow">→</span><span class="flow-step">Query vector</span><span class="flow-arrow">→</span><span class="flow-step">ANN index search</span><span class="flow-arrow">→</span><span class="flow-step">Nearest neighbors + metadata filter</span></div>
+<div class="note">Vector search finds <em>semantically</em> similar items. It does not replace exact filters, permissions checks, or transactional reads.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>How to choose a database</h2>
+<p class="lede">Work through the data and the queries before comparing products. Five questions eliminate most of the option space.</p>
+<ul><li><strong>What do the queries look like?</strong> Single-key fetches, ad hoc joins, text ranking, or time windows each point somewhere different.</li><li><strong>How important are transactions?</strong> If a partial update causes real damage, start with a system that gives atomic multi-row writes.</li><li><strong>What is the read and write volume?</strong> Very write-heavy workloads need an engine designed to spread writes across machines.</li><li><strong>How often does the shape change?</strong> Frequent evolution favors a flexible document model or JSON columns.</li><li><strong>What can the team operate?</strong> A familiar database run well beats a theoretically perfect one nobody can tune at 3 a.m.</li><li>Prefer the <strong>simplest engine that satisfies the hardest requirement</strong>; every extra system adds backup and upgrade work.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Signal in the workload</th><th>First choice</th><th>Watch out for</th></tr></thead><tbody><tr><td>Multi-row correctness, joins, reporting</td><td>Relational</td><td>Write scaling past one primary</td></tr>
+<tr><td>Known-key lookups, TTL, counters</td><td>Key-value</td><td>No query by value, hot keys</td></tr>
+<tr><td>Whole object read, evolving fields</td><td>Document</td><td>Connected data and duplication</td></tr>
+<tr><td>Huge write rate, known query list</td><td>Wide-column</td><td>One table per query, compaction</td></tr>
+<tr><td>Multi-hop relationships</td><td>Graph</td><td>Bulk scans, partitioning</td></tr>
+<tr><td>Append-only metrics, range rollups</td><td>Time-series</td><td>High-cardinality labels</td></tr>
+<tr><td>Ranked text, typo tolerance, facets</td><td>Search engine</td><td>Index lag behind the primary</td></tr>
+<tr><td>Semantic similarity over embeddings</td><td>Vector</td><td>Approximate recall, model drift</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">List the top queries</span><span class="flow-arrow">→</span><span class="flow-step">Check consistency needs</span><span class="flow-arrow">→</span><span class="flow-step">Check write volume</span><span class="flow-arrow">→</span><span class="flow-step">Check schema churn</span><span class="flow-arrow">→</span><span class="flow-step">Check team expertise</span><span class="flow-arrow">→</span><span class="flow-step">Choose the simplest fit</span></div>
+<div class="note">The decision guide is a starting point, not an oracle. Validate the final choice with a realistic query and data volume before committing.</div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Polyglot persistence and a practical starting point</h2>
+<p class="lede">Large systems often use several databases, each for the workload it handles best. That is polyglot persistence, and it is a cost as much as a capability.</p>
+<ul><li>PostgreSQL holds users, orders, and payments because they need transactions and constraints.</li><li>Redis holds sessions and carts because they need very fast lookup by a known key.</li><li>The catalog is copied into a search engine so the search bar can rank results.</li><li>Request metrics go to a time-series store so dashboards do not slow the transactional database.</li><li>Each additional database must be deployed, monitored, backed up, upgraded, and secured.</li><li>Copied data needs a reliable synchronization path; without one, the systems silently disagree.</li><li>Start with <strong>one well-tuned relational database</strong>; JSON columns, full-text search, and vector extensions cover many early needs.</li><li>Add a specialized engine when a specific workload clearly outgrows the primary — not in anticipation of scale you do not have.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Data</th><th>Store</th><th>Reason</th></tr></thead><tbody><tr><td>Users, orders, payments</td><td>PostgreSQL</td><td>Transactions, joins, integrity</td></tr>
+<tr><td>Sessions, carts</td><td>Redis</td><td>Fast key lookup, TTL</td></tr>
+<tr><td>Product search</td><td>Elasticsearch</td><td>Relevance ranking, facets</td></tr>
+<tr><td>Request metrics</td><td>Time-series DB</td><td>Range queries, retention</td></tr></tbody></table></div>
+
+<div class="note">Every copy of the data is a consistency problem. Keep the number of copies as small as the workload allows.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Relational</strong> gives transactions, integrity, and ad hoc joins but makes write scaling past one primary and frequent schema changes expensive.</li><li><strong>Key-value</strong> gives the fastest and simplest key lookups but cannot answer questions about fields inside the value.</li><li><strong>Document</strong> gives one-read object fetches and schema flexibility but pushes relationship handling and duplication into the application.</li><li><strong>Wide-column</strong> gives very high write throughput and partition-local range reads but requires one table per query pattern.</li><li><strong>Graph</strong> makes multi-hop traversal cheap but partitions poorly and suits fewer engineers and tools.</li><li><strong>Time-series</strong> gives compression and fast window aggregates but punishes high-cardinality labels and non-time access patterns.</li><li><strong>Search engines</strong> give relevance, stemming, and facets but are a derived copy that can lag and must be rebuilt.</li><li><strong>Vector databases</strong> give semantic matching but return approximate results and couple the index to one embedding model.</li><li><strong>Polyglot persistence</strong> gives each workload its best engine but multiplies operational cost and data-sync risk.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why does more than one type of database exist?</summary><div class="answer"><p>Because workloads have incompatible access patterns. Payments need atomic multi-row writes, sessions need single-key lookups, search needs relevance ranking, and metrics need time-window scans. An engine optimizes its storage and index layout for one shape of query, so it is usually mediocre at the others.</p></div></details>
+<details><summary>2. When is a relational database the right default?</summary><div class="answer"><p>When the data is structured, invariants matter, and you do not yet know every query. ACID transactions, constraints, foreign keys, and SQL joins cover a wide range of unplanned questions. Start there and specialize only when a measured workload outgrows it.</p></div></details>
+<details><summary>3. How does a relational database enforce correctness across multiple tables?</summary><div class="answer"><p>With transactions. All statements inside a transaction commit together or roll back together, and constraints such as <code>UNIQUE</code> and foreign keys are checked inside that boundary. This is why an order, an inventory decrement, and a payment record can be treated as one unit.</p></div></details>
+<details><summary>4. What is the main scaling limitation of a relational database?</summary><div class="answer"><p>Writes are bound to a single primary. Read replicas add read capacity, but write throughput beyond one machine usually requires sharding, which introduces routing, cross-shard joins, distributed transactions, and resharding.</p></div></details>
+<details><summary>5. When would you choose a key-value store?</summary><div class="answer"><p>When the application already knows the key and only needs to fetch or update the value: sessions, carts, counters, rate limits, feature flags. The trade-off is that you cannot query by fields inside the value, and a single hot key can overload one node.</p></div></details>
+<details><summary>6. Document database versus key-value store — what actually changes?</summary><div class="answer"><p>A document store understands the value's structure, so it can index and filter nested fields and return a whole object in one read. A key-value store treats the value as opaque and only helps when you have the key.</p></div></details>
+<details><summary>7. Why do wide-column databases require query-first modeling?</summary><div class="answer"><p>Rows are distributed by partition key and sorted by clustering key, so the physical layout only supports the access paths it was built for. A new query pattern such as 'messages by sender' usually needs a new table with a different partition key rather than an ad hoc index.</p></div></details>
+<details><summary>8. When does a graph database beat recursive SQL?</summary><div class="answer"><p>When relationship depth is variable and central to the query, such as friends-of-friends, fraud rings, or dependency chains. Each extra hop in SQL adds another join, while a graph follows pointers locally. If you mostly do bulk scans or one-hop lookups, a relational store is simpler.</p></div></details>
+<details><summary>9. What makes time-series data different from ordinary event data?</summary><div class="answer"><p>The write pattern is append-only at the current time, and reads are time-range aggregates. That allows time-ordered storage, strong compression of consecutive values, and retention policies that downsample old data. It also means non-time predicates and high-cardinality labels are the weak spots.</p></div></details>
+<details><summary>10. Why is a search engine not the source of truth?</summary><div class="answer"><p>It is a derived, denormalized index optimized for ranking rather than durable transactional storage. Changes are copied asynchronously, so results can lag, and the index can be rebuilt from the primary database if it is lost or its mapping changes.</p></div></details>
+<details><summary>11. What does an inverted index do that a B-tree cannot?</summary><div class="answer"><p>It maps each analyzed term to the documents containing it, so the engine can find candidates and score them by relevance. A B-tree compares whole column values and cannot rank free text, stem words, or support <code>LIKE '%term%'</code> efficiently.</p></div></details>
+<details><summary>12. How does a vector database find similar items?</summary><div class="answer"><p>An embedding model converts items and the query into vectors; items with similar meaning are close in that space. The database uses an approximate nearest neighbor index such as HNSW to avoid comparing against every vector, trading a small amount of recall for speed.</p></div></details>
+<details><summary>13. What is polyglot persistence, and when is it a mistake?</summary><div class="answer"><p>Using several database types, each for the workload it handles best. It becomes a mistake when adopted before a workload actually needs it: every extra engine adds deployment, monitoring, backup, upgrade, and synchronization work, plus a new way for copies of the data to disagree.</p></div></details>
+<details><summary>14. How would you choose a database in an interview?</summary><div class="answer"><p>State the access patterns, consistency requirements, write volume, schema churn, and team constraints, then map them to candidates. Pick the simplest engine that satisfies the hardest requirement, and note the migration path if that assumption changes.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Choosing a database from its reputation instead of from the query patterns it must serve.</li><li>Assuming NoSQL automatically scales writes — some document and graph systems still have a single primary or a hard partitioning limit.</li><li>Storing connected data in documents and duplicating the same fact until updates drift.</li><li>Using a search engine or vector index as the authoritative store rather than a derived copy.</li><li>Putting high-cardinality labels such as user id on every time-series metric and destroying index performance.</li><li>Adopting polyglot persistence before a workload needs it, then paying for four systems nobody operates well.</li><li>Forgetting that every copy of data needs a synchronization path and a way to detect divergence.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="webhooks.html"><span>← Previous</span><strong>Webhooks</strong></a><a class="next" href="object-storage.html"><span>Next →</span><strong>Object Storage</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/database-types">AlgoMaster — Database Types</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scheduling Delayed and Recurring Jobs — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 16 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Scheduling Delayed and Recurring Jobs</h1>
+    <p class="dek">Interview Patterns · Running Background Work</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/scheduling-delayed-and-recurring-jobs">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Delayed jobs</a>
+<a href="#s3">Recurring jobs</a>
+<a href="#s4">Why naive approaches break</a>
+<a href="#s5">Core architecture</a>
+<a href="#s6">Ensuring one scheduler acts</a>
+<a href="#s7">Storing and finding due jobs</a>
+<a href="#s8">Duplicate runs and idempotency</a>
+<a href="#s9">Missed runs and catch-up</a>
+<a href="#s10">Time zones and calendars</a>
+<a href="#s11">Overlap, concurrency, and long runs</a>
+<a href="#s12">Load shaping and fairness</a>
+<a href="#s13">Operating and monitoring</a>
+<a href="#s14">Choosing a design in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Some work must happen at a chosen time (send a reminder, cancel an unpaid order) and some must happen on a rhythm (nightly report, hourly cleanup). The pattern is a <strong>durable store of due times</strong>, a scheduler that decides what is due, and workers that run each job exactly once in practice.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Delayed job</dt><dd>A one-off task with a specific future execution time, such as a reminder or an order-expiry check.</dd></div><div class="term"><dt>Recurring job (cron)</dt><dd>A task defined by a schedule expression, executed repeatedly at matching times.</dd></div><div class="term"><dt>Scheduler</dt><dd>The component that determines which jobs are due and dispatches them; it should not do the work itself.</dd></div><div class="term"><dt>Leader election</dt><dd>Choosing one active scheduler among many so the same schedule is not fired by every node.</dd></div><div class="term"><dt>Lease</dt><dd>A time-bounded ownership claim on a job; if the owner dies, the lease expires and another node can take over.</dd></div><div class="term"><dt>Misfire</dt><dd>A scheduled execution that was missed or delayed because the system was down, overloaded, or paused.</dd></div><div class="term"><dt>Catch-up policy</dt><dd>The rule for what happens after a misfire: run once now, run every missed occurrence, or skip.</dd></div><div class="term"><dt>Idempotency key</dt><dd>A deterministic identifier per scheduled occurrence so a duplicate dispatch does not duplicate the side effect.</dd></div><div class="term"><dt>Jitter</dt><dd>Randomized spread added to schedules so many jobs do not fire at the same instant.</dd></div><div class="term"><dt>Timing wheel</dt><dd>A bucketed in-memory structure for efficiently finding due timers; fast, but usually needs a durable backing store.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">Time is the trigger. Nothing in the request path asks for this work; a clock does. That single difference creates a set of failure modes around reliability, duplication, and missed executions.</p>
+<ul><li>Delayed work must survive restarts and redeploys until its due time arrives.</li><li>Recurring work must fire on a rhythm for months without drifting or double-firing.</li><li>The system must decide what to do when it was down and the moment has passed.</li><li>Multiple scheduler instances must not all fire the same job.</li><li>Execution must be idempotent, because dispatch is at-least-once in practice.</li><li>Schedules are expressed in human time, which brings time zones and daylight-saving transitions.</li><li>This pattern appears inside almost every design: order expiry, trial reminders, report generation, cleanup, billing.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Delayed jobs</h2>
+<ul><li>Each delayed job is a durable record with a <strong>run-at timestamp</strong>, payload, and status.</li><li>A reminder scheduled for a future date must still exist after every server in the fleet is replaced.</li><li>Cancellation matters as much as creation: a paid order must be able to cancel its expiry job.</li><li>The due time should be stored in absolute UTC and interpreted with the user's time zone only for display.</li><li>The delay can be long — days or months — so in-memory timers and queue visibility delays are often insufficient.</li><li>A common shape is an expiry sweeper: find due records, act conditionally, mark done.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Example</th><th>Trigger</th><th>Action if already handled</th></tr></thead><tbody><tr><td>Send appointment reminder</td><td>Some time before the appointment</td><td>Skip if cancelled or already sent</td></tr>
+<tr><td>Cancel unpaid order</td><td>Payment window expires</td><td>Skip if paid, no-op if already cancelled</td></tr>
+<tr><td>Trial ending notice</td><td>Fixed offset from signup</td><td>Skip if converted or churned</td></tr>
+<tr><td>Retry a failed payment</td><td>Backoff schedule</td><td>Skip if already succeeded</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Recurring jobs</h2>
+<ul><li>A recurring job is a <strong>schedule definition</strong> plus a stream of occurrences; each occurrence is a unit of work.</li><li>Store the schedule expression and the last completed occurrence, not a precomputed infinite list.</li><li>Compute the next occurrence from the schedule, so restarts and clock changes are handled by recomputation.</li><li>Recurring does not mean overlapping: decide whether a new run may start while the previous one is still going.</li><li>Separate the definition (owned by a product team) from the execution (owned by the platform).</li><li>Give each occurrence a deterministic identity such as job ID plus scheduled time, so retries are safe.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Cadence</th><th>Typical use</th><th>Watch out for</th></tr></thead><tbody><tr><td>Every few minutes</td><td>Queue drain, sync, health sweep</td><td>Overlap with the previous run</td></tr>
+<tr><td>Hourly</td><td>Cleanup, aggregation</td><td>All jobs firing on the hour</td></tr>
+<tr><td>Daily</td><td>Reports, billing, backups</td><td>Time zones, DST, month boundaries</td></tr>
+<tr><td>Weekly or monthly</td><td>Statements, retention</td><td>Long runtimes, missed windows</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Why naive approaches break</h2>
+<ul><li><strong>In-process timers</strong> vanish on deploy, restart, or crash, and do not exist on other instances.</li><li><strong>Cron on every server</strong> fires the job once per instance, multiplying side effects by fleet size.</li><li><strong>Cron on one server</strong> is a single point of failure with no failover and no visibility.</li><li><strong>Sleep loops</strong> drift, consume a thread, and behave badly across restarts and clock adjustments.</li><li><strong>Queue delay features</strong> are convenient but often cap the maximum delay and may not survive migration.</li><li><strong>Polling without locking</strong> lets two schedulers pick the same due row and both dispatch it.</li></ul>
+
+
+<div class="note">The question is never 'can I run this on a timer?' It is 'what owns the timer when the process dies?'</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Core architecture</h2>
+<p class="lede">Separate deciding from doing. The scheduler owns time; workers own execution.</p>
+<ul><li>A durable <strong>job store</strong> holds the schedule, next run time, status, and locking fields.</li><li>The scheduler polls for due jobs and dispatches them to a queue; it never runs long work itself.</li><li>Workers consume dispatched jobs, execute them, and report completion or failure.</li><li>The stored next-run time advances only after a successful dispatch or completion, depending on your semantics.</li><li>All state that matters lives in the store, so any scheduler instance can take over.</li><li>The queue provides retries and backpressure; the store provides durability and the source of truth.</li></ul>
+
+<div class="flow"><span class="flow-step">Scheduler finds due job</span><span class="flow-arrow">→</span><span class="flow-step">Claim with lease</span><span class="flow-arrow">→</span><span class="flow-step">Dispatch to queue</span><span class="flow-arrow">→</span><span class="flow-step">Worker executes</span><span class="flow-arrow">→</span><span class="flow-step">Record result</span><span class="flow-arrow">→</span><span class="flow-step">Compute next run</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Ensuring one scheduler acts</h2>
+<ul><li>Run several scheduler instances for availability, but let only one be <strong>active</strong> at a time via leader election or a database lease.</li><li>The active scheduler renews its lease; if it stalls, another instance takes over.</li><li>Fencing matters: a paused old leader must not dispatch after losing the lease, so include the lease epoch in claims.</li><li>Alternatively, skip the single leader and make claiming atomic per job with a conditional update; this scales better.</li><li>Per-job claiming is usually preferable to global leadership because it avoids a fleet-wide single point of coordination.</li><li>Whichever you choose, dispatch must be idempotent at the worker, because a claim can be lost after the side effect.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Coordination</th><th>How it works</th><th>Trade-off</th></tr></thead><tbody><tr><td>Single leader</td><td>One active scheduler holds a lease</td><td>Simple, but failover gap and pause risk</td></tr>
+<tr><td>Atomic per-job claim</td><td>Conditional update sets owner + lease</td><td>Scales, more complex queries</td></tr>
+<tr><td>Partitioned ownership</td><td>Each scheduler owns a hash range of jobs</td><td>Even load, rebalancing work</td></tr>
+<tr><td>External scheduler service</td><td>Managed cron/dispatch</td><td>Less control, vendor limits</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Storing and finding due jobs</h2>
+<ul><li>The canonical design is a table with an indexed <code>next_run_at</code>; query for rows at or before now.</li><li>Poll on a short interval, ordered by due time, with a bounded batch size.</li><li>Claim rows atomically so a second scheduler cannot take the same ones.</li><li>A <strong>priority queue or min-heap</strong> in memory is fast but not durable; rebuild it from the store on start.</li><li>Time-bucketed queues (one queue per interval) reduce scanning but complicate late or early arrivals.</li><li>Redis sorted sets give efficient due-time ordering with <code>ZRANGEBYSCORE</code>, but persistence and failover semantics must be understood.</li><li>A <strong>timing wheel</strong> is efficient for many short timers, but long delays and durability still need the store.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Mechanism</th><th>Strength</th><th>Limitation</th></tr></thead><tbody><tr><td>DB table + index</td><td>Durable, queryable, transactional</td><td>Polling load, index contention at scale</td></tr>
+<tr><td>Priority queue / heap</td><td>Very fast ordering</td><td>In-memory, lost on restart</td></tr>
+<tr><td>Redis sorted set</td><td>Fast due-time queries</td><td>Durability and failover must be designed</td></tr>
+<tr><td>Delay queue (broker)</td><td>No polling, managed retries</td><td>Maximum delay caps, limited visibility</td></tr>
+<tr><td>Timing wheel</td><td>Cheap for many timers</td><td>Short-horizon, memory-resident</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Duplicate runs and idempotency</h2>
+<ul><li>Assume every occurrence can run more than once: lease expiry, retries, and failover all produce duplicates.</li><li>Give each occurrence a deterministic key such as <code>jobId:scheduledTime</code>.</li><li>Record the key with a unique constraint when the side effect is applied, so a second run is a no-op.</li><li>Make the side effect itself idempotent where possible (upsert, conditional update, provider idempotency key).</li><li>Do not rely on 'the scheduler only fires once'; correctness must survive an imperfect scheduler.</li><li>For non-idempotent external calls, write an intent record before calling and reconcile afterwards.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Missed runs and catch-up</h2>
+<ul><li>Define the policy explicitly per job: <strong>skip</strong>, <strong>run once now</strong>, or <strong>run every missed occurrence</strong>.</li><li>Skip is right for cleanup and idempotent housekeeping where only the latest state matters.</li><li>Run-once-now is right for reports and reconciliations that summarize a period.</li><li>Run-every-missed is right for billing or event processing where each interval carries unique work.</li><li>Bound catch-up: replaying hundreds of missed runs at once can overload downstream systems.</li><li>Record the last successful occurrence so a restart computes the gap deterministically.</li></ul>
+
+
+<div class="note">A missed run is a product decision as much as an engineering one. Choose the policy with the business owner.</div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Time zones and calendars</h2>
+<ul><li>Store instants in UTC; convert to a zone only when interpreting a local schedule or displaying a time.</li><li>A '9am local' job needs the zone attached to the schedule, not to the server running it.</li><li><strong>Daylight-saving transitions</strong> create missing and duplicated local hours; define behavior for both.</li><li>Monthly schedules need rules for short months (31st in February).</li><li>Calendar-based schedules (business days, holidays) belong in a calendar service, not in cron expressions.</li><li>Test the transition dates explicitly; they are the classic source of off-by-one-hour incidents.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Overlap, concurrency, and long runs</h2>
+<ul><li>Decide per job whether overlapping runs are allowed, forbidden, or queued.</li><li>Forbid overlap with a lease or a 'running' flag that the next trigger checks.</li><li>A long-running recurring job that exceeds its interval will pile up unless overlap is blocked.</li><li>Set a maximum runtime and a per-job timeout so a stuck run does not block future ones forever.</li><li>Limit global worker concurrency so a burst of due jobs does not exhaust the pool.</li><li>For expensive recurring work, chain the next run after completion instead of scheduling on a fixed grid.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Load shaping and fairness</h2>
+<ul><li>Add <strong>jitter</strong> so thousands of jobs scheduled for the same minute do not stampede.</li><li>Spread tenant-specific schedules across the interval where the exact minute does not matter.</li><li>Partition jobs by owner or hash so one busy scheduler does not delay everything.</li><li>Prioritize time-critical jobs such as payment retries over housekeeping.</li><li>Cap dispatch rate to protect downstream systems during catch-up or a backlog drain.</li><li>Watch for schedules that cluster at popular times like midnight or the top of the hour.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Operating and monitoring</h2>
+<ul><li><strong>Scheduler lag:</strong> now minus the oldest due-but-undispatched job — the single most important metric.</li><li>Missed-run count and catch-up backlog size per job definition.</li><li>Duplicate-suppression hits, which reveal how often retries or failover occur.</li><li>Per-job duration percentiles against the schedule interval.</li><li>Lease-acquisition failures and leader changes.</li><li>Dead-letter volume and the age of the oldest failed occurrence.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Choosing a design in an interview</h2>
+<ul><li>Separate one-off delayed jobs from recurring schedules and say what each needs.</li><li>Put the schedule and due time in durable storage; never rely on process memory.</li><li>Show the scheduler claiming due work atomically and dispatching to a queue.</li><li>Explain how you avoid double dispatch: leases, conditional claims, and idempotent workers.</li><li>State the misfire and catch-up policy explicitly.</li><li>Handle time zones and DST as first-class concerns.</li><li>Close with scheduler lag, missed runs, and duplicate suppression as your monitoring story.</li></ul>
+
+<div class="flow"><span class="flow-step">Define schedule</span><span class="flow-arrow">→</span><span class="flow-step">Store due time</span><span class="flow-arrow">→</span><span class="flow-step">Claim atomically</span><span class="flow-arrow">→</span><span class="flow-step">Dispatch</span><span class="flow-arrow">→</span><span class="flow-step">Execute idempotently</span><span class="flow-arrow">→</span><span class="flow-step">Advance next run</span><span class="flow-arrow">→</span><span class="flow-step">Monitor lag</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Single-leader scheduling</strong> is simple and avoids duplicate dispatch but has a failover gap and can stall if the leader pauses.</li><li><strong>Per-job atomic claims</strong> scale better and remove the global leader but require careful conditional updates and more complex queries.</li><li><strong>Frequent polling</strong> reduces dispatch lag but increases database load and contention on the due-time index.</li><li><strong>In-memory timing structures</strong> are fast but rebuild from durable storage on every restart and cannot be the source of truth.</li><li><strong>Run-every-missed catch-up</strong> preserves per-interval semantics but can flood downstream systems after an outage.</li><li><strong>Skipping missed runs</strong> protects capacity but silently loses work that had unique value.</li><li><strong>Blocking overlapping runs</strong> protects the system but can postpone a schedule indefinitely if runs are slow.</li><li><strong>Jitter and spread</strong> smooth load but make execution times less predictable for users and downstream jobs.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. How is scheduling different from a normal background job?</summary><div class="answer"><p>The trigger is time rather than a request. Nothing in the request path creates the work, so the system must own durability until the due time, decide which instance fires it, and define behavior when the moment was missed.</p></div></details>
+<details><summary>2. Why not just use an in-process timer or <code>sleep</code>?</summary><div class="answer"><p>It dies with the process. A deploy, crash, or scale-in loses the timer, and other instances never knew about it. The due time must live in durable storage so any instance can resume it.</p></div></details>
+<details><summary>3. Why is cron on every server wrong?</summary><div class="answer"><p>Each instance fires the same job, so the side effect happens once per server. Cron on exactly one server is the opposite problem: a single point of failure with no failover. You need either one active scheduler or atomic per-job claiming.</p></div></details>
+<details><summary>4. How do you prevent two schedulers from running the same job?</summary><div class="answer"><p>Claim the job atomically with a conditional update that sets an owner and lease, or elect a single active scheduler. Even then, assume a claim can be lost after the side effect, so the worker must also be idempotent.</p></div></details>
+<details><summary>5. How do you store delayed jobs?</summary><div class="answer"><p>As durable rows with an indexed run-at time, claimed in small atomic batches. Add a queue or sorted set for efficient due-time ordering if the table becomes a bottleneck, but keep the durable record as the source of truth.</p></div></details>
+<details><summary>6. How do you handle a job that was missed while the system was down?</summary><div class="answer"><p>Choose an explicit policy: skip, run once now, or replay every missed occurrence. Skip suits cleanup, run-once suits periodic reports, and replay suits billing where each interval has unique value. Bound the replay rate.</p></div></details>
+<details><summary>7. How do you stop duplicate side effects from retries?</summary><div class="answer"><p>A deterministic idempotency key per occurrence, such as job ID plus scheduled time, recorded with a unique constraint when the effect is applied. Plus idempotent writes or provider-side idempotency for external calls.</p></div></details>
+<details><summary>8. What happens when a recurring job takes longer than its interval?</summary><div class="answer"><p>Either block the next run with a lease or running flag, queue it, or allow overlap deliberately. Without a decision, runs pile up and can exhaust the worker pool. Also set a maximum runtime so a stuck run does not block the schedule forever.</p></div></details>
+<details><summary>9. How do you handle time zones and daylight saving?</summary><div class="answer"><p>Store instants in UTC and attach the zone to the schedule definition. Define what happens to a local time that does not exist or occurs twice during a DST transition, and test those dates explicitly.</p></div></details>
+<details><summary>10. What is jitter and why do you need it?</summary><div class="answer"><p>Jitter adds a small random offset to scheduled times so many jobs do not fire at the same instant. Without it, schedules that cluster at midnight or the top of the hour create a periodic spike that looks like a traffic attack.</p></div></details>
+<details><summary>11. How would you schedule millions of reminders?</summary><div class="answer"><p>Store each reminder with its due time, shard by time bucket or user, and claim due batches atomically with a bounded batch size. Push to a queue for delivery workers, and rely on per-reminder idempotency keys so retries and failover do not send duplicates.</p></div></details>
+<details><summary>12. How do you cancel a scheduled job?</summary><div class="answer"><p>Mark the record cancelled conditionally, and have the dispatcher re-check status at claim time. Cancellation must be checked as close to execution as possible, because the job may already be claimed or in flight.</p></div></details>
+<details><summary>13. What should you monitor?</summary><div class="answer"><p>Scheduler lag — the age of the oldest due-but-undispatched job — plus missed-run counts, catch-up backlog, duplicate suppression hits, per-job duration versus interval, and leader or lease changes.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Relying on in-process timers or sleep loops for durable delays.</li><li>Running cron on every application server and multiplying side effects by fleet size.</li><li>Using one cron server with no failover and no visibility into missed runs.</li><li>Dispatching due rows without an atomic claim, so two schedulers pick the same job.</li><li>Assuming the scheduler fires exactly once and skipping idempotency in workers.</li><li>Ignoring daylight-saving transitions and short months in local-time schedules.</li><li>Letting a slow recurring job overlap itself until the worker pool is exhausted.</li><li>Having no misfire policy, so an outage silently drops work or floods the system on recovery.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="handling-long-running-tasks.html"><span>← Previous</span><strong>Handling Long-Running Tasks</strong></a><a class="next" href="search-and-typeahead.html"><span>Next →</span><strong>Search and Typeahead</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/scheduling-delayed-and-recurring-jobs">AlgoMaster — Scheduling Delayed and Recurring Jobs</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

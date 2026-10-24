@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Absorb Traffic Spikes — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 14 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · Scaling</span></div>
+    <h1>Absorb Traffic Spikes</h1>
+    <p class="dek">Interviewers ask it to separate candidates who say "autoscale" from those who can explain what happens in the first ten seconds, what gets rejected, and how the system recovers afterwards.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>A spike is about ramp speed, not average load: have capacity ready with headroom and pre-warming, cap demand with rate limits and admission control, buffer only in bounded queues, and shed or degrade so the critical flow survives.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Survive a sudden jump to many times the baseline request rate without a cascading failure.</li><li>Keep critical flows such as login, checkout, and payment working while optional features degrade.</li><li>Queue or defer work that can genuinely finish later, and tell the client it was accepted.</li><li>Reject excess traffic quickly with a clear error and a retry hint instead of a slow timeout.</li><li>Drain the backlog and return to normal latency after the peak.</li><li>Pre-scale and warm capacity for known events such as a sale or a launch.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>p99 for admitted requests stays inside the target instead of climbing with the load.</li><li>Every buffer has a maximum depth and a maximum age; nothing queues without bound.</li><li>Autoscaling reacts in minutes, so step changes must be covered by headroom or pre-warming.</li><li>Degradation is a flag change, not a deploy.</li><li>Shed and reject decisions are counted, labelled, and alertable.</li><li>Retries are capped and jittered so a blip does not become a sustained overload.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 5k requests per second at baseline and 100k per second for ten minutes during a flash sale, a 20x step change.</li><li>A new instance takes roughly 60 to 120 seconds to boot, pass health checks, and warm its cache, so a 10-second ramp cannot be met reactively.</li><li>Keeping 40 percent headroom above the expected peak costs about 1.4x baseline capacity while idle, which is usually cheaper than an outage.</li><li>A queue holding 1M messages at about 1 KB each is roughly 1 GB; draining at 20k messages per second takes about 50 seconds.</li><li>If one instance handles about 500 requests per second for this endpoint, a 100k peak needs about 200 instances before treating headroom as extra.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">TrafficPolicy</span><span class="fields">route, limit_per_window, burst, priority_class, scope (user, key, tenant)</span></div><div class="entity"><span class="name">AdmissionDecision</span><span class="fields">request_id, route, decision, reason, queue_depth, decided_at</span></div><div class="entity"><span class="name">QueueJob</span><span class="fields">job_id, type, payload_ref, enqueued_at, deadline, attempts, status</span></div><div class="entity"><span class="name">CapacityPlan</span><span class="fields">event, expected_peak, prewarm_at, min_instances, max_instances, owner</span></div><div class="entity"><span class="name">ShedRule</span><span class="fields">route, priority, shed_order, trigger_threshold, enabled</span></div><div class="entity"><span class="name">LoadSample</span><span class="fields">minute, rps, p99_ms, saturation, queue_depth, error_rate</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/jobs</code></td><td>Accepts deferrable work with a dedupe key and deadline; returns 202 with a job id instead of blocking.</td></tr><tr><td><code>GET</code></td><td><code>/jobs/{id}</code></td><td>Polls job status so the client can stop retrying the original request.</td></tr><tr><td><code>PUT</code></td><td><code>/admin/policies/{route}</code></td><td>Changes limits, burst allowance, or priority class without a deploy.</td></tr><tr><td><code>POST</code></td><td><code>/admin/prewarm</code></td><td>Scales the bottleneck tier, warms caches, and opens connection pools before a known event.</td></tr><tr><td><code>GET</code></td><td><code>/admin/traffic</code></td><td>Shows current rps, saturation, queue depth, shed rate, and which degradations are active.</td></tr><tr><td><code>GET</code></td><td><code>/health/ready</code></td><td>Readiness that includes cache warmup and dependency reachability, so cold instances do not take traffic.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Queue layout</td><td>Separate bounded queues per priority class (critical, normal, bulk) with a max depth and message deadline</td><td>Bulk work cannot head-of-line block checkout, and a full queue triggers backpressure instead of unbounded memory growth.</td></tr><tr><td>Rate limiting state</td><td>Token bucket counters in Redis per scope, plus a cheap local bucket at the edge</td><td>Allows short bursts, enforces the sustained rate, and keeps the hottest limits off the network.</td></tr><tr><td>Job records</td><td>Durable row with dedupe key, deadline, attempts, and terminal status</td><td>Makes retries idempotent and lets the system drop work whose deadline has already passed.</td></tr><tr><td>Shed accounting</td><td>Counters keyed by route, reason, and priority class, sampled at the edge</td><td>You must be able to distinguish deliberate protection from an outage during and after the event.</td></tr><tr><td>Configuration</td><td>Limits, shed order, and degradation flags in a dynamic config store, cached in-process with a short refresh</td><td>Operators can react in seconds during an incident without waiting for a deploy.</td></tr><tr><td>Capacity plans</td><td>One row per scheduled event with prewarm time and expected peak</td><td>Turns a known spike into a checklist with an owner instead of an on-call surprise.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Clients] --> E[🛡️ Edge cache + rate limit]
+  E -->|over limit| X[🚫 429 with retry hint]
+  E -->|admit| AD[🚦 Admission control]
+  AD --> A[⚙️ API tier]
+  A --> Q1[📬 Critical queue]
+  A --> Q2[📬 Bulk queue]
+  Q1 --> W[👷 Workers]
+  Q2 --> W
+  W --> D[🗄️ Database]
+  A --> F[🎛️ Degradation flags]
+  A --> M[📊 Metrics + autoscaler]
+  M --> A
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef edge fill:#fff2d6,stroke:#b26a08,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#6d3fc4,color:#17211f;
+  classDef bad fill:#ffe8ec,stroke:#b42342,color:#17211f;
+  class C client;
+  class AD,A,W,F svc;
+  class E,M edge;
+  class Q1,Q2,D store;
+  class X bad;</div><div class="diagram-caption">Defenses apply in order: the edge caps and caches, admission control protects the API tier, queues hold only deferrable work, and flags plus metrics drive degradation and scaling.</div></div>
+        <ul><li>Order the defenses: capacity you already have, then admission at the door, then bounded buffering, then shedding and degradation. Capacity alone is not a strategy.</li><li>Autoscaling is a follower, not a shield. It helps sustained growth and hurts nothing, but a step change is absorbed by headroom and pre-warming.</li><li>Scale the bottleneck tier. Adding API instances while the database or a third-party API stays fixed just moves the queue.</li><li>New instances start cold: empty caches and empty pools push extra load onto the database exactly when it is weakest.</li><li>Queueing converts a latency failure into a backlog. It works only when consumers can eventually outpace producers.</li><li>Measure the recovery tail, not just the peak: time to drain the backlog and return p99 to baseline is the real recovery metric.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Static headroom</td><td>Absorbs a step change immediately and survives a lost node</td><td>Pays for idle capacity at baseline</td></tr><tr><td>Reactive autoscaling</td><td>Cheap at baseline and handles gradual growth</td><td>Reacts after minutes and starts cold instances that add load</td></tr><tr><td>Scheduled pre-warming</td><td>Capacity and caches are ready before a known event</td><td>Depends on an accurate forecast and adds temporary spend</td></tr><tr><td>Rate limiting and quotas</td><td>Caps demand before it reaches shared resources and gives a fast, honest rejection</td><td>Rejects legitimate users during a genuine surge</td></tr><tr><td>Bounded queue with backpressure</td><td>Converts a burst into a drainable backlog and protects memory</td><td>Adds delay and duplicates, and still fails if consumers are persistently slower</td></tr><tr><td>Load shedding</td><td>Keeps most requests fast and protects the critical flow</td><td>Explicitly fails some requests that might have succeeded</td></tr><tr><td>Graceful degradation</td><td>Core journeys survive when optional features cannot</td><td>Users get a reduced or stale experience and need to be told</td></tr><tr><td>Waiting room</td><td>Keeps a high-demand event from collapsing the purchase path</td><td>Adds friction and a second stateful system to operate</td></tr></tbody></table></div>
+        <ul><li>Pre-warm before known events: scale the bottleneck, warm caches, open pools, and raise provider quotas in advance.</li><li>Run 30 to 50 percent headroom on the bottleneck tier so one lost node or one surge does not saturate it.</li><li>Serve public reads from the CDN with stale-while-revalidate so a surge never forces synchronous revalidation.</li><li>Apply admission control at the edge with per-route concurrency caps, not just per-IP rate limits.</li><li>Bound every queue, attach a deadline, and reject or drop work that can no longer be useful.</li><li>Return 429 with a Retry-After hint and jittered client backoff instead of letting requests time out.</li><li>Put circuit breakers and aggressive timeouts in front of every dependency, and isolate connection pools per dependency.</li><li>Use flags to disable recommendations, live counters, and personalisation first, keeping the purchase path intact.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why is autoscaling not enough for a ticket on-sale?</strong> The spike ramps in seconds while scaling takes minutes to launch, pass health checks, and warm caches, so pre-warming and admission control carry the peak.</div><div class="followup"><strong>Headroom or autoscaling?</strong> Headroom for sharp, short, or unpredictable spikes; autoscaling for gradual or sustained growth, and most systems run both.</div><div class="followup"><strong>When does a queue help and when does it only hide the problem?</strong> It helps a short burst that consumers can later drain; it hides the problem when consumers are persistently slower, so lag grows without limit.</div><div class="followup"><strong>What is backpressure and how do you implement it?</strong> A signal that producers must slow down or retry later, implemented with bounded queues, concurrency limits, and explicit rejection when the buffer is full.</div><div class="followup"><strong>What would you shed first?</strong> Bots, background jobs, analytics, and expensive non-critical features, while protecting login, checkout, and payment with their own limits.</div><div class="followup"><strong>How do you prevent a retry storm?</strong> Retry only idempotent calls, cap attempts, use exponential backoff with jitter, respect Retry-After, and put a circuit breaker in front of failing dependencies.</div><div class="followup"><strong>How do you protect the database during a spike?</strong> Cap API concurrency, cache aggressively, queue writes, use read replicas for non-critical reads, and shed or degrade anything that touches the primary.</div><div class="followup"><strong>When would you use a waiting room?</strong> For a known event where demand far exceeds capacity but users will wait, such as a ticket sale, admitting them at a rate the purchase path can serve.</div><div class="followup"><strong>Why do cold instances make a spike worse?</strong> They start with empty caches and no established connections, so their first requests hit the database and dependency pools that are already the bottleneck.</div><div class="followup"><strong>How do you test for a spike before it happens?</strong> Load test above the expected peak with a realistic ramp shape and dependency latency, then run a game day that exercises shedding, degradation, and recovery.</div><div class="followup"><strong>What do you monitor during and after the peak?</strong> Rps, p95 and p99, error and reject rates, saturation, queue depth and age, cache hit ratio, autoscaler activity, and time back to baseline.</div><div class="followup"><strong>What if the spike lands on one key or one tenant?</strong> That is a hot-key problem, not a capacity problem: add per-key limits, cache or replicate the key, and isolate the tenant before scaling the whole fleet.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Saying autoscaling will handle it, without explaining the seconds before the first new instance is ready.</li><li>Provisioning for the daily average and calling that number peak capacity.</li><li>Leaving queues unbounded and treating a growing backlog as success.</li><li>Retrying aggressively without backoff or jitter and turning a blip into an outage.</li><li>Scaling every tier except the actual bottleneck, usually the database or a third party.</li><li>Applying the same rate limit to payment and login traffic as to browsing.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="handle-hot-keys.html"><span>← Previous</span><strong>Handle Hot Keys</strong></a><a class="next" href="fanout-updates.html"><span>Next →</span><strong>Fan Out Updates</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

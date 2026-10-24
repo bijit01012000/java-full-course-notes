@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Architectural Styles — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 15 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>API Architectural Styles</h1>
+    <p class="dek">API Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/api-styles">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What is an API style?</a>
+<a href="#s2">REST: resources and HTTP methods</a>
+<a href="#s3">REST statelessness and why it won</a>
+<a href="#s4">REST limitations: over-fetching and under-fetching</a>
+<a href="#s5">GraphQL: the client asks for exactly what it needs</a>
+<a href="#s6">GraphQL trade-offs</a>
+<a href="#s7">RPC: actions instead of resources</a>
+<a href="#s8">gRPC: contracts, codegen, and HTTP/2</a>
+<a href="#s9">gRPC trade-offs</a>
+<a href="#s10">WebSockets: two-way persistent connections</a>
+<a href="#s11">Webhooks: server-initiated event delivery</a>
+<a href="#s12">Other styles you will see</a>
+<a href="#s13">Using API styles together</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>An API style is the pattern a communication follows — resource-based, query-based, action-based, streaming, or event-driven — and real systems pick a different one for each communication path.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>API style</dt><dd>The pattern of communication: how the client asks, how data is structured, who initiates, and whether the interaction is one-shot or continuous.</dd></div><div class="term"><dt>REST</dt><dd>Representational State Transfer: resources identified by URLs, manipulated with standard HTTP methods, usually stateless.</dd></div><div class="term"><dt>Idempotent</dt><dd>A request that has the same effect whether it is sent once or many times; GET, PUT, and DELETE are idempotent, POST is not by default.</dd></div><div class="term"><dt>GraphQL</dt><dd>A query language and schema where the client specifies exactly which fields it needs and gets back that shape.</dd></div><div class="term"><dt>RPC</dt><dd>Remote Procedure Call: the API is organized around actions or function calls rather than resources.</dd></div><div class="term"><dt>gRPC</dt><dd>A modern RPC framework using Protobuf contracts, generated client and server code, and HTTP/2 multiplexing and streaming.</dd></div><div class="term"><dt>Protocol Buffers</dt><dd>A compact binary serialization format where both sides know the field names from a shared contract, so only field numbers and values travel.</dd></div><div class="term"><dt>WebSocket</dt><dd>A persistent, full-duplex connection upgraded from HTTP, letting either side send messages at any time.</dd></div><div class="term"><dt>Webhook</dt><dd>An HTTP callback: a provider POSTs an event to a URL the consumer registered, reversing the usual direction of initiation.</dd></div><div class="term"><dt>SSE</dt><dd>Server-Sent Events: a one-way stream of updates from server to browser over a normal HTTP connection, consumed with EventSource.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What is an API style?</h2>
+<p class="lede">An API defines how two pieces of software communicate. The style defines the pattern that communication follows.</p>
+<ul><li><strong>How does the client ask?</strong> Does it request a resource, call a function, or subscribe to a stream?</li><li><strong>How is data structured?</strong> Text JSON, XML, or a compact binary format?</li><li><strong>What is the interaction model?</strong> One-shot request-response, or continuous two-way traffic?</li><li><strong>Who initiates?</strong> Does the client always start, or can the server reach out when something happens?</li><li>The answers decide latency, coupling, caching, tooling, and operational cost more than any single library choice.</li><li>Most real systems mix styles; the design question is per communication path, not per company.</li></ul>
+
+<div class="flow"><span class="flow-step">Identify the communication shape</span><span class="flow-arrow">→</span><span class="flow-step">Pick the style that matches it</span><span class="flow-arrow">→</span><span class="flow-step">Define the contract</span><span class="flow-arrow">→</span><span class="flow-step">Add auth, limits, and observability</span><span class="flow-arrow">→</span><span class="flow-step">Revisit when traffic or clients change</span></div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>REST: resources and HTTP methods</h2>
+<p class="lede">REST stands for Representational State Transfer. Instead of thinking in functions or actions, you think in resources: users, orders, products.</p>
+<ul><li>Each resource is identified by a URL, such as <code>/users/123</code> or <code>/orders</code>.</li><li>Standard HTTP methods carry the meaning: GET reads, POST creates, PUT replaces, PATCH partially updates, DELETE removes.</li><li><strong>Safe</strong> means the request does not change server state; GET is safe.</li><li><strong>Idempotent</strong> means repeating the request has the same effect as sending it once; GET, PUT, and DELETE are idempotent.</li><li>PATCH idempotency depends on the patch: setting a field is idempotent, incrementing a counter is not.</li><li>The path names the thing; the method names the action. That separation is what makes the API predictable.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Method</th><th>Common meaning</th><th>Safe</th><th>Idempotent</th></tr></thead><tbody><tr><td>GET</td><td>Read a resource</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>POST</td><td>Create or trigger processing</td><td>No</td><td>No by default</td></tr>
+<tr><td>PUT</td><td>Replace a resource</td><td>No</td><td>Yes</td></tr>
+<tr><td>PATCH</td><td>Partially update a resource</td><td>No</td><td>Depends on the patch</td></tr>
+<tr><td>DELETE</td><td>Delete a resource</td><td>No</td><td>Yes</td></tr></tbody></table></div>
+
+<pre class="code"><code>GET /users/123 HTTP/1.1
+Accept: application/json
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{&quot;id&quot;: 123, &quot;name&quot;: &quot;Alice&quot;, &quot;email&quot;: &quot;alice@example.com&quot;}</code></pre>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>REST statelessness and why it won</h2>
+<ul><li>REST APIs are typically <strong>stateless</strong>: every request carries everything needed, including the auth token.</li><li>The server does not rely on context from a previous request, so any instance behind a load balancer can serve any call.</li><li>That is what makes REST trivial to scale horizontally and to retry after a failed instance.</li><li>REST maps directly onto HTTP, so status codes, cache headers, proxies, and existing tooling work out of the box.</li><li>It is simple to understand, easy to debug with curl, and supported in every language and platform.</li><li><strong>Strict REST</strong> per Roy Fielding also includes HATEOAS, where responses carry links to the next available actions.</li><li>Most APIs called RESTful skip HATEOAS: they use resource URLs, HTTP methods, and stateless requests, documented with OpenAPI.</li></ul>
+
+
+<div class="note">Stateless does not mean no state exists; it means the server does not need per-client conversational state to process a request. State lives in the token, the database, or the cache.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>REST limitations: over-fetching and under-fetching</h2>
+<ul><li><strong>Over-fetching:</strong> a screen that shows only a name still receives the full user object.</li><li><strong>Under-fetching:</strong> one screen needs several endpoints, so the client makes multiple round trips.</li><li>A profile page might need <code>/users/123</code>, <code>/users/123/profile</code>, and <code>/users/123/orders?limit=5</code>.</li><li>Each round trip adds latency, which hurts most on mobile and high-latency networks.</li><li>Clients compensate with bespoke endpoints, BFF layers, or response expansion parameters, all of which add API surface.</li><li>REST also has no standard way for the server to push updates, which is why WebSockets and SSE exist.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>GraphQL: the client asks for exactly what it needs</h2>
+<p class="lede">GraphQL reverses control: instead of the server deciding the response shape, the client specifies the fields it wants.</p>
+<ul><li>The client sends a query naming the fields it needs, and the server returns data in the same shape.</li><li>A single query can fetch a user, their profile picture, and five recent orders in one round trip.</li><li>This removes both over-fetching and under-fetching for screens with varied data needs.</li><li>The API is built around a <strong>strongly defined schema</strong> describing available types, fields, and operations.</li><li>Clients can introspect the schema to discover what they can request, which enables strong tooling and codegen.</li><li>GraphQL has <strong>queries</strong> for reads, <strong>mutations</strong> for writes, and <strong>subscriptions</strong> for live updates.</li><li>It shines when a mobile client wants a lightweight response and a desktop client wants much more from the same API.</li></ul>
+
+
+<pre class="code"><code>query {
+  user(id: 123) {
+    name
+    profilePicture
+    orders(limit: 5) {
+      id
+      total
+    }
+  }
+}</code></pre>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>GraphQL trade-offs</h2>
+<ul><li><strong>Arbitrary query shapes:</strong> the server must handle whatever the client sends, including deeply nested queries like <code>friends { friends { friends { orders } } }</code>.</li><li>Teams add query depth limits, complexity scoring, and timeouts to stop one query from exhausting the backend.</li><li><strong>N+1 problem:</strong> a naive resolver runs one query for a list and then one per item; 100 users become 101 queries.</li><li>Batching tools such as DataLoader collapse those into fewer queries, at the cost of extra machinery.</li><li><strong>Caching is harder:</strong> REST gets per-URL HTTP and CDN caching for free; GraphQL usually posts every query to one endpoint.</li><li>Persisted queries and response-level caching can recover some of that, but they are extra work.</li><li>Authorization becomes per-field rather than per-endpoint, which is more expressive but easier to get wrong.</li><li>GraphQL is still text JSON over HTTP with the client initiating each request, so it does not solve server push.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>RPC: actions instead of resources</h2>
+<ul><li>RPC stands for Remote Procedure Call: calling a function on another server should look like calling a local function.</li><li>The API is organized around <strong>actions</strong>, not resources: <code>createOrder</code> rather than <code>POST /orders</code>.</li><li>The design question changes from "what resource am I working with?" to "what operation do I want performed?"</li><li>The client sends the function name and parameters; the server executes and returns a result.</li><li>RPC is not tied to one protocol or format: JSON-RPC sends JSON over HTTP, while gRPC uses Protobuf over HTTP/2.</li><li>RPC feels natural for internal service calls, command-style operations, and workflows that do not map cleanly to CRUD.</li><li>It tends to produce tighter coupling because every operation is a named method in the contract.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>gRPC: contracts, codegen, and HTTP/2</h2>
+<p class="lede">gRPC is a modern RPC framework designed for fast, efficient communication between services.</p>
+<ul><li>The API is defined in a <code>.proto</code> file, for example a <code>UserService</code> with a <code>GetUser</code> operation.</li><li>The definition acts as a contract: it names operations, request messages, and response messages.</li><li>gRPC generates client stubs and server interfaces in many languages, so Java can call Go or Python through the same contract.</li><li>It commonly uses <strong>Protocol Buffers</strong>, a compact binary format, instead of text JSON.</li><li>Protobuf does not repeat field names in every message; both sides know them from the contract, so only field numbers and values travel.</li><li>Smaller payloads and faster serialization make gRPC attractive for high-volume internal traffic.</li><li>gRPC runs on <strong>HTTP/2</strong>, which gives multiplexing (many calls share one connection) and streaming in both directions.</li><li>It also supports deadlines, so a caller can state how long it is willing to wait and the server can stop work early.</li></ul>
+
+<div class="flow"><span class="flow-step">Write the .proto contract</span><span class="flow-arrow">→</span><span class="flow-step">Generate client stubs and server interfaces</span><span class="flow-arrow">→</span><span class="flow-step">Implement the server</span><span class="flow-arrow">→</span><span class="flow-step">Client calls a stub method</span><span class="flow-arrow">→</span><span class="flow-step">HTTP/2 carries binary Protobuf messages</span><span class="flow-arrow">→</span><span class="flow-step">Deadline or error returns a status</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>gRPC trade-offs</h2>
+<ul><li>Binary messages are <strong>harder to inspect</strong> by hand than JSON; you need tooling to decode them.</li><li>Browsers cannot call gRPC directly, so web clients usually need gRPC-Web plus a proxy.</li><li>Both sides usually need access to the same Protobuf definitions, which adds a build and release dependency.</li><li>Schema evolution is possible with field numbers, but removing or reusing them breaks compatibility.</li><li>Debugging stretches from the client through a proxy and HTTP/2 framing, which is more complex than curl against REST.</li><li>Load balancers and proxies must understand HTTP/2 and long-lived streams; some infrastructure does not.</li><li>The common pattern is REST or GraphQL for external clients and gRPC between internal services.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>REST</th><th>GraphQL</th><th>gRPC</th></tr></thead><tbody><tr><td>Organized around</td><td>Resources</td><td>Client-selected fields</td><td>Actions / methods</td></tr>
+<tr><td>Format</td><td>JSON (usually)</td><td>JSON</td><td>Protobuf binary</td></tr>
+<tr><td>Contract</td><td>OpenAPI (optional)</td><td>Schema (required)</td><td>.proto (required)</td></tr>
+<tr><td>Browser support</td><td>Native</td><td>Native</td><td>Needs gRPC-Web and a proxy</td></tr>
+<tr><td>Caching</td><td>Easy per URL</td><td>Harder, one endpoint</td><td>Not HTTP-cache friendly</td></tr>
+<tr><td>Best for</td><td>Public resource APIs</td><td>Varied client data needs</td><td>Internal high-volume calls</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>WebSockets: two-way persistent connections</h2>
+<ul><li>A WebSocket keeps one connection open so the client and server can send messages at any time.</li><li>It begins as an HTTP request with <code>Upgrade: websocket</code>; the server replies <code>101 Switching Protocols</code>.</li><li>The same TCP connection then carries small WebSocket frames instead of repeated HTTP headers.</li><li>This is <strong>full-duplex</strong>: the server can push while the client is still sending.</li><li>It removes polling entirely, so updates arrive as soon as they exist.</li><li>The cost is operational: long-lived connections, reconnects, heartbeats, and routing messages across servers.</li><li>Good fits are chat, live notifications, multiplayer games, collaborative editing, and real-time dashboards.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Webhooks: server-initiated event delivery</h2>
+<ul><li>A webhook is an HTTP callback: the consumer registers a URL, and the provider POSTs an event when something happens.</li><li>It reverses initiation: the consumer no longer polls the provider for changes.</li><li>The request carries the event type, a unique event ID, a timestamp, a payload, and usually a signature header.</li><li>Webhooks are asynchronous; the provider does not wait for the consumer to finish business processing.</li><li>Delivery is typically at-least-once, so consumers must deduplicate by event ID and verify signatures.</li><li>Common uses are payment events, source-control updates, email delivery notices, and CI/CD triggers.</li><li>They suit discrete events where a permanent connection would be wasteful.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Other styles you will see</h2>
+<ul><li><strong>SSE</strong> lets a server stream one-way updates to a browser over plain HTTP, consumed with <code>EventSource</code>.</li><li>SSE is simpler than WebSockets when only the server pushes: live notifications, progress bars, streamed LLM tokens.</li><li>If the client also sends frequent messages, use WebSockets instead.</li><li><strong>Message-driven APIs</strong> publish events to a broker such as Kafka, and consumers process them independently.</li><li>They fit when the producer must not wait for every consumer, such as order events, notifications, and audit logs.</li><li>Their cost is harder debugging, ordering, and schema evolution across independent consumers.</li><li><strong>SOAP</strong> is an older XML protocol with formal WSDL contracts; it persists in banking, insurance, healthcare, and government integrations.</li><li>Use SOAP only when an integration partner requires it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Using API styles together</h2>
+<p class="lede">In real systems these styles are not mutually exclusive. An e-commerce application typically uses several at once.</p>
+<ul><li>The frontend talks to the backend over REST or GraphQL through an API gateway.</li><li>Behind the gateway, internal services use gRPC for efficient, strongly typed calls.</li><li>A payment provider notifies the backend of a successful charge with a webhook.</li><li>Live chat or order tracking reaches the client over a WebSocket.</li><li>Fan-out events that many services must react to go through a message broker.</li><li>The right question is not which style the whole system should use, but which style fits each communication path.</li><li>Mixing styles adds gateways, contracts, and monitoring; the benefit must justify that operational surface.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Communication path</th><th>Good fit</th><th>Avoid when</th></tr></thead><tbody><tr><td>Public API working with resources</td><td>REST</td><td>Clients need many different nested views</td></tr>
+<tr><td>Client screens with varied data needs</td><td>GraphQL</td><td>A few stable endpoints cover the use case</td></tr>
+<tr><td>Internal service-to-service calls</td><td>gRPC</td><td>Browsers must call it directly without a proxy</td></tr>
+<tr><td>Two-way real-time interaction</td><td>WebSocket</td><td>Normal request-response is enough</td></tr>
+<tr><td>One-way live updates to a browser</td><td>SSE</td><td>The client also sends frequent messages</td></tr>
+<tr><td>Another system notifies you of an event</td><td>Webhook</td><td>The caller needs an immediate result from your system</td></tr>
+<tr><td>Many services react to the same event</td><td>Message-driven API</td><td>The caller needs a response from every consumer</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>REST</strong> is simple, cacheable, and universal, but it over-fetches, under-fetches, and has no built-in push.</li><li><strong>GraphQL</strong> removes over- and under-fetching and gives clients one flexible endpoint, but adds query-cost control, N+1 risk, and harder caching.</li><li><strong>RPC</strong> maps naturally to actions and internal workflows, but organizes the API around verbs and tends to couple client and server more tightly.</li><li><strong>gRPC</strong> gives compact payloads, generated code, streaming, and deadlines, but is hard to inspect and unusable from browsers without a proxy.</li><li><strong>WebSockets</strong> give the lowest-latency two-way communication, but require connection state, heartbeats, pub/sub routing, and draining on deploy.</li><li><strong>Webhooks</strong> avoid polling and decouple event producers from consumers, but delivery is at-least-once, unordered, and needs signatures and retries.</li><li><strong>SSE</strong> is far simpler than WebSockets for server push, but it is one-way and limited to browser-friendly HTTP semantics.</li><li><strong>Message-driven APIs</strong> decouple producers from many consumers and absorb spikes, but make debugging, ordering, and schema changes harder.</li><li><strong>SOAP</strong> offers rigid formal contracts and mature enterprise tooling, but is verbose, XML-heavy, and slow to evolve.</li><li><strong>Using several styles</strong> matches each path well, but multiplies contracts, gateways, and skills the team must operate.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is an API style, and what does it decide?</summary><div class="answer"><p>It is the pattern communication follows: how the client asks for data, how data is structured, whether the interaction is one-shot or continuous, and who initiates. Those choices drive latency, coupling, caching, and operational cost.</p></div></details>
+<details><summary>2. When would you choose REST over GraphQL?</summary><div class="answer"><p>When a small set of stable endpoints covers the use case and you want simple, cacheable, universally supported APIs. REST is easier to secure, cache at the CDN, and operate. GraphQL pays off when clients need many different nested views of the same data.</p></div></details>
+<details><summary>3. What problems does GraphQL solve, and what does it create?</summary><div class="answer"><p>It solves over-fetching and under-fetching by letting the client choose fields in one query. It creates query-cost risk, the N+1 resolver problem, per-field authorization, and harder HTTP caching.</p></div></details>
+<details><summary>4. How do you protect a GraphQL server from expensive queries?</summary><div class="answer"><p>Limit query depth and complexity, set timeouts, cap page sizes, and reject introspection or arbitrary queries in production where appropriate. Persisted queries and cost scoring based on estimated work also help.</p></div></details>
+<details><summary>5. What does idempotent mean, and why does it matter for API design?</summary><div class="answer"><p>Repeating the request has the same effect as sending it once. It matters because networks fail and clients retry: GET, PUT, and DELETE can be retried safely, while a naive POST can create duplicate orders or charges.</p></div></details>
+<details><summary>6. Explain RPC versus REST.</summary><div class="answer"><p>REST models resources and uses HTTP methods on URLs; RPC models actions and calls named operations with parameters. REST is a better fit for public resource APIs, RPC for command-style internal calls and workflows.</p></div></details>
+<details><summary>7. Why is gRPC fast?</summary><div class="answer"><p>It uses Protobuf, a compact binary format that omits repeated field names because both sides know the contract, plus HTTP/2 multiplexing so many calls share one connection. It also supports streaming and deadlines.</p></div></details>
+<details><summary>8. What are the main drawbacks of gRPC?</summary><div class="answer"><p>Binary payloads are hard to inspect, browsers need gRPC-Web and a proxy, and both sides need the same Protobuf definitions. Proxies and load balancers must also handle HTTP/2 and long-lived streams.</p></div></details>
+<details><summary>9. When are WebSockets the wrong choice?</summary><div class="answer"><p>When normal request-response is enough, updates are infrequent enough for polling, or only the server pushes and SSE would do. WebSockets add connection state, reconnects, heartbeats, and cross-server routing.</p></div></details>
+<details><summary>10. How is a webhook different from a WebSocket?</summary><div class="answer"><p>A webhook is a one-shot HTTP POST from a provider to a consumer URL when an event occurs. A WebSocket is a persistent two-way connection between a client and a server. Webhooks are event notifications; WebSockets are a live channel.</p></div></details>
+<details><summary>11. When would you use SSE instead of WebSockets?</summary><div class="answer"><p>When only the server needs to push and the client does not send frequent messages: notifications, progress updates, or streamed tokens. SSE runs over ordinary HTTP, reconnects automatically, and is much simpler to operate.</p></div></details>
+<details><summary>12. Why use message-driven APIs instead of direct service calls?</summary><div class="answer"><p>They decouple the producer from every consumer, absorb traffic spikes, and let consumers scale and fail independently. The cost is eventual consistency, duplicate handling, ordering concerns, and harder tracing.</p></div></details>
+<details><summary>13. Design the API styles for an e-commerce system.</summary><div class="answer"><p>Use REST or GraphQL from clients to an API gateway, gRPC between internal services, webhooks from the payment provider, WebSockets for live chat or tracking, and a broker for events with many consumers. Choose per path, not one style everywhere.</p></div></details>
+<details><summary>14. What is the trade-off of using several API styles in one system?</summary><div class="answer"><p>Each path gets the right semantics and performance, but you now run multiple contracts, gateways, auth models, and debugging tools. That overhead is worth it when the paths genuinely differ, not when a single style would do.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Choosing one API style for the entire system instead of per communication path.</li><li>Calling an API RESTful while using POST for every operation and putting the action in the URL.</li><li>Assuming GraphQL eliminates performance problems; unbounded query depth and N+1 resolvers move the cost to the server.</li><li>Treating POST as safe to retry, which creates duplicate orders or payments.</li><li>Using WebSockets for one-way notifications where SSE or plain HTTP would be simpler.</li><li>Building webhooks without signature verification, deduplication, or a fast acknowledgment.</li><li>Adopting gRPC for browser clients without planning for gRPC-Web and a proxy.</li><li>Forgetting that webhooks and message-driven APIs are asynchronous, then designing the UI as if the result were immediate.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="what-is-an-api.html"><span>← Previous</span><strong>What is an API?</strong></a><a class="next" href="websockets.html"><span>Next →</span><strong>WebSockets</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/api-styles">AlgoMaster — API Architectural Styles</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

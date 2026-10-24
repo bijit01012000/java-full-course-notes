@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Surviving Component Failures — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 09 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Surviving Component Failures</h1>
+    <p class="dek">Interview Patterns · Staying Reliable</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/surviving-component-failures">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Failure modes to design for</a>
+<a href="#s3">Redundancy: removing single points of failure</a>
+<a href="#s4">Detecting failure</a>
+<a href="#s5">Timeouts, retries, and backoff</a>
+<a href="#s6">Circuit breakers</a>
+<a href="#s7">Bulkheads and isolation</a>
+<a href="#s8">Load shedding and graceful degradation</a>
+<a href="#s9">Failing over stateful components</a>
+<a href="#s10">Cascading failures and retry storms</a>
+<a href="#s11">Testing the failure path</a>
+<a href="#s12">Monitoring the failure path</a>
+<a href="#s13">Interview walkthrough</a>
+<a href="#s14">When not to over-engineer</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Every dependency will fail eventually, so design for <strong>partial failure</strong>: detect it quickly, contain the blast radius, retry only what is safe, and degrade in a planned order instead of cascading.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Partial failure</dt><dd>One component is broken while the rest of the system is healthy — the normal failure mode of a distributed system.</dd></div><div class="term"><dt>Single point of failure</dt><dd>A component whose failure makes the whole system unavailable because nothing redundant stands behind it.</dd></div><div class="term"><dt>Redundancy</dt><dd>Running more than one copy of a component so one failure does not remove the capability.</dd></div><div class="term"><dt>Failover</dt><dd>Moving traffic or leadership from a failed component to a healthy replica, automatically or manually.</dd></div><div class="term"><dt>Health check</dt><dd>A probe that decides whether an instance should receive traffic (readiness) or should be restarted (liveness).</dd></div><div class="term"><dt>Circuit breaker</dt><dd>A wrapper that stops calling a failing dependency after repeated errors and periodically probes for recovery.</dd></div><div class="term"><dt>Bulkhead</dt><dd>Isolating resources — pools, threads, queues, cells — so exhaustion in one area cannot consume capacity everywhere.</dd></div><div class="term"><dt>Load shedding</dt><dd>Deliberately rejecting low-priority work when the system is saturated so accepted work can still succeed.</dd></div><div class="term"><dt>Cascading failure</dt><dd>A failure that spreads because callers block, retry, or exhaust resources waiting on a broken dependency.</dd></div><div class="term"><dt>Blast radius</dt><dd>The set of users, requests, and components affected by a single failure.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">Large systems are built from components that fail independently: servers crash, databases become unavailable, networks drop requests, and downstream services go down. A well-designed system expects this and keeps working, or degrades gracefully, when part of it breaks.</p>
+<ul><li>A <strong>partial failure</strong> is the normal case: one node, shard, or dependency is broken while everything else is healthy.</li><li>Failures are often <strong>slow</strong> rather than binary; an instance that answers after many seconds holds threads and connections hostage, which is worse than one that refuses immediately.</li><li>A caller cannot reliably distinguish a slow response, a lost response, and a failed request, so it must choose between waiting, retrying, or giving up.</li><li>Retries are the natural client reaction, and they add load precisely when the system is already struggling.</li><li>One slow dependency can exhaust the thread pool, connection pool, or memory of a healthy service and take it down indirectly.</li><li>Interviewers judge the failure story as much as the happy path: what breaks, how it is detected, and what the user sees.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Failure modes to design for</h2>
+<p class="lede">Different failures need different containment. Naming the failure mode first makes the mechanism choice obvious.</p>
+<ul><li><strong>Crash-stop:</strong> the process or machine disappears; detection is fast and redundancy handles it.</li><li><strong>Slow or degraded:</strong> responses arrive late, timeouts fire, and queues build; this is the hardest case because the component still looks alive.</li><li><strong>Network partition:</strong> two parts of the system can each serve requests but cannot see each other, which risks split brain and divergent writes.</li><li><strong>Dependency outage:</strong> a third-party API, DNS, or identity provider fails and every instance fails the same way at the same time.</li><li><strong>Resource exhaustion:</strong> disk full, connection limit reached, memory pressure, or file descriptor leak causes a gradual collapse.</li><li><strong>Operator error and bad deploys:</strong> a configuration change or rollout removes capacity faster than any hardware fault.</li><li>Correlated failures matter most: replicas in the same rack, region, or deployment pipeline fail together.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Failure</th><th>Symptom</th><th>First containment</th></tr></thead><tbody><tr><td>Crash-stop</td><td>Connection refused, instance gone</td><td>Load balancer reroutes to healthy replicas</td></tr>
+<tr><td>Slow node</td><td>High latency, growing in-flight requests</td><td>Timeouts, outlier ejection, circuit breaker</td></tr>
+<tr><td>Network partition</td><td>Timeouts between zones, divergent state</td><td>Quorum, fencing, single-writer per shard</td></tr>
+<tr><td>Dependency outage</td><td>Uniform errors across all instances</td><td>Fallback, breaker, cached or degraded response</td></tr>
+<tr><td>Resource exhaustion</td><td>Rising queue depth and error rate</td><td>Load shedding, admission control, backpressure</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Redundancy: removing single points of failure</h2>
+<ul><li>Run at least <strong>N+1</strong> capacity: enough replicas that losing one still leaves the system within its latency budget.</li><li>Spread replicas across <strong>availability zones</strong>, racks, and power domains so one physical event cannot take all copies.</li><li>Keep the application tier <strong>stateless</strong> so any healthy instance can serve any request after a failure.</li><li>Replicate the database and make the failover path explicit: who promotes, how clients find the new primary, and what data may be lost.</li><li>Load balancers, DNS, and configuration services are components too; redundant entries and health-aware routing are required.</li><li>Watch for <strong>correlated failure</strong>: two replicas on the same host, the same image, or the same config push are effectively one replica.</li><li>Redundancy converts a hard outage into a smaller event only if traffic actually moves away from the failed copy.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Detecting failure</h2>
+<p class="lede">Nothing else works if the system cannot tell that a component is unhealthy. Detection is a design decision with its own false-positive and false-negative costs.</p>
+<ul><li><strong>Liveness</strong> asks whether the process should be restarted; <strong>readiness</strong> asks whether it should receive traffic. Conflating them restarts healthy-but-warming instances or routes traffic to broken ones.</li><li>A readiness check should exercise the dependencies needed to serve the request, but not so deeply that one shared dependency marks the whole fleet unhealthy.</li><li>Heartbeats and leases detect silent nodes; a missed heartbeat must be treated as suspicion, not proof, until a timeout or quorum confirms it.</li><li>Client-side <strong>timeouts</strong> are a failure detector too: if the deadline passes, the caller must decide and move on.</li><li>Use several signals — error rate, latency, saturation, and active probes — instead of trusting one threshold.</li><li>Detection has a cost in both directions: too sensitive causes flapping and failover storms, too slow leaves users waiting on dead components.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Check</th><th>Question</th><th>Wrong answer causes</th></tr></thead><tbody><tr><td>Liveness</td><td>Should this process be restarted?</td><td>Restart loops, lost in-flight work</td></tr>
+<tr><td>Readiness</td><td>Should this instance get traffic?</td><td>Errors or timeouts for real users</td></tr>
+<tr><td>Heartbeat / lease</td><td>Is this node still participating?</td><td>Split brain or stalled progress</td></tr>
+<tr><td>Synthetic probe</td><td>Can a real user journey succeed?</td><td>Late detection of dependency-level outages</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Timeouts, retries, and backoff</h2>
+<p class="lede">Timeouts bound how long a failure can hurt, and retries recover from transient faults. Both are dangerous when applied without a budget.</p>
+<ul><li>Set a timeout for every network call; a call with no deadline can wait forever and pin resources.</li><li>Propagate a <strong>deadline</strong> through the call chain so downstream work is abandoned when the caller has already given up.</li><li>Retry only <strong>idempotent or safe</strong> operations; blindly retrying a charge or an order creation creates duplicates.</li><li>Use <strong>exponential backoff with jitter</strong> so retries spread out instead of arriving in synchronized waves.</li><li>Cap attempts and total retry time, and allow retries at only one layer so they do not multiply across the stack.</li><li>Use a <strong>retry budget</strong> (retries as a fraction of total requests); when the budget is exhausted, fail fast instead of amplifying load.</li><li>Distinguish retryable errors (timeouts, 503, connection reset) from permanent ones (400, validation, auth failure).</li></ul>
+
+<div class="flow"><span class="flow-step">Request fails</span><span class="flow-arrow">→</span><span class="flow-step">Classify error</span><span class="flow-arrow">→</span><span class="flow-step">Retryable?</span><span class="flow-arrow">→</span><span class="flow-step">Backoff with jitter</span><span class="flow-arrow">→</span><span class="flow-step">Retry within budget</span><span class="flow-arrow">→</span><span class="flow-step">Give up with a clear error</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Circuit breakers</h2>
+<ul><li>A breaker watches calls to one dependency and <strong>trips</strong> after a threshold of failures or slow calls.</li><li>While open it fails fast, returning a fallback or an error instead of consuming threads on a dead dependency.</li><li>After a cool-down it moves to <strong>half-open</strong> and lets a small number of probes through to test recovery.</li><li>Track slow calls as failures; a dependency that answers in ten seconds is failing from the caller's point of view.</li><li>Scope breakers per dependency and, where useful, per tenant or endpoint so one bad route does not close everything.</li><li>A breaker without a fallback only converts a timeout into an error; the user-visible behavior still has to be designed.</li><li>Use breakers together with timeouts: the timeout bounds one call, the breaker bounds the whole dependency.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>State</th><th>Behavior</th><th>Transition</th></tr></thead><tbody><tr><td>Closed</td><td>Calls pass through, failures counted</td><td>Opens at error or latency threshold</td></tr>
+<tr><td>Open</td><td>Calls fail fast, fallback used</td><td>Moves to half-open after cool-down</td></tr>
+<tr><td>Half-open</td><td>Limited probe traffic allowed</td><td>Closes on success, reopens on failure</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Bulkheads and isolation</h2>
+<p class="lede">Bulkheads limit how much of the system one broken dependency or noisy tenant can consume.</p>
+<ul><li>Give each downstream dependency its own <strong>connection and thread pool</strong> so a slow one cannot starve the others.</li><li>Partition consumers and queues by workload so a backlog in image processing does not delay payments.</li><li>Apply per-tenant or per-api-key quotas to stop one customer from consuming shared capacity.</li><li><strong>Cell-based architecture</strong> splits users into independent stacks; a failure or bad deploy affects one cell, not everyone.</li><li>Use shuffle sharding so each request touches a small random subset of instances, limiting the reach of a single bad node.</li><li>Isolation reduces blast radius but wastes capacity and complicates routing, deployment, and capacity planning.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Load shedding and graceful degradation</h2>
+<ul><li>When demand exceeds capacity, <strong>admission control</strong> decides what to reject before queues grow without bound.</li><li>Rank work by importance: keep checkout and authentication, and drop recommendations, analytics, or prefetching first.</li><li>Reject early with a clear <strong>429 or 503</strong> and a retry hint rather than accepting work that will time out anyway.</li><li>Serve <strong>stale or static fallbacks</strong> — cached catalog, previous recommendations, last known balance — when a dependency is down.</li><li>Disable non-essential features behind flags so the core journey survives an incident.</li><li>Degradation must be planned and tested; inventing a fallback during an outage usually produces a second incident.</li><li>Tell the user what happened and what still works; silent partial failure erodes trust faster than a clear error.</li></ul>
+
+<div class="flow"><span class="flow-step">Load rises</span><span class="flow-arrow">→</span><span class="flow-step">Saturation detected</span><span class="flow-arrow">→</span><span class="flow-step">Shed low-priority work</span><span class="flow-arrow">→</span><span class="flow-step">Serve fallback where possible</span><span class="flow-arrow">→</span><span class="flow-step">Protect core path</span><span class="flow-arrow">→</span><span class="flow-step">Recover and drain</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Failing over stateful components</h2>
+<p class="lede">Stateless tiers fail over by rerouting traffic. Databases and leaders need a coordination protocol, and that protocol is where most outages hide.</p>
+<ul><li>Use a single writer per shard with <strong>leader election</strong> through a consensus service or the database's own failover mechanism.</li><li>Require a <strong>quorum</strong> before a new leader accepts writes; a minority partition must stop writing rather than diverge.</li><li>Use <strong>fencing tokens</strong> so an old leader that has not noticed its demotion cannot overwrite newer data.</li><li>Prefer automated failover for availability, but keep a tested manual path for cases where automation is unsure.</li><li>State the trade-off explicitly: synchronous replication reduces data loss and increases write latency; asynchronous replication is faster but can lose recent writes.</li><li>Clients must reconnect to the new primary; connection strings, DNS, or a proxy layer have to support that.</li><li>A failover you have never rehearsed is a hypothesis, not a mechanism.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Cascading failures and retry storms</h2>
+<ul><li>A slow dependency fills queues, which increases latency, which triggers more retries, which increases load further — a self-sustaining loop.</li><li>Synchronized retries after a blip create a <strong>thundering herd</strong>; jitter and backoff break the synchronization.</li><li>Timeouts set too close to normal latency cause healthy calls to be retried, adding load for no benefit.</li><li>Queue-based systems can amplify: every retry adds messages, and consumers fall further behind while producers keep publishing.</li><li>Metastable failures persist after the original trigger is gone because the retry and queue state keeps the system overloaded.</li><li>Break the loop with load shedding, breaker state, bounded queues, and a way to drain or reset backlog deliberately.</li><li>Watch in-flight requests, queue age, and retry rate — not just error rate — to catch the loop early.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Testing the failure path</h2>
+<ul><li><strong>Fault injection</strong> kills instances, adds latency, or breaks dependencies to verify the design actually reacts.</li><li>Start in staging with a clear hypothesis: which component fails, what should happen, and what the user should see.</li><li>Run <strong>game days</strong> where the team executes the failover runbook and measures detection and recovery time.</li><li>Test correlated failures, such as losing a whole zone or a shared dependency, not only single processes.</li><li>Chaos experiments in production need a small blast radius, a kill switch, and a rollback plan.</li><li>Every experiment should produce a fix: a missing timeout, a misleading alert, or an untested runbook step.</li><li>Track the time from injected failure to detection, to mitigation, and to full recovery.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Monitoring the failure path</h2>
+<ul><li>Define <strong>SLIs</strong> (success rate, latency, freshness) and an <strong>SLO</strong> with an error budget that justifies reliability work.</li><li>Alert on user-visible symptoms first, then on saturation and dependency health as leading indicators.</li><li>Track retries, breaker state, timeouts, queue depth, and in-flight requests per dependency.</li><li>Use distributed tracing to see where a request stalls across services; a single slow hop explains most tail latency.</li><li>Dashboards should show capacity versus current load so an on-call engineer knows how much headroom is left after a failure.</li><li>Log the decision, not just the error: which fallback was used, which instance was ejected, which region took over.</li><li>Review incidents for detection gaps and add a test or alert that would have caught them earlier.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Interview walkthrough</h2>
+<p class="lede">For almost any design, the interviewer will ask what happens when a component goes down. Answer in a fixed order so the story stays complete.</p>
+<ul><li>List the critical path and every dependency on it: client, DNS, load balancer, app tier, cache, database, queue, third parties.</li><li>For each dependency, name the failure mode and whether the system can serve without it.</li><li>Explain detection: health checks, timeouts, and what marks an instance or region unhealthy.</li><li>Explain containment: redundancy, isolation, breakers, and load shedding.</li><li>Explain the user-visible behavior during the failure, including what is degraded and what is unavailable.</li><li>Explain recovery: how traffic returns, how state is repaired, and how you avoid a second outage during failback.</li><li>Close with what you would monitor and which failure you would test first.</li></ul>
+
+<div class="flow"><span class="flow-step">Map critical path</span><span class="flow-arrow">→</span><span class="flow-step">Enumerate failures</span><span class="flow-arrow">→</span><span class="flow-step">Detect</span><span class="flow-arrow">→</span><span class="flow-step">Contain</span><span class="flow-arrow">→</span><span class="flow-step">Degrade</span><span class="flow-arrow">→</span><span class="flow-step">Recover</span><span class="flow-arrow">→</span><span class="flow-step">Monitor</span></div>
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>When not to over-engineer</h2>
+<ul><li>Redundancy multiplies cost: every additional copy needs capacity, patching, monitoring, and a failover path.</li><li>For a small internal system, a single well-backed-up database and a clear restore procedure may be the honest answer.</li><li>Multi-region active-active is usually unjustified until the availability target or latency requirement demands it.</li><li>Complex failover automation can cause more outages than it prevents if it is untested and poorly understood.</li><li>Match the mechanism to the requirement: a 99.9% target does not need the same design as a payment ledger.</li><li>State the cost of each reliability feature out loud; interviewers reward justified simplicity.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Redundancy</strong> removes single points of failure but multiplies infrastructure cost and adds replication consistency problems.</li><li><strong>Aggressive timeouts</strong> free resources quickly but turn slow responses into failures and generate extra retries.</li><li><strong>Retries</strong> improve success under transient faults but amplify load during overload and can create duplicates.</li><li><strong>Circuit breakers</strong> protect the caller and the dependency but convert a partial outage into a full feature outage for users.</li><li><strong>Load shedding</strong> keeps the core system healthy but rejects legitimate work, which must be visible and fair.</li><li><strong>Automatic failover</strong> reduces recovery time but risks split brain, flapping, and data loss if quorum and fencing are missing.</li><li><strong>Bulkheads and cells</strong> contain blast radius but waste capacity and complicate routing and deploys.</li><li><strong>Graceful degradation</strong> preserves the core journey but serves stale or reduced data that product and support must understand.</li><li><strong>Chaos testing</strong> exposes real weaknesses but injects risk and consumes engineering time.</li><li><strong>Multi-region redundancy</strong> survives a regional outage but makes every write path a consistency decision.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What does it mean for a system to survive component failure?</summary><div class="answer"><p>It keeps serving its core function, or degrades in a defined way, when any single component fails. That requires redundancy, fast detection, containment of the blast radius, and a tested recovery path — not just extra servers.</p></div></details>
+<details><summary>2. How do you find single points of failure?</summary><div class="answer"><p>Map the critical request path and list every hop: DNS, load balancer, app instance, cache, database, queue, third-party API. For each, ask what happens if it disappears and whether a healthy copy takes over automatically.</p></div></details>
+<details><summary>3. What is the difference between liveness and readiness?</summary><div class="answer"><p>Liveness asks whether the process should be restarted; readiness asks whether it should receive traffic. A warming instance should be live but not ready. Conflating them causes restart loops or traffic sent to instances that cannot serve.</p></div></details>
+<details><summary>4. How do you choose a timeout?</summary><div class="answer"><p>Start from the caller's end-to-end deadline and the dependency's normal latency distribution. The timeout should be above normal p99 but well below the caller's budget, and it must be shorter than any upstream timeout so work is abandoned coherently.</p></div></details>
+<details><summary>5. Why exponential backoff with jitter?</summary><div class="answer"><p>Backoff reduces retry pressure while the dependency recovers; jitter prevents all clients from retrying at the same instant. Without jitter, synchronized retries create a second traffic spike that can re-break the service.</p></div></details>
+<details><summary>6. When do retries make things worse?</summary><div class="answer"><p>When the failure is overload rather than a transient fault, when the operation is not idempotent, or when retries are layered so one request becomes many. Retry budgets and breakers bound this amplification.</p></div></details>
+<details><summary>7. How does a circuit breaker work?</summary><div class="answer"><p>It counts failures or slow calls to a dependency. Above a threshold it opens and fails fast, optionally returning a fallback. After a cool-down it half-opens, lets a few probes through, and closes if they succeed.</p></div></details>
+<details><summary>8. What is a bulkhead and why does it matter?</summary><div class="answer"><p>A bulkhead isolates resources so one failing dependency or noisy tenant cannot consume all threads, connections, or queue capacity. It limits blast radius at the cost of some idle capacity and more configuration.</p></div></details>
+<details><summary>9. How do you stop a cascading failure?</summary><div class="answer"><p>Bound every wait with timeouts, fail fast with breakers, limit in-flight work and queue size, shed low-priority traffic, and break retry storms with backoff, jitter, and retry budgets. Then drain backlog deliberately rather than letting it grow.</p></div></details>
+<details><summary>10. Load shedding versus rate limiting?</summary><div class="answer"><p>Rate limiting enforces a quota per client over time. Load shedding protects the system when it is saturated, dropping or rejecting work by priority regardless of who sent it. They are complementary.</p></div></details>
+<details><summary>11. How do you fail over a database safely?</summary><div class="answer"><p>Elect a single leader with quorum, fence the old leader with a token, promote a replica that is caught up enough for the RPO, and redirect clients. Then verify replication and repair any divergence before failing back.</p></div></details>
+<details><summary>12. How do you test failure handling?</summary><div class="answer"><p>Inject faults in staging and controlled production experiments: kill instances, add latency, block a dependency. State the expected behavior first, measure detection and recovery time, and turn every surprise into a fix or a test.</p></div></details>
+<details><summary>13. What would you monitor during an incident?</summary><div class="answer"><p>User-facing success rate and latency, saturation and queue depth, retry rate, breaker state, dependency latency, and error budget burn. Traces show which hop is failing; capacity dashboards show remaining headroom after the loss.</p></div></details>
+<details><summary>14. How much redundancy is enough?</summary><div class="answer"><p>Enough to meet the availability target with the failure you must survive. That usually means N+1 within a region, multi-AZ placement, and a tested disaster-recovery path. More than that must be justified by the cost of downtime.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Saying 'we add replicas' without explaining how failure is detected and how traffic is rerouted.</li><li>Retrying every failed request, including non-idempotent writes such as payments.</li><li>Setting a dependency timeout longer than the caller's own deadline, so the caller gives up while work continues.</li><li>Treating a process-level health check as proof that the instance can serve real traffic.</li><li>Assuming a standby region or replica works without ever rehearsing the failover.</li><li>Ignoring correlated failures: replicas in one zone, one image, or one shared dependency.</li><li>Designing for machine failure but not for bad deploys, configuration changes, or operator error.</li><li>Opening a circuit breaker with no fallback, which turns a timeout into a hard error for the user.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="streaming-video-audio.html"><span>← Previous</span><strong>Streaming Video and Audio</strong></a><a class="next" href="preventing-duplicate-processing.html"><span>Next →</span><strong>Preventing Duplicate Processing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/surviving-component-failures">AlgoMaster — Surviving Component Failures</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

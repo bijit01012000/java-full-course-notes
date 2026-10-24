@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Warehousing — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 39 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Data Warehousing</h1>
+    <p class="dek">Big Data Processing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/data-warehousing">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: transactional and analytical work pull in opposite directions</a>
+<a href="#s2">Schema-on-write: model before you load</a>
+<a href="#s3">Columnar storage</a>
+<a href="#s4">MPP execution</a>
+<a href="#s5">Dimensional modeling: facts and grain</a>
+<a href="#s6">Dimensions and the star schema</a>
+<a href="#s7">Snowflake schema and normalization</a>
+<a href="#s8">Slowly changing dimensions</a>
+<a href="#s9">OLAP versus OLTP</a>
+<a href="#s10">Loading the warehouse: ETL and ELT</a>
+<a href="#s11">Performance, concurrency, and cost</a>
+<a href="#s12">Warehouse, lake, or lakehouse</a>
+<a href="#s13">Designing a warehouse in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A data warehouse is a separate analytical database that enforces a schema before loading, stores data column-wise across many machines, and models it into facts and dimensions so business questions can scan history without slowing production.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Data warehouse</dt><dd>A separate analytical database, loaded from operational systems, optimized for large scans and aggregations rather than transactions.</dd></div><div class="term"><dt>Schema-on-write</dt><dd>The warehouse requires data to match a defined schema before it is loaded and queryable.</dd></div><div class="term"><dt>Columnar storage</dt><dd>Storing values by column rather than by row, so analytical queries read only the columns they need and compress well.</dd></div><div class="term"><dt>MPP</dt><dd>Massively parallel processing — many worker nodes scan and compute in parallel under a coordinating node.</dd></div><div class="term"><dt>Star schema</dt><dd>A fact table surrounded by denormalized dimension tables, with joins one hop away.</dd></div><div class="term"><dt>Snowflake schema</dt><dd>A star schema whose dimensions are further normalized into related tables.</dd></div><div class="term"><dt>Fact table</dt><dd>The table of measured events at a defined grain, holding foreign keys to dimensions and numeric measures.</dd></div><div class="term"><dt>Dimension table</dt><dd>The descriptive context for facts, such as customer, product, date, or store.</dd></div><div class="term"><dt>Grain</dt><dd>The precise meaning of one row in a fact table, such as one order line or one daily account snapshot.</dd></div><div class="term"><dt>Slowly changing dimension</dt><dd>A dimension whose attributes change over time, handled with overwrite, history rows, or versioned columns.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: transactional and analytical work pull in opposite directions</h2>
+<p class="lede">Production databases are built for small, fast reads and writes. Business questions scan months of history and group it in many ways.</p>
+<ul><li>An OLTP database serves point lookups and short transactions, with indexes tuned for finding a few rows.</li><li>An analytical query may scan most of a large table and aggregate it, which is the opposite access pattern.</li><li>Running those scans on the production primary competes for CPU, I/O, and buffer cache with user traffic.</li><li>The data needed often spans several systems, and the production schema does not contain the history or conformed dimensions required.</li><li>Operational schemas change for application reasons, which makes them a poor contract for reporting.</li><li>A warehouse is a separate store built for analysis, loaded from sources on a schedule.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Schema-on-write: model before you load</h2>
+<ul><li>The warehouse declares tables, columns, types, and keys before data is queryable.</li><li>Loads validate and transform data to match that contract, rejecting or quarantining violations.</li><li>Because the schema is enforced once, every reader can trust column names and types.</li><li>Query optimizers rely on declared types, statistics, and constraints, which schema-on-read cannot guarantee.</li><li>The cost is rigidity: a new source field requires a schema change and a reload or migration.</li><li>Modeling is deliberate: the warehouse usually stores conformed dimensions and facts rather than raw source tables.</li><li>This is the key contrast with a lake, where structure is applied by the reader.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Columnar storage</h2>
+<ul><li>Columnar files store all values of one column together rather than all columns of one row.</li><li>An analytical query that touches three of fifty columns reads only those three, cutting I/O drastically.</li><li>Values in a column share a type and often repeat, so compression — dictionary, run-length, delta — works well.</li><li>Compression means less data to read from disk and less memory needed for the working set.</li><li>Column statistics and min/max metadata allow the engine to skip whole blocks that cannot match a filter.</li><li>Vectorized execution processes batches of column values, using CPU caches and SIMD-style operations efficiently.</li><li>The trade-off appears on single-row writes and point reads, where columnar layout is inefficient; that is why warehouses batch loads.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Workload</th><th>Row store</th><th>Column store</th></tr></thead><tbody><tr><td>Point lookup by primary key</td><td>Fast</td><td>Slow</td></tr>
+<tr><td>Single-row update</td><td>Fast</td><td>Expensive</td></tr>
+<tr><td>Scan a few columns over many rows</td><td>Reads whole rows</td><td>Reads only needed columns</td></tr>
+<tr><td>Compression</td><td>Moderate</td><td>High, type-homogeneous</td></tr>
+<tr><td>Typical system</td><td>OLTP database</td><td>Warehouse</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>MPP execution</h2>
+<ul><li>A coordinating node parses the query, plans it, and distributes work to worker nodes.</li><li>Data is distributed across workers by distribution key or hash, and each worker scans its local portion.</li><li><strong>Shared-nothing</strong> workers have their own CPU, memory, and storage, so they scale by adding nodes.</li><li>Aggregations run partially on each worker and are combined by the coordinator or a second stage.</li><li>Joins require matching rows to be co-located; otherwise the engine shuffles or broadcasts one side across the network.</li><li>The planner chooses join order, join strategy, and distribution based on table statistics and sizes.</li><li>Skew in a distribution key sends disproportionate rows to one worker and dominates query time.</li></ul>
+
+
+<div class="note">MPP performance is a planning problem as much as a hardware problem. A bad distribution key or stale statistics can make a fast cluster look slow.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Dimensional modeling: facts and grain</h2>
+<ul><li>A <strong>fact table</strong> stores business events or snapshots with numeric measures and foreign keys to dimensions.</li><li>Define the <strong>grain</strong> first: one row per order line, per shipment, or per account per day.</li><li>Measures are additive, semi-additive, or non-additive; summing a balance across days is usually wrong.</li><li>Keep facts narrow and numerous; descriptive attributes belong in dimensions.</li><li>Surrogate integer keys isolate the warehouse from source-system key changes.</li><li>A fact table should be loaded at a consistent grain so one query can combine metrics without double counting.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Dimensions and the star schema</h2>
+<ul><li>Dimensions provide the <strong>who, what, where, and when</strong> used to filter and group facts.</li><li>A <strong>star schema</strong> keeps dimensions denormalized, so a query joins the fact to each dimension once.</li><li>Conformed dimensions — the same customer and date definitions across fact tables — let separate processes be compared.</li><li>A date dimension is pre-built with fiscal periods, holidays, and week numbers so reports do not recompute them.</li><li>Star schemas favor simplicity and query performance over storage normalization.</li><li>Dimension attributes should use consistent names and values across sources, or drill-across breaks.</li><li>The model is optimized for how analysts ask questions, not for how the source application stores data.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Star</th><th>Snowflake</th></tr></thead><tbody><tr><td>Dimension layout</td><td>Denormalized, one table per dimension</td><td>Normalized into multiple related tables</td></tr>
+<tr><td>Joins per query</td><td>Fewer</td><td>More</td></tr>
+<tr><td>Storage</td><td>More redundancy</td><td>Less redundancy</td></tr>
+<tr><td>Query simplicity</td><td>Higher</td><td>Lower</td></tr>
+<tr><td>Best fit</td><td>BI and dashboards</td><td>Large or frequently changing dimensions</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Snowflake schema and normalization</h2>
+<ul><li>A <strong>snowflake schema</strong> normalizes dimensions into hierarchies, such as product to category to department.</li><li>It reduces redundancy when dimension attributes are large or change independently.</li><li>The cost is more joins, more complex SQL, and often slower BI queries.</li><li>Modern columnar warehouses handle joins well, so the performance gap is smaller than on older systems.</li><li>Normalization helps when a dimension is shared by many facts or maintained by a separate team.</li><li>Most warehouses use a star for common marts and normalize only where the dimension is genuinely large.</li><li>The modeling choice should follow query patterns and maintenance ownership, not dogma.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Slowly changing dimensions</h2>
+<ul><li>A <strong>slowly changing dimension</strong> handles attributes that change, such as a customer's region or a product's price band.</li><li>Type 1 overwrites the old value; simple, but history is lost and past reports change retroactively.</li><li>Type 2 adds a new row with valid-from and valid-to dates and a current flag, preserving history.</li><li>Type 3 keeps a previous-value column for a limited number of changes.</li><li>Type 2 requires an effective-date join so a fact is attributed to the dimension version valid at event time.</li><li>Late-arriving dimension records must be handled without dropping or misattributing facts.</li><li>Choose based on whether analysts need to reproduce history or only the current state.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>OLAP versus OLTP</h2>
+<ul><li>OLTP supports day-to-day operations: short transactions, high concurrency, row-level access, strict consistency.</li><li>OLAP supports analysis: large scans, few concurrent users relative to transactions, aggregations, and history.</li><li>OLTP schemas are normalized to avoid update anomalies; OLAP schemas are denormalized for query simplicity.</li><li>OLTP indexes serve point lookups; OLAP relies on column pruning, partitioning, and zone maps.</li><li>Warehouses batch-load from OLTP rather than serving transactions directly.</li><li>Keeping the two workloads separate protects application latency and lets each be tuned independently.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>OLTP</th><th>OLAP</th></tr></thead><tbody><tr><td>Typical query</td><td>Fetch or update one order</td><td>Revenue by region by month</td></tr>
+<tr><td>Rows touched</td><td>A few</td><td>Millions</td></tr>
+<tr><td>Schema</td><td>Normalized</td><td>Star or snowflake</td></tr>
+<tr><td>Storage</td><td>Row-oriented</td><td>Column-oriented</td></tr>
+<tr><td>Optimized for</td><td>Write throughput and point reads</td><td>Scan throughput and aggregation</td></tr>
+<tr><td>Freshness</td><td>Current</td><td>Periodic loads or micro-batch</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Loading the warehouse: ETL and ELT</h2>
+<ul><li>Extract from sources into a staging area, then validate and conform before publishing to marts.</li><li><strong>ETL</strong> transforms outside the warehouse and loads curated tables; <strong>ELT</strong> loads raw and transforms with warehouse SQL.</li><li>Incremental loads use change capture or a watermark so the warehouse does not reprocess all history nightly.</li><li>Loads should be idempotent: a rerun replaces the affected partition or merges on a key rather than appending duplicates.</li><li>Stage tables allow validation and reconciliation before swapping data into production tables.</li><li>Dimension loads must run before fact loads so foreign keys resolve, and late facts may need a default member.</li><li>The transformation layer — SQL models, tests, and documentation — is part of the warehouse product.</li></ul>
+
+<div class="flow"><span class="flow-step">Extract to staging</span><span class="flow-arrow">→</span><span class="flow-step">Validate and conform</span><span class="flow-arrow">→</span><span class="flow-step">Load dimensions</span><span class="flow-arrow">→</span><span class="flow-step">Load facts</span><span class="flow-arrow">→</span><span class="flow-step">Run quality tests</span><span class="flow-arrow">→</span><span class="flow-step">Publish marts</span></div>
+<div class="note">A nightly full rebuild is simple and self-correcting, but it stops scaling once history and concurrency grow. Incremental loads need the same idempotency discipline as any pipeline.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Performance, concurrency, and cost</h2>
+<ul><li>Partition large fact tables by date so queries scan only relevant history.</li><li>Cluster or sort within partitions by common filter columns such as customer or region.</li><li>Keep statistics current; stale statistics produce bad join orders and distribution choices.</li><li>Pre-aggregate expensive repeated metrics into summary tables or materialized views.</li><li>Use workload management to stop one runaway query from consuming the whole cluster.</li><li>Result caching and concurrency scaling help dashboards but do not fix a bad data model.</li><li>Cost is driven by bytes scanned and compute time, so column pruning and partitioning are financial controls as well as performance ones.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Warehouse, lake, or lakehouse</h2>
+<ul><li>A warehouse gives the strongest governed SQL performance and concurrency for structured data.</li><li>A lake is cheaper for raw, varied, and unstructured data and supports emerging use cases.</li><li>A lakehouse adds transactions and schema to lake storage, narrowing the gap for open-format analytics.</li><li>Many organizations keep raw data in a lake and publish modeled marts in a warehouse or lakehouse.</li><li>The warehouse is still the better default when BI concurrency and a mature optimizer matter most.</li><li>Data movement between them should be deliberate; copying everything both ways creates inconsistency.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Designing a warehouse in an interview</h2>
+<ul><li>Clarify the business questions, the metrics, and the freshness required before choosing tables.</li><li>Identify source systems and the keys that let them be conformed.</li><li>Declare the grain of each fact table and the dimensions it references.</li><li>Choose star schemas for common marts and normalize only where dimensions justify it.</li><li>Decide how changes to dimensions are tracked — overwrite or full history.</li><li>Plan partitioning, incremental loads, quality tests, and backfills.</li><li>State the trade-off between freshness, cost, and concurrency instead of assuming all three are free.</li></ul>
+
+<div class="flow"><span class="flow-step">Questions and metrics</span><span class="flow-arrow">→</span><span class="flow-step">Sources and keys</span><span class="flow-arrow">→</span><span class="flow-step">Grain and facts</span><span class="flow-arrow">→</span><span class="flow-step">Conformed dimensions</span><span class="flow-arrow">→</span><span class="flow-step">Load strategy</span><span class="flow-arrow">→</span><span class="flow-step">Performance and governance</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Schema-on-write</strong> gives trustworthy, optimizable tables but slows onboarding of new sources.</li><li><strong>Denormalized star schemas</strong> simplify queries and speed BI but duplicate dimension attributes.</li><li><strong>Snowflake schemas</strong> reduce redundancy and ease maintenance but add joins and complexity.</li><li><strong>Columnar storage</strong> accelerates scans and compression but makes point updates and single-row writes expensive.</li><li><strong>MPP scale-out</strong> increases throughput but adds shuffle cost, skew sensitivity, and cluster management.</li><li><strong>Pre-aggregation</strong> makes dashboards fast but multiplies storage and creates refresh lag.</li><li><strong>Type 2 history</strong> preserves accurate past reporting but grows dimensions and complicates every join.</li><li><strong>Batch loading</strong> is simple and cheap but delivers stale data; streaming ingestion adds cost and late-data handling.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a data warehouse?</summary><div class="answer"><p>A separate analytical database loaded from operational systems, with an enforced schema and a model designed for large scans and aggregations. It protects production systems and gives business users one governed place to query history.</p></div></details>
+<details><summary>2. Why not run analytics on the production database?</summary><div class="answer"><p>Analytical scans consume CPU, I/O, and cache that user traffic needs, and the operational schema often lacks the history and conformed dimensions required. A warehouse isolates the workloads and models data for analysis.</p></div></details>
+<details><summary>3. What is schema-on-write?</summary><div class="answer"><p>The warehouse defines and enforces tables, types, and keys before data becomes queryable. Loads conform to that contract, so readers and the optimizer can trust the structure. The cost is that new sources and fields need explicit schema changes.</p></div></details>
+<details><summary>4. Why is columnar storage good for analytics?</summary><div class="answer"><p>Queries usually touch a few columns over many rows. Columnar layout reads only those columns, compresses similar values well, and uses metadata to skip blocks. It is poor for single-row updates, which is acceptable because warehouses load in batches.</p></div></details>
+<details><summary>5. How does an MPP warehouse execute a query?</summary><div class="answer"><p>A coordinator plans the query and distributes fragments to workers that scan local partitions in parallel. Aggregations are partially computed and merged, and joins either co-locate, shuffle, or broadcast data. The planner uses statistics to choose the strategy.</p></div></details>
+<details><summary>6. What is the grain of a fact table and why define it first?</summary><div class="answer"><p>The grain is what one row represents, such as one order line or one account-day. Defining it first prevents mixed grains and double counting, and it determines which dimensions and measures are valid.</p></div></details>
+<details><summary>7. Star versus snowflake schema?</summary><div class="answer"><p>A star keeps dimensions denormalized for fewer joins and simpler queries. A snowflake normalizes dimensions into hierarchies, saving storage and easing maintenance at the cost of more joins. Stars are the usual default for BI marts.</p></div></details>
+<details><summary>8. What is a conformed dimension?</summary><div class="answer"><p>A dimension with consistent keys, attributes, and values shared across fact tables or data marts. It is what makes drill-across analysis possible, for example comparing sales and returns by the same customer definition.</p></div></details>
+<details><summary>9. How do you handle a changing customer region?</summary><div class="answer"><p>Decide whether history matters. Type 1 overwrites the value. Type 2 inserts a new version with valid-from and valid-to dates and joins facts to the version valid at event time. Type 3 keeps a limited previous value.</p></div></details>
+<details><summary>10. OLTP versus OLAP?</summary><div class="answer"><p>OLTP handles short, concurrent transactions and point reads on a normalized row store. OLAP handles large scans and aggregations on a columnar, often denormalized model. They have different schemas, storage layouts, and performance goals.</p></div></details>
+<details><summary>11. How do you keep warehouse loads correct on retry?</summary><div class="answer"><p>Make loads idempotent with partition replacement or key-based merges, stage and validate before publishing, and record batch metadata. Load dimensions before facts and reconcile row counts against the source.</p></div></details>
+<details><summary>12. How would you make a slow dashboard query faster?</summary><div class="answer"><p>Check the scanned bytes first: partition pruning and column pruning usually matter most. Then review join order and statistics, consider a summary table or materialized view, and only then add compute. A bad grain or missing partition will not be fixed by a bigger cluster.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Loading facts before dimensions and silently dropping rows that fail foreign keys.</li><li>Mixing grains in one fact table and double counting revenue.</li><li>Using a Type 1 overwrite when analysts need historical accuracy.</li><li>Denormalizing everything without measuring query patterns.</li><li>Assuming a columnar warehouse is good for single-row updates.</li><li>Partitioning on a high-cardinality column and creating metadata overhead.</li><li>Treating the warehouse as a raw dump instead of a modeled, governed product.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="data-lakes.html"><span>← Previous</span><strong>Data Lakes</strong></a><a class="next" href="client-server-architecture.html"><span>Next →</span><strong>Client-Server Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/data-warehousing">AlgoMaster — Data Warehousing</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

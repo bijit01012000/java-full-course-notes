@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Denormalization — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 23 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Denormalization</h1>
+    <p class="dek">Database Scaling Techniques · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/denormalization">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Starting from a normalized schema</a>
+<a href="#s2">Why normalization helps</a>
+<a href="#s3">The cost of joins</a>
+<a href="#s4">Why joins get worse when data is distributed</a>
+<a href="#s5">What denormalization is</a>
+<a href="#s6">Common forms of denormalization</a>
+<a href="#s7">Choosing what to duplicate</a>
+<a href="#s8">Keeping copies consistent</a>
+<a href="#s9">Handling drift and repair</a>
+<a href="#s10">When denormalization helps</a>
+<a href="#s11">When not to denormalize</a>
+<a href="#s12">Measuring whether it was worth it</a>
+<a href="#s13">A decision checklist</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Denormalization intentionally stores duplicate or precomputed data so reads avoid expensive joins — trading write complexity and consistency risk for faster, simpler read paths.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Normalization</dt><dd>Organizing tables so each fact is stored once, removing redundancy and update anomalies.</dd></div><div class="term"><dt>Single source of truth</dt><dd>The principle that a fact lives in exactly one place, so every part of the system agrees on its value.</dd></div><div class="term"><dt>Denormalization</dt><dd>Deliberately duplicating a value or precomputing a result to make reads cheaper.</dd></div><div class="term"><dt>Join</dt><dd>A query operation that combines rows from multiple tables using a matching key.</dd></div><div class="term"><dt>Read model</dt><dd>A copy of data shaped for a particular query or screen rather than for normalized storage.</dd></div><div class="term"><dt>Materialized view</dt><dd>A stored query result that is refreshed periodically or incrementally instead of computed per request.</dd></div><div class="term"><dt>Data duplication</dt><dd>Storing the same fact in more than one place, which requires every copy to be kept in sync.</dd></div><div class="term"><dt>Write amplification</dt><dd>The extra writes and work required to update all copies of a denormalized fact.</dd></div><div class="term"><dt>Staleness</dt><dd>The window in which a duplicated copy disagrees with the source of truth.</dd></div><div class="term"><dt>Change data capture (CDC)</dt><dd>Streaming a database's change log so derived copies can be updated from committed writes.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Starting from a normalized schema</h2>
+<p class="lede">Relational design usually begins normalized: each entity gets a table and each fact is stored once.</p>
+<ul><li>An e-commerce schema might use <code>users(id, name, email)</code>, <code>products(id, name, price)</code>, <code>orders(id, user_id, created_at, total)</code>, and <code>order_items(id, order_id, product_id, quantity)</code>.</li><li>The customer's name lives only in <code>users</code>; an order stores just <code>user_id</code>.</li><li>The product's name and price live only in <code>products</code>; an item stores just <code>product_id</code> and quantity.</li><li>Each fact has exactly one home, which is the definition of a single source of truth.</li><li>The schema models the domain, not any particular screen or API response.</li><li>Normalization is the correct default because it keeps writes simple and unambiguous.</li></ul>
+
+
+<pre class="code"><code>users(id, name, email)
+products(id, name, price)
+orders(id, user_id, created_at, total)
+order_items(id, order_id, product_id, quantity)</code></pre>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why normalization helps</h2>
+<ul><li><strong>One update, everywhere correct:</strong> if a customer changes their name, one row changes and every reader sees the new value.</li><li><strong>No disagreement between tables:</strong> two tables cannot hold conflicting versions of the same fact.</li><li><strong>Less storage:</strong> a value is not repeated across millions of rows.</li><li><strong>Simpler write path:</strong> a write touches one row in one table rather than several copies.</li><li><strong>Clear ownership:</strong> it is obvious which table is authoritative for each field.</li><li>These benefits are why normalized schemas remain the right starting point for transactional systems.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The cost of joins</h2>
+<p class="lede">Normalization moves work from writes to reads. The bill arrives when a page needs data from several tables.</p>
+<ul><li>An order history page shows order date, total, customer name, and product names — data spread across four tables.</li><li>The database must join <code>orders</code> to <code>users</code>, then <code>order_items</code>, then <code>products</code>.</li><li>On a small dataset that is fast; on a table with hundreds of millions of rows it is repeated work on every request.</li><li>Each join may require index lookups per row, consuming CPU, memory, and disk reads.</li><li>The same expensive assembly runs again for every user who loads the same page.</li><li>Cost grows with result-set size, join depth, and request rate, not just with the size of one table.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Why joins get worse when data is distributed</h2>
+<ul><li>If <code>users</code> and <code>orders</code> live on different shards, a join may require fetching data across the network.</li><li>Many distributed databases do not support joins across nodes at all, or support them only with heavy restrictions.</li><li>A cross-node join turns one query into several round trips plus application-side merging.</li><li>Network latency and partial failure become part of a query that used to be local.</li><li>Sharding by one key makes joins on any other key expensive, which pushes teams toward pre-joined copies.</li><li>This is why denormalization is closely tied to sharding and to read-optimized stores.</li></ul>
+
+
+<div class="note">The question denormalization answers: what if data were stored in the shape the page needs, so the database did not have to assemble it on every read?</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>What denormalization is</h2>
+<p class="lede">Denormalization deliberately introduces redundancy or precomputation into the schema to make reads cheaper.</p>
+<ul><li>It stores a copy of a fact — such as <code>customer_name</code> on <code>orders</code> — so a read avoids joining <code>users</code>.</li><li>It may store a derived value, such as <code>item_count</code> or <code>order_total</code>, that could otherwise be aggregated at read time.</li><li>It may maintain a separate table or document shaped exactly for one screen or API response.</li><li>The trade is explicit: fewer joins and less read work in exchange for duplicated data and a harder write path.</li><li>It does not remove the normalized source of truth; it adds derived copies beside it.</li><li>Denormalization is a performance decision, not a modeling accident — the duplication must be intentional and owned.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Common forms of denormalization</h2>
+<ul><li><strong>Duplicated column:</strong> copy <code>customer_name</code> onto <code>orders</code> so order history needs no join.</li><li><strong>Precomputed aggregate:</strong> keep <code>order_total</code> or <code>review_count</code> instead of summing child rows on every read.</li><li><strong>Summary or rollup table:</strong> store daily totals or per-category counts for dashboards.</li><li><strong>Materialized view:</strong> persist a query result and refresh it periodically or incrementally.</li><li><strong>Embedded document:</strong> store order items inside the order document in a document database to read them in one fetch.</li><li><strong>Read model / projection:</strong> maintain a store shaped for a specific query, updated from events or change logs.</li><li><strong>Denormalized search index:</strong> copy fields into a search engine so filtering and sorting avoid the primary database.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Choosing what to duplicate</h2>
+<ul><li>Duplicate data on the <strong>hot read path</strong>, not everywhere; the goal is to remove joins that run constantly.</li><li>Prefer fields that are <strong>read far more often than they change</strong>, such as a product name or a customer's display name.</li><li>Be careful with values that change often or must be exact, such as price, balance, or inventory count.</li><li>Prefer precomputing <strong>aggregates that are expensive to derive</strong> and cheap to maintain incrementally.</li><li>Consider whether the copy can be rebuilt from the source of truth; if not, it is a new source of truth, not a cache.</li><li>Keep the number of copies small — every additional copy is another place that can drift.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Data</th><th>Good candidate?</th><th>Reason</th></tr></thead><tbody><tr><td>Customer display name on orders</td><td>Often yes</td><td>Read constantly, changes rarely</td></tr>
+<tr><td>Product name on order items</td><td>Often yes, but snapshot semantics</td><td>Historical orders should show what was bought</td></tr>
+<tr><td>Current product price</td><td>Careful</td><td>Changes often; historical price may differ from current price</td></tr>
+<tr><td>Account balance</td><td>Usually no</td><td>Must be exact and is read on a critical path</td></tr>
+<tr><td>Order total</td><td>Yes</td><td>Expensive to recompute, cheap to maintain with the order</td></tr>
+<tr><td>Live inventory count</td><td>Careful</td><td>High write rate and strong correctness requirements</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Keeping copies consistent</h2>
+<p class="lede">Once a fact exists twice, every write must update both copies correctly. This is the real cost of denormalization.</p>
+<ul><li><strong>Same transaction:</strong> update the source row and the duplicate in one database transaction, which keeps them atomic when both live in the same database.</li><li><strong>Application logic:</strong> update copies in the write path; simple, but easy to miss a path and hard to keep ordered.</li><li><strong>Triggers:</strong> let the database maintain derived columns; reliable but can hide logic and add write overhead.</li><li><strong>Change data capture:</strong> stream committed changes to derived stores, which decouples the write path but introduces lag.</li><li><strong>Events:</strong> publish a domain event and let consumers update their read models; powerful but needs idempotency and ordering handling.</li><li><strong>Periodic rebuild:</strong> recompute the copy on a schedule; simple, but the copy can be stale between runs.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Mechanism</th><th>Freshness</th><th>Main risk</th></tr></thead><tbody><tr><td>Same transaction</td><td>Immediate</td><td>Only works when copies share a database</td></tr>
+<tr><td>Application dual-write</td><td>Near-immediate</td><td>Missed paths and ordering races</td></tr>
+<tr><td>Database trigger</td><td>Immediate</td><td>Hidden logic and extra write cost</td></tr>
+<tr><td>CDC stream</td><td>Small lag</td><td>Consumer lag and replay complexity</td></tr>
+<tr><td>Domain events</td><td>Eventual</td><td>Duplicates, ordering, and schema evolution</td></tr>
+<tr><td>Scheduled rebuild</td><td>Periodic</td><td>Stale between rebuilds</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Handling drift and repair</h2>
+<ul><li>Any duplicated value will eventually drift, so assume repair is needed rather than hoping it never happens.</li><li>Keep an authoritative source and a way to recompute every derived copy from it.</li><li>Run reconciliation jobs that compare copies and report or fix mismatches.</li><li>Make consumers idempotent so a replayed change does not double-apply an increment.</li><li>Version derived schemas so a format change can rebuild a copy rather than patch it in place.</li><li>Alert on lag and mismatch rates; silent drift is worse than a visible failure because it corrupts decisions quietly.</li></ul>
+
+
+<div class="note">A denormalized copy that cannot be rebuilt is not a copy — it is a second source of truth with no owner.</div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>When denormalization helps</h2>
+<ul><li>Read-heavy workloads where the same expensive join runs thousands of times per second.</li><li>Dashboards and feeds that aggregate large child sets on every request.</li><li>Sharded or distributed databases where cross-node joins are slow or unsupported.</li><li>APIs with a fixed response shape that would otherwise assemble many entities per call.</li><li>Systems where a small amount of staleness is acceptable in exchange for predictable latency.</li><li>Cases where the read path must be simple enough to scale horizontally without a complex query layer.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>When not to denormalize</h2>
+<ul><li>Write-heavy systems, where every write would have to update several copies.</li><li>Data that must always be exact, such as balances, ledgers, and inventory reservations.</li><li>Values that change constantly, which makes copies stale almost immediately.</li><li>Small datasets where the join is already cheap and the duplication adds risk without measurable benefit.</li><li>Teams without a reliable mechanism to propagate changes, since manual dual-writes will drift.</li><li>Schemas still in flux, where duplicated fields multiply the cost of every model change.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Measuring whether it was worth it</h2>
+<ul><li>Measure the read path before and after: latency percentiles and database CPU, not just a single query plan.</li><li>Track how often the denormalized copy is read versus how often it must be updated.</li><li>Watch write latency and write amplification after adding copies to the write path.</li><li>Monitor staleness or replication lag if the copy is updated asynchronously.</li><li>Count reconciliation mismatches to see whether the maintenance mechanism is actually working.</li><li>Account for storage growth and backup cost; duplication is not free even when reads get faster.</li><li>Re-evaluate after access patterns change — a copy that helped last year may now be pure overhead.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>A decision checklist</h2>
+<ul><li>Is there a measured read problem caused by joins or aggregation, rather than an assumed one?</li><li>Which exact query or screen is slow, and which fields does it actually need?</li><li>How often does each duplicated field change, and who owns updating it?</li><li>Can the copy be updated atomically with the source, or does it require asynchronous propagation?</li><li>How much staleness can the feature tolerate, and what does the user see when the copy is behind?</li><li>Is there a rebuild and reconciliation path if the copy is lost or corrupted?</li><li>What is the cost in write latency, storage, and operational complexity, and is the read gain larger?</li></ul>
+
+<div class="flow"><span class="flow-step">Measure the read</span><span class="flow-arrow">→</span><span class="flow-step">Identify the join or aggregate</span><span class="flow-arrow">→</span><span class="flow-step">Check change frequency</span><span class="flow-arrow">→</span><span class="flow-step">Choose a sync mechanism</span><span class="flow-arrow">→</span><span class="flow-step">Add reconciliation</span><span class="flow-arrow">→</span><span class="flow-step">Re-measure</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Denormalization</strong> removes joins from the read path but adds duplicate data that must be kept correct on every write.</li><li><strong>Precomputed aggregates</strong> make dashboards fast but turn a read-time calculation into a write-time maintenance burden.</li><li><strong>Duplicated columns</strong> simplify common queries but risk drift whenever a writer forgets one copy.</li><li><strong>Materialized views</strong> give fast reads with managed refresh, but the data is stale between refreshes.</li><li><strong>Event-driven projections</strong> decouple read and write models, but introduce lag, ordering problems, and replay complexity.</li><li><strong>Same-transaction updates</strong> give immediate consistency, but only work when all copies live in the same database.</li><li><strong>Read-optimized stores</strong> scale reads independently, but add another system to operate, monitor, and rebuild.</li><li><strong>Snapshot fields</strong> such as the price at purchase time preserve history, but intentionally disagree with the current value.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is denormalization?</summary><div class="answer"><p>Intentionally storing duplicate or precomputed data so reads can avoid joins or aggregation. The normalized source of truth remains, but a derived copy is kept in the shape a read path needs. The cost is that every write must maintain the copy, and the copy can become stale.</p></div></details>
+<details><summary>2. Why does normalization make reads expensive?</summary><div class="answer"><p>Normalization stores each fact once, so a single screen may need data from four tables. The database must join them on every request, often with multiple index lookups per row. At high request rates and large table sizes, that repeated assembly dominates read cost.</p></div></details>
+<details><summary>3. Give an example of denormalization in an e-commerce schema.</summary><div class="answer"><p>Store <code>customer_name</code> on <code>orders</code> so the order history page does not join <code>users</code>. Or store <code>order_total</code> on the order instead of summing <code>order_items</code> on every read. In both cases the value is derived and must be updated when the source changes.</p></div></details>
+<details><summary>4. How do you keep duplicated data consistent?</summary><div class="answer"><p>Use the strongest mechanism the architecture allows: update both copies in one transaction when they share a database, or use triggers, CDC, or domain events when they do not. Whatever the mechanism, make consumers idempotent, monitor lag, and run reconciliation so drift is detected rather than discovered by a user.</p></div></details>
+<details><summary>5. When is denormalization a bad idea?</summary><div class="answer"><p>When writes are frequent, when the data must be exact such as balances or inventory, when values change constantly, or when no reliable propagation mechanism exists. It is also premature on small datasets where the join is already cheap; duplication adds risk without a measurable read gain.</p></div></details>
+<details><summary>6. Denormalization vs caching — what is the difference?</summary><div class="answer"><p>A cache is a transient copy that can be lost and rebuilt, usually with a TTL and no guarantee of presence. Denormalization is part of the stored schema: the duplicate is durable, queryable, and must be maintained like any other column. Caching is easier to add and remove; denormalization changes the data model.</p></div></details>
+<details><summary>7. How does sharding push teams toward denormalization?</summary><div class="answer"><p>Once data is split across shards, joins on a non-shard key may require cross-node fetches or may be unsupported entirely. Storing the needed fields alongside the row keeps the query single-shard. That is why shard keys are often copied onto child tables and why pre-joined read models become common.</p></div></details>
+<details><summary>8. What is a materialized view, and how is it different from a regular view?</summary><div class="answer"><p>A regular view is a saved query that runs every time it is referenced. A materialized view stores the result physically, so reads are fast, but it must be refreshed periodically or incrementally. The trade-off is freshness: the stored result can lag the base tables.</p></div></details>
+<details><summary>9. How would you decide which fields to duplicate?</summary><div class="answer"><p>Pick fields on the hottest read path that change rarely and are expensive to join or aggregate. Avoid frequently changing or correctness-critical values unless you can propagate updates reliably. For each candidate, ask who owns the copy, how it is updated, and whether it can be rebuilt from the source.</p></div></details>
+<details><summary>10. What is write amplification in this context?</summary><div class="answer"><p>One logical change now requires writing the source row plus every duplicated copy, and possibly updating indexes and derived stores. That increases write latency, lock contention, and failure surface. It is the main reason denormalization hurts write-heavy systems.</p></div></details>
+<details><summary>11. How do you repair a denormalized copy that has drifted?</summary><div class="answer"><p>Recompute it from the authoritative source, either in bulk or per record, and verify with a reconciliation job. The copy must be rebuildable by design, which means the source of truth and the derivation rule are explicit. Versioning the derived schema makes format changes a rebuild rather than a manual patch.</p></div></details>
+<details><summary>12. Does denormalization violate normalization theory?</summary><div class="answer"><p>It deliberately introduces redundancy that normalization would remove, so yes at the schema level. The justification is performance: the redundant copy serves a specific read path and is maintained by an explicit mechanism. It is a considered trade-off, not an argument that normalization was wrong.</p></div></details>
+<details><summary>13. How would you measure whether denormalization helped?</summary><div class="answer"><p>Compare read latency percentiles and database CPU before and after, along with the cost added to writes and storage. Track how often the copy is read versus updated, and monitor staleness or mismatch counts. If the read gain is small relative to the maintenance burden, revert it.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Denormalizing before measuring that joins are actually the bottleneck.</li><li>Duplicating a frequently changing value such as price or inventory and assuming it will stay correct.</li><li>Updating the source table but forgetting one of the duplicated copies in a less common write path.</li><li>Treating a denormalized copy as the source of truth, so it can no longer be rebuilt.</li><li>Using asynchronous propagation without monitoring lag or handling duplicate and out-of-order events.</li><li>Ignoring write amplification and discovering that write latency and contention increased.</li><li>Forgetting that historical snapshots, such as the price at purchase time, are supposed to differ from current values.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="sharding.html"><span>← Previous</span><strong>Sharding</strong></a><a class="next" href="what-is-caching.html"><span>Next →</span><strong>What is Caching?</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/denormalization">AlgoMaster — Denormalization</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

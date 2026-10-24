@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caching and Cache Consistency — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 10 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Caching</span></div>
+    <h1>Caching and Cache Consistency</h1>
+    <p class="dek">Every cache buys latency with a second copy of the truth, and interviewers probe whether you can name the staleness window, the invalidation path, and the failure mode instead of just saying add Redis.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">5 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Use cache-aside for reads, delete after commit plus a TTL for writes, and propagate invalidation as an event so every copy converges without treating the cache as the source of truth.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Serve reads through cache-aside with a per-key TTL and a database fallback.</li><li>Commit writes to the database and invalidate the affected cache entries.</li><li>Propagate invalidation to every application instance, including local caches.</li><li>Guarantee read-your-writes for the user who just wrote.</li><li>Support an operator purge for a key, a prefix, or a bulk correction.</li><li>Expose hit ratio, miss latency, evictions, and invalidation lag per key family.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>p99 under 20 ms for a cache hit and under 200 ms for a miss that reaches the database.</li><li>99.95% read availability; losing the cache degrades latency, not correctness.</li><li>Staleness budgets: catalog 60 s, stock 5 s, checkout price and balance 0 s.</li><li>No stale value survives longer than its TTL even if an invalidation is lost.</li><li>Invalidation propagation p99 under 1 s across all app instances.</li><li>Cache memory is bounded by bytes and every key has an expiry.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 100k reads/s peak and 1k writes/s, so invalidation volume is modest compared with read volume.</li><li>10M cached objects at about 2 KB each is about 20 GB of values before overhead.</li><li>At a 95% hit ratio, 5,000 reads/s reach the database; at 99%, only 1,000 reads/s do.</li><li>A 60 s TTL means an untouched key can be stale for up to 60 s and on average about 30 s.</li><li>One invalidation message per write, broadcast to 20 app instances, is about 20k small messages/s at peak.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Product</span><span class="fields">product_id, title, price_cents, stock, version, updated_at</span></div><div class="entity"><span class="name">CacheEntry</span><span class="fields">key, value, version, ttl_seconds, cached_at, size_bytes</span></div><div class="entity"><span class="name">InvalidationEvent</span><span class="fields">event_id, key, version, reason, emitted_at</span></div><div class="entity"><span class="name">RefreshLock</span><span class="fields">key, owner_id, expires_at, attempt</span></div><div class="entity"><span class="name">CacheMetric</span><span class="fields">route, key_family, hits, misses, evictions, p99_ms, window</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/v1/products/{id}</code></td><td>Cache-aside read; returns the cached value or loads, stores, and returns the database value.</td></tr><tr><td><code>PUT</code></td><td><code>/v1/products/{id}</code></td><td>Commit the new value, bump the version, and emit an invalidation event.</td></tr><tr><td><code>DELETE</code></td><td><code>/v1/products/{id}</code></td><td>Soft-delete the product, invalidate the cache, and leave a short negative entry.</td></tr><tr><td><code>POST</code></td><td><code>/internal/cache/invalidate</code></td><td>Explicit purge for a key or prefix after a bad deploy or bulk correction.</td></tr><tr><td><code>GET</code></td><td><code>/internal/cache/stats</code></td><td>Per-route hit ratio, miss latency, eviction rate, memory, and invalidation lag.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Read strategy</td><td>Cache-aside with a database fallback and a per-key TTL</td><td>It works with plain Redis, caches only data that is actually read, and still serves reads if the cache is unavailable.</td></tr><tr><td>Write strategy</td><td>Commit the database first, then delete the cache entry</td><td>Deleting avoids the race where two writers update cache and database in opposite orders and leave an older value behind.</td></tr><tr><td>Invalidation transport</td><td>Outbox or CDC event published to a broadcast channel; every instance deletes its local and shared copy</td><td>One committed change fans out to every cache without a non-atomic dual write in the request path.</td></tr><tr><td>Key versioning</td><td>product:{id}:v{version} for values that change often</td><td>A late writer holding an old version writes to an old key and cannot clobber the current value.</td></tr><tr><td>Negative caching</td><td>Cache not-found for 30 s under a separate key namespace</td><td>Stops repeated misses for deleted or invented IDs from reaching the database, while expiring quickly enough for a newly created item.</td></tr><tr><td>Stampede protection</td><td>A short-lived refresh lock per key, plus stale-while-revalidate for public responses</td><td>Only one request rebuilds an expired hot key; the rest wait briefly or receive the stale value instead of stampeding the database.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> GW[🛡️ API gateway]
+  GW --> APP[⚙️ Product service]
+  APP --> LC[⚡ Local cache]
+  LC -->|miss| RC[⚡ Redis cluster]
+  RC -->|miss| DB[🗄️ Primary DB]
+  APP -->|write| DB
+  DB --> OB[📤 Outbox]
+  OB --> RLY[👷 Relay]
+  RLY --> BUS[📬 Invalidation bus]
+  BUS -.->|delete key| APP
+  APP --> LOCK[🔒 Refresh lock]
+  APP --> MON[📊 Cache metrics]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef cache fill:#dff3ee,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef bus fill:#ffe8ec,stroke:#b42342,color:#17211f;
+  class C client;
+  class GW,LOCK edge;
+  class APP,MON svc;
+  class LC,RC cache;
+  class DB store;
+  class OB,BUS bus;</div><div class="diagram-caption">Reads fall through local cache, Redis, then the database, while writes commit once and invalidate every copy through an outbox and broadcast bus.</div></div>
+        <ul><li>The database is the source of truth and the cache is derived data; losing the cache must cost latency, never correctness.</li><li>The write path is one database transaction that also writes an outbox row, so the state change and the intent to invalidate commit atomically.</li><li>Delete rather than update the cache on writes, because concurrent writers can otherwise finish in the reverse order and leave an old value cached.</li><li>Invalidation must reach local in-process caches too; a shared Redis delete alone leaves per-instance copies stale.</li><li>Every key has a TTL even when explicit invalidation exists, so a lost event becomes bounded staleness rather than permanent divergence.</li><li>Read-your-writes is a per-request guarantee: pin the writer to the primary briefly or wait for a version watermark, not for every reader.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Cache-aside</td><td>Simple, works with any key-value store, and falls back to the database when the cache is down</td><td>The application owns misses and invalidation, and the first read of each key is slower</td></tr><tr><td>Delete on write instead of update</td><td>Avoids the write-order race that leaves an older value in the cache</td><td>The next read pays a miss and must repopulate the entry</td></tr><tr><td>Short TTL</td><td>Bounds staleness and recovers automatically from missed invalidations</td><td>More misses and more load on the database</td></tr><tr><td>Write-through</td><td>Cache and database stay fresh for the next read</td><td>Every write still waits for the database, and the cache can fill with rarely read values</td></tr><tr><td>Write-behind</td><td>Very fast writes and natural batching</td><td>An acknowledged write can be lost before it reaches durable storage, so it is unsuitable for payments or orders</td></tr><tr><td>Local in-process cache</td><td>Lowest possible latency and no network hop</td><td>Per-instance copies that must be invalidated separately and can diverge briefly</td></tr><tr><td>Event-based invalidation</td><td>One committed change reaches every service and instance that caches the fact</td><td>Queue lag, at-least-once duplicates, and another pipeline to operate and monitor</td></tr><tr><td>Strong read-your-writes</td><td>The writer never sees a stale value after a successful update</td><td>Pushes some reads back to the primary and reduces the benefit of read scaling</td></tr></tbody></table></div>
+        <ul><li>Cache only data that is read often, changes slowly, and tolerates a stated staleness window.</li><li>Add 10% jitter to TTLs so keys cached together do not expire in a single wave.</li><li>Use single-flight or a short refresh lock on misses to protect the database from a hot-key stampede.</li><li>Refresh popular entries in the background before they expire, while serving the current value.</li><li>Keep a very short-TTL local cache for the hottest keys, and invalidate it from the broadcast bus.</li><li>Pipeline Redis calls and cap value size; compress large objects or split them into smaller keys.</li><li>Negative-cache missing keys briefly and clear that entry when a create commits.</li><li>Track hit ratio per route rather than in aggregate, because a high overall ratio can hide one path that always misses.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why not update the cache with the new value after a write?</strong> Two concurrent writers can reach the database and cache in opposite orders, leaving the older value cached; deleting forces the next read to load the authoritative value.</div><div class="followup"><strong>Should you delete before or after the database commit?</strong> After the commit, because deleting before opens a window in which a concurrent read can repopulate the cache with the old value.</div><div class="followup"><strong>What if the cache delete fails?</strong> Retry it from the outbox relay and rely on the TTL as a backstop, so the worst case is bounded staleness rather than permanent divergence.</div><div class="followup"><strong>Can the cache be the source of truth?</strong> No; it is a derived copy that must be rebuildable from the database, and treating it as authoritative turns an eviction into data loss.</div><div class="followup"><strong>How do you give a user read-your-writes?</strong> Pin that user's reads to the primary for a short window after a write, or return a version watermark and wait until the cache or replica has reached it.</div><div class="followup"><strong>What is a cache stampede and how do you stop it?</strong> A popular key expires and every concurrent request misses at once; a per-key lock or single-flight lets one request rebuild while the others wait or receive stale data.</div><div class="followup"><strong>How do you handle a hot key?</strong> Keep a short-TTL local copy and replicate the key under suffixed names that hash to different cache nodes, deleting all copies on write.</div><div class="followup"><strong>Is negative caching safe?</strong> It is safe with a short TTL and an explicit invalidation on create, otherwise a newly created item can appear missing for the length of the TTL.</div><div class="followup"><strong>Write-through or cache-aside?</strong> Cache-aside is the default for read-heavy data; write-through is worth it only when recently written values are read again immediately and every writer goes through the cache.</div><div class="followup"><strong>When is write-behind acceptable?</strong> Only for high-volume, low-value data with a durable pending-write buffer, never for payments, orders, balances, or audit records.</div><div class="followup"><strong>How long should a TTL be?</strong> As long as the feature's staleness budget allows and no longer; derive it from how fast the data changes and how bad an old value is, then add jitter.</div><div class="followup"><strong>What should you monitor?</strong> Hit ratio per route, miss latency, eviction rate, memory and key size, invalidation lag, duplicate invalidations, and user reports of stale reads.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Updating the cache before the database commit and calling the pair consistent.</li><li>Relying on invalidation alone with no TTL, so one lost event leaves data stale forever.</li><li>Caching user-specific data under a shared key or at the CDN.</li><li>Treating the cache as the source of truth and being unable to rebuild it.</li><li>Using write-behind for payments or orders where an acknowledged write must never be lost.</li><li>Invalidating only Redis and forgetting the local caches on each application instance.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="scale-write-traffic.html"><span>← Previous</span><strong>Scale Write Traffic</strong></a><a class="next" href="database-selection.html"><span>Next →</span><strong>SQL vs NoSQL / Choose a Database</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proxy vs Reverse Proxy — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 09 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Proxy vs Reverse Proxy</h1>
+    <p class="dek">Networking · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/proxy-vs-reverse-proxy">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Two proxies, one question</a>
+<a href="#s2">How a forward proxy works</a>
+<a href="#s3">Why use a forward proxy</a>
+<a href="#s4">How a reverse proxy works</a>
+<a href="#s5">Why use a reverse proxy</a>
+<a href="#s6">Forward vs reverse proxy</a>
+<a href="#s7">Reverse proxy vs load balancer</a>
+<a href="#s8">Layer 4 vs Layer 7 proxying</a>
+<a href="#s9">Common reverse proxy technologies</a>
+<a href="#s10">NGINX reverse proxy example</a>
+<a href="#s11">Load balancing across backends</a>
+<a href="#s12">Production hardening</a>
+<a href="#s13">Placing proxies in an architecture</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A forward proxy speaks for the client, a reverse proxy speaks for the servers — the difference is whose side of the connection it represents.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Forward proxy</dt><dd>An intermediary that acts on behalf of clients, forwarding their outbound requests to the internet and returning responses.</dd></div><div class="term"><dt>Reverse proxy</dt><dd>An intermediary that acts on behalf of backend servers, accepting client requests and forwarding them to the right internal service.</dd></div><div class="term"><dt>Proxy vs VPN</dt><dd>A proxy forwards traffic for specific applications or protocols; a VPN typically tunnels broader traffic in an encrypted connection.</dd></div><div class="term"><dt>TLS termination</dt><dd>Ending the client's HTTPS connection at the proxy and forwarding the request to backends, centralizing certificates.</dd></div><div class="term"><dt>Request routing</dt><dd>Sending requests to different backends based on path, host, or headers, for example <code>/users</code> to the user service.</dd></div><div class="term"><dt>API gateway</dt><dd>A reverse proxy specialized for APIs, adding authentication, rate limiting, and per-route policy.</dd></div><div class="term"><dt>Ingress controller</dt><dd>A Kubernetes component that programs a reverse proxy to expose cluster services to external traffic.</dd></div><div class="term"><dt>Layer 4 proxy</dt><dd>Forwards TCP or UDP connections without reading the application payload.</dd></div><div class="term"><dt>Layer 7 proxy</dt><dd>Parses the application protocol, usually HTTP, and can decide using paths, headers, or hostnames.</dd></div><div class="term"><dt>Session affinity</dt><dd>Pinning a client to one backend, often implemented by a proxy cookie; useful for local state but harmful to balance.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Two proxies, one question</h2>
+<p class="lede">When you open a website, the request does not always travel straight from browser to application server. Sometimes another server sits in the middle.</p>
+<ul><li>If the middle server acts on behalf of the <strong>client</strong>, it is a forward proxy.</li><li>If it acts on behalf of the <strong>backend servers</strong>, it is a reverse proxy.</li><li>Both forward traffic and both hide one side from the other; only the direction and intent differ.</li><li>The distinguishing question is not <em>where</em> the box sits but <em>whose interests it represents</em>.</li><li>A forward proxy sees outbound traffic leaving a client network.</li><li>A reverse proxy sees inbound traffic entering a service.</li><li>The same software, such as NGINX, can play either role depending on configuration.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Question</th><th>Forward proxy</th><th>Reverse proxy</th></tr></thead><tbody><tr><td>Acts for</td><td>The client</td><td>The backend servers</td></tr>
+<tr><td>Direction</td><td>Outbound from a client network</td><td>Inbound to a service</td></tr>
+<tr><td>Who configures it</td><td>The client's network or operator</td><td>The service owner</td></tr>
+<tr><td>Who benefits</td><td>The client or its organization</td><td>The service and its operators</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>How a forward proxy works</h2>
+<ul><li>The client is configured to send requests to the proxy rather than directly to the destination.</li><li>The proxy forwards the request to the destination server on the client's behalf.</li><li>The destination responds to the proxy, which relays the response to the client.</li><li>From the destination's point of view, the request appears to come from the proxy's address, not the client's.</li><li>The client's browser or OS must know about the proxy, usually through explicit configuration or a proxy auto-config file.</li><li>Because the proxy sits in the path, it can log, block, cache, or modify requests — which is both the feature and the risk.</li><li>HTTPS complicates inspection: without a trusted interception certificate, the proxy can see the destination but not the content.</li></ul>
+<h3>Proxy vs VPN</h3>
+<ul><li>Both can hide the client's IP address from the destination, which is why they get confused.</li><li>A proxy usually forwards traffic for specific applications or protocols.</li><li>A VPN typically creates an encrypted tunnel that carries broader network traffic from the device.</li><li>A proxy can be per-application; a VPN is usually system-wide.</li><li>Hiding an IP is not anonymity: the proxy operator can log connections, and sites can still recognize you via cookies, logins, or fingerprints.</li></ul>
+
+
+
+<div class="flow"><span class="flow-step">Client sends request to the proxy</span><span class="flow-arrow">→</span><span class="flow-step">Proxy forwards to the destination server</span><span class="flow-arrow">→</span><span class="flow-step">Server responds to the proxy</span><span class="flow-arrow">→</span><span class="flow-step">Proxy returns the response to the client</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Why use a forward proxy</h2>
+<ul><li><strong>Privacy:</strong> the destination sees the proxy's address instead of the client's network address.</li><li><strong>Access control:</strong> organizations block sites or restrict which external services employees can reach.</li><li><strong>Monitoring and logging:</strong> outbound traffic passes one point, so requests and policy violations can be tracked.</li><li><strong>Caching:</strong> repeated requests for the same resource can be served from the proxy, reducing bandwidth and latency.</li><li><strong>Access through another network:</strong> a proxy can reach resources that are unavailable or restricted from the client's location.</li><li><strong>Protocol bridging and header control:</strong> rewrite headers, add authentication, or normalize traffic before it leaves.</li><li>The common thread is control over <strong>outbound</strong> traffic from clients.</li><li>The cost is a central choke point, added latency, and a component that must be trusted with all that traffic.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Use case</th><th>What the proxy does</th><th>Who cares</th></tr></thead><tbody><tr><td>Privacy</td><td>Masks the client's address</td><td>Individual users</td></tr>
+<tr><td>Access control</td><td>Blocks or allows destinations</td><td>Enterprises, schools</td></tr>
+<tr><td>Monitoring</td><td>Logs and inspects outbound requests</td><td>Security and compliance teams</td></tr>
+<tr><td>Caching</td><td>Serves repeated responses locally</td><td>Bandwidth-constrained networks</td></tr>
+<tr><td>Network access</td><td>Egress through an allowed location</td><td>Restricted environments</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>How a reverse proxy works</h2>
+<ul><li>The reverse proxy sits in front of backend servers and accepts requests on their behalf.</li><li>The client talks to the proxy, often without knowing a proxy exists.</li><li>The proxy decides which backend should handle the request and forwards it.</li><li>The backend sends its response to the proxy, which returns it to the client.</li><li>From the client's perspective there is a single endpoint; the internal topology stays hidden.</li><li>Because it terminates the client connection, it can apply policy before any backend sees the request.</li><li>This is the shape used by web servers in front of app servers, API gateways, ingress controllers, and CDNs.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends request to the proxy</span><span class="flow-arrow">→</span><span class="flow-step">Proxy chooses a backend</span><span class="flow-arrow">→</span><span class="flow-step">Proxy forwards the request</span><span class="flow-arrow">→</span><span class="flow-step">Backend responds to the proxy</span><span class="flow-arrow">→</span><span class="flow-step">Proxy returns the response</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Why use a reverse proxy</h2>
+<ul><li><strong>Traffic management:</strong> distribute requests across backends so no single server is overloaded.</li><li><strong>TLS termination:</strong> handle certificates and encryption in one place instead of on every backend.</li><li><strong>Caching:</strong> serve repeated responses without touching the backend, reducing load and latency.</li><li><strong>Security and access control:</strong> hide backends from direct public access, enforce rate limits, filter requests, and require authentication.</li><li><strong>Request routing:</strong> send <code>/users</code> to the user service and <code>/payments</code> to the payment service.</li><li><strong>Connection management:</strong> absorb slow clients, buffer responses, and keep backend connections pooled.</li><li><strong>Observability:</strong> one place for access logs, request ids, metrics, and tracing headers.</li><li>Caching personalized responses is dangerous: a cached copy of one user's data must never be served to another.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Responsibility</th><th>Effect</th><th>Watch out for</th></tr></thead><tbody><tr><td>Traffic management</td><td>Even load across backends</td><td>Proxy becomes the bottleneck</td></tr>
+<tr><td>TLS termination</td><td>Central certificates, less backend CPU</td><td>Plaintext internally unless re-encrypted</td></tr>
+<tr><td>Caching</td><td>Lower latency and backend load</td><td>Leaking private data through shared cache</td></tr>
+<tr><td>Security</td><td>Backends unreachable from the internet</td><td>Misconfigured rules blocking valid traffic</td></tr>
+<tr><td>Routing</td><td>One entry point for many services</td><td>Routing table drift as services change</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Forward vs reverse proxy</h2>
+<p class="lede">The two roles share mechanics but differ in direction, trust boundary, and who operates them. This table is the one to reproduce in an interview.</p>
+<ul><li>A forward proxy is usually deployed at the edge of a client network; a reverse proxy at the edge of a service.</li><li>A forward proxy protects and controls clients; a reverse proxy protects and controls servers.</li><li>A forward proxy must be known to the client; a reverse proxy is usually transparent to the client.</li><li>A reverse proxy is where TLS termination, routing, and load balancing normally live.</li><li>A forward proxy is where egress filtering, outbound logging, and shared caching normally live.</li><li>Either can cache, but the cache serves different populations and has different privacy rules.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Forward proxy</th><th>Reverse proxy</th></tr></thead><tbody><tr><td>Acts on behalf of</td><td>Clients</td><td>Backend servers</td></tr>
+<tr><td>Sits between</td><td>Clients and the internet</td><td>Clients and backend servers</td></tr>
+<tr><td>Traffic</td><td>Outbound from a client network</td><td>Inbound to a service</td></tr>
+<tr><td>Hides</td><td>The client from the destination</td><td>The backends from the client</td></tr>
+<tr><td>Common uses</td><td>Privacy, access control, monitoring, caching, alternate network access</td><td>Traffic management, TLS termination, caching, security, routing</td></tr>
+<tr><td>Examples</td><td>Corporate outbound proxy, Squid</td><td>NGINX, HAProxy, Envoy, CDN, API gateway, ingress controller</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Reverse proxy vs load balancer</h2>
+<p class="lede">They are closely related and often the same process, but they are not the same concept.</p>
+<ul><li>A load balancer has one primary job: distribute incoming traffic across multiple backend servers.</li><li>A reverse proxy is a broader role: it also sits in front of backends but can do much more than distribute.</li><li>Load balancing is one capability a reverse proxy may provide, not its definition.</li><li>A reverse proxy can terminate TLS, cache, compress, authenticate, rate limit, and route by path without balancing at all.</li><li>A load balancer can be a dedicated Layer 4 appliance that does nothing else.</li><li>Products such as NGINX, HAProxy, and Envoy blur the line because they do both.</li><li>The same behaviour may also arrive as an API gateway, an ingress controller, or a CDN edge — the label changes, the function does not.</li><li>In an interview, say the reverse proxy is the position in the architecture and load balancing is one of its jobs.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Capability</th><th>Load balancer</th><th>Reverse proxy</th></tr></thead><tbody><tr><td>Distribute across backends</td><td>Core job</td><td>One of several jobs</td></tr>
+<tr><td>TLS termination</td><td>Sometimes</td><td>Common</td></tr>
+<tr><td>Path or host routing</td><td>Layer 7 only</td><td>Common</td></tr>
+<tr><td>Caching and compression</td><td>Rarely</td><td>Common</td></tr>
+<tr><td>Authentication and rate limits</td><td>Sometimes</td><td>Common</td></tr>
+<tr><td>Scope</td><td>Narrow and focused</td><td>Broad and extensible</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Layer 4 vs Layer 7 proxying</h2>
+<ul><li>A <strong>Layer 4</strong> proxy forwards TCP or UDP connections without reading what is inside them.</li><li>It is fast, protocol-agnostic, and can handle databases, message brokers, and custom protocols.</li><li>It cannot route on URL or header because it never parses them; it sees addresses and ports.</li><li>A <strong>Layer 7</strong> proxy understands the application protocol, usually HTTP.</li><li>That lets it route by path, host, header, or cookie, and rewrite or reject requests intelligently.</li><li>It can also cache responses, compress bodies, and apply per-route authentication.</li><li>The cost is parsing and buffering every request, which uses more CPU and memory.</li><li>Choose the lowest layer that satisfies the routing requirement; use Layer 7 when content matters.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Layer 4 proxy</th><th>Layer 7 proxy</th></tr></thead><tbody><tr><td>Sees</td><td>IPs, ports, TCP/UDP</td><td>HTTP method, path, headers, body metadata</td></tr>
+<tr><td>Routing basis</td><td>Connection tuple</td><td>Content and host</td></tr>
+<tr><td>Protocol support</td><td>Any TCP or UDP</td><td>Mainly HTTP and HTTPS</td></tr>
+<tr><td>Performance</td><td>Higher throughput, lower overhead</td><td>More processing per request</td></tr>
+<tr><td>Typical use</td><td>Database proxy, TCP ingress, edge balancing</td><td>API gateway, web reverse proxy, ingress</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Common reverse proxy technologies</h2>
+<ul><li><strong>NGINX</strong> is one of the most widely used: reverse proxying, load balancing, caching, TLS termination, and static content.</li><li><strong>HAProxy</strong> is known for high-performance Layer 4 and Layer 7 proxying and load balancing.</li><li><strong>Envoy</strong> targets cloud-native and microservice architectures with advanced routing, observability, retries, and circuit breaking.</li><li><strong>Managed cloud services</strong> provide load balancers and gateways that perform similar roles without you running the software.</li><li><strong>CDN edges</strong> act as reverse proxies for cacheable content close to users.</li><li>Envoy often runs next to every service in a mesh, handling service-to-service traffic rather than only north-south ingress.</li><li>You may never deploy something literally named a reverse proxy; an ingress controller or gateway may already be doing it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Technology</th><th>Known for</th><th>Typical placement</th></tr></thead><tbody><tr><td>NGINX</td><td>Reverse proxy, caching, TLS, static files</td><td>Web tier and ingress</td></tr>
+<tr><td>HAProxy</td><td>High-performance L4/L7 balancing</td><td>Edge and internal tiers</td></tr>
+<tr><td>Envoy</td><td>Cloud-native routing, retries, observability</td><td>Service mesh sidecars and gateways</td></tr>
+<tr><td>Cloud load balancer or gateway</td><td>Managed ingress and TLS</td><td>Cloud edge</td></tr>
+<tr><td>CDN</td><td>Caching at the edge</td><td>Between users and origin</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>NGINX reverse proxy example</h2>
+<p class="lede">A minimal HTTP reverse proxy forwards every request to one backend and passes along the headers the backend needs to understand the original request.</p>
+<ul><li>Install NGINX, validate the configuration with <code>nginx -t</code>, then reload rather than restart for zero-downtime changes.</li><li><code>proxy_pass</code> names the backend the request is forwarded to.</li><li><code>Host</code> preserves the original hostname so the backend generates correct links and redirects.</li><li><code>X-Real-IP</code> and <code>X-Forwarded-For</code> tell the backend who the client really is behind the proxy.</li><li><code>X-Forwarded-Proto</code> preserves the original scheme so HTTPS redirects do not loop.</li><li>Only trust these headers from a proxy you control; otherwise clients can spoof their address.</li><li>This block alone gives you a single entry point, but not TLS, caching, or balancing.</li></ul>
+
+
+<pre class="code"><code># validate and reload
+sudo nginx -t
+sudo systemctl reload nginx
+
+# /etc/nginx/conf.d/app.conf
+server {
+    listen 80;
+    server_name app.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}</code></pre>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Load balancing across backends</h2>
+<p class="lede">Adding an <code>upstream</code> block turns the same proxy into a load balancer across several backends.</p>
+<ul><li>NGINX uses round robin by default, cycling through the listed servers.</li><li><code>least_conn</code> sends new requests to the backend with the fewest active connections, which helps when request durations vary.</li><li><code>max_fails</code> and <code>fail_timeout</code> stop sending traffic to a server that keeps failing.</li><li>A <code>backup</code> server receives traffic only when the primary servers are unavailable.</li><li>Health checks or passive failure detection are not optional in production; without them the proxy keeps hitting a dead node.</li><li>Sticky routing is possible with a cookie, but use it carefully because it hides a dependency on local server state.</li><li>This configuration is deliberately small; it needs timeouts, limits, and logs before it is production-ready.</li></ul>
+
+
+<pre class="code"><code>upstream app_backend {
+    least_conn;
+    server 10.0.0.11:3000 max_fails=3 fail_timeout=10s;
+    server 10.0.0.12:3000 max_fails=3 fail_timeout=10s;
+    server 10.0.0.13:3000 backup;
+}
+
+server {
+    listen 80;
+    server_name app.example.com;
+
+    location / {
+        proxy_pass http://app_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}</code></pre>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Production hardening</h2>
+<ul><li><strong>Timeouts:</strong> set connect, send, and read timeouts so a stalled backend cannot hold client connections indefinitely.</li><li><strong>Request limits:</strong> cap body size and header size to blunt accidental or malicious large requests.</li><li><strong>TLS:</strong> terminate HTTPS with managed certificates, modern protocol versions, and automated renewal.</li><li><strong>Buffering:</strong> decide whether to buffer request and response bodies; buffering protects slow backends but costs memory.</li><li><strong>Compression and caching:</strong> compress text responses and cache only content that is safe to share.</li><li><strong>Security headers and filtering:</strong> apply HSTS, frame and content-type protections, and request filtering at the edge.</li><li><strong>Logging and tracing:</strong> log upstream status and latency, and propagate request ids to backends.</li><li><strong>Capacity and redundancy:</strong> the proxy sees all traffic, so run more than one instance and monitor its saturation.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Concern</th><th>Setting to think about</th><th>Failure if ignored</th></tr></thead><tbody><tr><td>Slow backend</td><td>Proxy read timeout</td><td>Connections pile up and exhaust workers</td></tr>
+<tr><td>Huge uploads</td><td>Client max body size</td><td>Memory or disk exhaustion</td></tr>
+<tr><td>Certificate expiry</td><td>Automated renewal</td><td>Site-wide HTTPS outage</td></tr>
+<tr><td>Private data</td><td>Cache-control and cache keys</td><td>One user's response served to another</td></tr>
+<tr><td>Spoofed identity</td><td>Trust only your own proxy headers</td><td>Wrong client IP and bypassed rate limits</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Placing proxies in an architecture</h2>
+<ul><li>Put a reverse proxy at the public edge to terminate TLS, absorb abusive traffic, and hide internal topology.</li><li>Use Layer 7 routing to split traffic by path or host across services.</li><li>Add load balancing at each tier that has more than one instance, including internal service-to-service calls.</li><li>Put a forward proxy on egress paths where outbound traffic must be filtered, logged, or routed through an allowed network.</li><li>Keep cache rules explicit: shared caches must never store authenticated, per-user responses.</li><li>Make the proxy tier redundant, since every request depends on it.</li><li>Choose one primary place for policy — edge proxy or API gateway — to avoid conflicting rules at multiple layers.</li><li>The mental model to state: the proxy is the position, and proxying, balancing, TLS, caching, and routing are jobs it can take on.</li></ul>
+
+<div class="flow"><span class="flow-step">Client</span><span class="flow-arrow">→</span><span class="flow-step">Edge reverse proxy (TLS termination)</span><span class="flow-arrow">→</span><span class="flow-step">Route by host or path</span><span class="flow-arrow">→</span><span class="flow-step">Load balance to service instances</span><span class="flow-arrow">→</span><span class="flow-step">Backend services</span><span class="flow-arrow">→</span><span class="flow-step">Shared data stores</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>A forward proxy</strong> centralizes outbound control and caching, but adds a choke point, extra latency, and a component that sees all client traffic.</li><li><strong>A reverse proxy</strong> gives one hardened entry point and central policy, but becomes a critical dependency and a potential single point of failure.</li><li><strong>TLS termination at the proxy</strong> simplifies certificates and saves backend CPU, but leaves internal traffic in plaintext unless re-encrypted.</li><li><strong>Layer 7 proxying</strong> enables content-aware routing and per-route policy, but costs more CPU per request and limits protocol support to HTTP-like traffic.</li><li><strong>Proxy caching</strong> cuts latency and origin load, but risks serving stale or private data if cache keys and headers are wrong.</li><li><strong>Path-based routing</strong> keeps one public endpoint for many services, but couples the proxy configuration to service topology and deploy order.</li><li><strong>Sticky routing through a proxy</strong> supports local state and cache locality, but produces uneven load and complicates failure handling.</li><li><strong>Adding another proxy layer</strong> improves isolation and policy separation, but adds hops, latency, and more configuration to keep consistent.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the difference between a forward and a reverse proxy?</summary><div class="answer"><p>A forward proxy acts on behalf of the client and handles outbound traffic, hiding the client from destinations. A reverse proxy acts on behalf of the servers and handles inbound traffic, hiding the backend topology from clients. The direction and whose interests are served define the role.</p></div></details>
+<details><summary>2. Walk me through a request through a forward proxy.</summary><div class="answer"><p>The client sends the request to the proxy instead of the destination. The proxy forwards it to the destination, receives the response, and returns it to the client. The destination sees the proxy's address as the source.</p></div></details>
+<details><summary>3. Walk me through a request through a reverse proxy.</summary><div class="answer"><p>The client connects to the proxy, which selects a backend, forwards the request, receives the backend's response, and relays it. The client believes it is talking to one server and never learns which backend handled it.</p></div></details>
+<details><summary>4. Is a proxy the same as a VPN?</summary><div class="answer"><p>No. Both can hide the client's IP, but a proxy typically forwards traffic for specific applications or protocols, while a VPN usually creates an encrypted tunnel carrying broader device traffic. Neither guarantees anonymity.</p></div></details>
+<details><summary>5. Why would an enterprise deploy a forward proxy?</summary><div class="answer"><p>To control and observe outbound traffic: blocking disallowed sites, enforcing policy, logging requests, caching repeated downloads, and providing egress through an approved network. It is a management and security control point for clients.</p></div></details>
+<details><summary>6. Why put a reverse proxy in front of an application?</summary><div class="answer"><p>To get one hardened entry point that terminates TLS, hides internal servers, caches responses, enforces rate limits and authentication, and routes requests to the right service. Load balancing is often one of those jobs rather than the only one.</p></div></details>
+<details><summary>7. Reverse proxy vs load balancer?</summary><div class="answer"><p>A load balancer distributes traffic across backends; that is its primary job. A reverse proxy is the broader role of representing backend servers and may also balance, terminate TLS, cache, compress, and route by content. Many products do both.</p></div></details>
+<details><summary>8. When do you need Layer 7 rather than Layer 4?</summary><div class="answer"><p>When routing depends on the request itself: path, host, headers, or method. Layer 4 only sees addresses, ports, and protocol, so use it when you need speed and protocol independence. Layer 7 costs more per request but enables content-aware policy.</p></div></details>
+<details><summary>9. What does TLS termination mean and where should it happen?</summary><div class="answer"><p>The proxy completes the TLS handshake and forwards the decrypted request to the backend. Usually this happens at the edge proxy or load balancer, centralizing certificate management and saving backend CPU. Re-encrypt internally if the network is not trusted.</p></div></details>
+<details><summary>10. What is dangerous about caching in a reverse proxy?</summary><div class="answer"><p>Serving a response that was generated for one user to another. Shared caches must key on the right dimensions and respect <code>Cache-Control</code>, <code>Vary</code>, and authentication. Personalized responses should generally bypass the shared cache.</p></div></details>
+<details><summary>11. How does an API gateway relate to a reverse proxy?</summary><div class="answer"><p>An API gateway is a reverse proxy specialized for APIs, adding authentication, rate limiting, request validation, and per-route policy. The traffic position is the same; the feature set and the audience are different.</p></div></details>
+<details><summary>12. How would you avoid the proxy becoming a single point of failure?</summary><div class="answer"><p>Run multiple proxy instances behind a shared address or a managed service, keep configuration identical across them, health-check the proxies themselves, and monitor their saturation. Every added central component needs its own redundancy plan.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Defining the two by where the box sits instead of whose traffic it represents.</li><li>Saying a load balancer and a reverse proxy are the same thing; balancing is one capability, not the definition.</li><li>Caching authenticated or personalized responses in a shared proxy cache.</li><li>Terminating TLS at the proxy and then sending sensitive traffic as plain HTTP across an untrusted network.</li><li>Trusting <code>X-Forwarded-For</code> from arbitrary clients, which lets them spoof their source address.</li><li>Adding a second proxy layer without consolidating policy, producing contradictory rules at different hops.</li><li>Forgetting that the proxy itself needs redundancy, health checks, and capacity planning.</li><li>Assuming a proxy hides a user's identity completely; cookies, logins, and fingerprints still identify them.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="load-balancers.html"><span>← Previous</span><strong>Load Balancers</strong></a><a class="next" href="domain-name-system-dns.html"><span>Next →</span><strong>Domain Name System (DNS)</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/proxy-vs-reverse-proxy">AlgoMaster — Proxy vs Reverse Proxy</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

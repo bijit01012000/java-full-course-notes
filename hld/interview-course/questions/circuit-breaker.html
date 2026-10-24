@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Circuit Breaker and Bulkhead — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 26 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p2">P2 · Reliability</span></div>
+    <h1>Circuit Breaker and Bulkhead</h1>
+    <p class="dek">It tests whether you understand failure propagation: how one slow dependency exhausts threads and turns a partial degradation into a full outage, and which mechanisms actually bound the damage.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">5 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Wrap each remote dependency in a per-dependency state machine that trips on failure or slow-call rate, rejects fast with a safe fallback, probes recovery in half-open, and caps concurrency with a bulkhead and retry budget.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Wrap outbound calls per dependency and endpoint with a timeout, circuit breaker, bulkhead, and bounded retries.</li><li>Trip from closed to open when failure rate or slow-call rate crosses a threshold over a sliding window with enough volume.</li><li>While open, reject immediately or return the configured fallback without calling the dependency.</li><li>After a cool-down, admit a small number of half-open probes; close on success and reopen on any probe failure.</li><li>Expose state, transitions, rejected calls, fallback rate, and probe results as metrics and events.</li><li>Support per-dependency and per-tenant policy, forced-open for maintenance, and runtime configuration changes.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>The per-call decision must be local and cheap, with no network hop on the request path.</li><li>Rejection must be fast, bounded by the timeout, and never wait on the failing dependency.</li><li>State updates must be safe under high concurrency and must not lose counts under contention.</li><li>Policy changes must apply without a redeploy, and a missing or invalid policy must fall back to safe defaults.</li><li>Fail-open or fail-closed behavior must be chosen per dependency based on business impact, not globally.</li><li>Breaker and bulkhead state must be observable enough to explain why traffic was rejected.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume checkout peaks at 2k requests/s and each request makes one payment call; with a 500 ms timeout, a 200-thread pool is consumed by about 400 hung calls per second, so the breaker must trip in seconds rather than minutes.</li><li>Starting policy: a 10s sliding window, a minimum of 20 calls, a 50 percent failure-rate threshold, a 1s slow-call threshold, a 2s call timeout, and an open duration of 30s.</li><li>Allow 3 half-open probe calls and jitter the open timer by 0 to 10s so a fleet does not probe in one synchronized wave.</li><li>Cap the dependency bulkhead at about 50 concurrent calls per instance, well below the thread or connection pool, so one dependency cannot consume the whole service.</li><li>Cap retries at roughly 10 percent of successful traffic as a retry budget, with exponential backoff and jitter.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">DependencyPolicy</span><span class="fields">dependency_id, timeout_ms, failure_rate_pct, slow_call_ms, min_volume, window_s, open_ms, half_open_probes</span></div><div class="entity"><span class="name">BreakerState</span><span class="fields">dependency_id, instance_id, state, opened_at, probe_count, window_buckets</span></div><div class="entity"><span class="name">CallOutcome</span><span class="fields">call_id, dependency_id, latency_ms, outcome, error_type, timestamp</span></div><div class="entity"><span class="name">Bulkhead</span><span class="fields">dependency_id, max_concurrent, current_in_flight, queue_limit</span></div><div class="entity"><span class="name">FallbackRule</span><span class="fields">dependency_id, operation, strategy, cache_ttl_s, user_message</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/checkout</code></td><td>Protected business endpoint that returns 503 with Retry-After or a degraded response when the payment breaker is open.</td></tr><tr><td><code>GET</code></td><td><code>/internal/dependencies/{dependency_id}/breaker</code></td><td>Read current state, counters, and the last transition reason for one dependency.</td></tr><tr><td><code>PUT</code></td><td><code>/internal/dependencies/{dependency_id}/policy</code></td><td>Update timeout, thresholds, open duration, probe count, and fallback configuration.</td></tr><tr><td><code>POST</code></td><td><code>/internal/dependencies/{dependency_id}/force-open</code></td><td>Temporarily stop calling a dependency during maintenance or a confirmed outage.</td></tr><tr><td><code>GET</code></td><td><code>/internal/breakers?state=open</code></td><td>List open or flapping breakers across the fleet for on-call triage.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Breaker state</td><td>In-process memory per instance, with an atomic state enum and counters</td><td>The decision must be a local read on the hot path; per-instance state is expected and cheaper than coordinating across the fleet.</td></tr><tr><td>Sliding window</td><td>A ring of one-second buckets holding success, failure, and slow-call counts</td><td>It gives bounded memory and recent behavior instead of a lifetime average that reacts hours too late.</td></tr><tr><td>Policy configuration</td><td>Versioned central config pushed to instances and cached locally as last-known-good</td><td>All instances should agree on thresholds without a per-call lookup, and a config outage must not disable protection.</td></tr><tr><td>Transitions</td><td>Append-only transition events plus a current-state gauge, each with a reason</td><td>Flapping and repeated opens are easiest to diagnose from the history, correlated with dependency latency and errors.</td></tr><tr><td>Fallback cache</td><td>A separate cache with a short TTL and an explicit degraded flag</td><td>The fallback must not call the failing dependency, and an entry that never expires can hide a permanent failure.</td></tr><tr><td>Bulkhead</td><td>A semaphore per dependency per instance, independent of the breaker</td><td>The breaker stops calls after detecting failure, while the bulkhead prevents one dependency from taking every thread in the first place.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> S[⚙️ Order Service]
+  S --> BH[🚧 Bulkhead per dependency]
+  BH --> CB{🔌 Breaker State}
+  CB -->|Closed| D[💳 Payment Service]
+  CB -->|Open| F[🧯 Fallback or fast 503]
+  CB -->|Cool-down elapsed| H[🔍 Half-open probes]
+  H -->|Probe succeeds| D
+  H -->|Probe fails| F
+  D --> W[📈 Sliding outcome window]
+  W --> CB
+  F --> S
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef dep fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef warn fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef bad fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class C client;
+  class S,BH,CB svc;
+  class D,W,H dep;
+  class F bad;</div><div class="diagram-caption">Calls pass through a per-dependency bulkhead and breaker; failures and slow calls feed the sliding window, which opens the breaker, sends traffic to a fallback, and later admits a few half-open probes.</div></div>
+        <ul><li>Use the full chain in order: a timeout shorter than the caller deadline, a per-dependency bulkhead, the breaker, bounded retries, and a deliberate fallback.</li><li>Scope the breaker to one dependency and usually one endpoint or cluster; a global breaker lets a failing recommendation service block checkout.</li><li>Do not retry when the breaker is open; an open breaker plus retries turns fast rejection into a delayed retry loop.</li><li>Treat slow calls as failures because a dependency that answers successfully after many seconds still consumes the caller's capacity.</li><li>Per-instance breakers mean the fleet is never perfectly uniform; aggregate state across instances before declaring recovery, and jitter the open timer.</li><li>In a service mesh the breaker is uniform across languages but sees routes rather than business operations; choose one owner per hop for timeouts, retries, and breakers.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Fail fast when open</td><td>Preserves threads and connections so the caller and unrelated endpoints stay available</td><td>Turns a slow dependency into an immediate user-visible error or a degraded response</td></tr><tr><td>Aggressive thresholds</td><td>Trips early and protects capacity during a real outage</td><td>False positives during normal variance, which reject traffic that would have succeeded</td></tr><tr><td>Lenient thresholds</td><td>Avoids tripping on noise</td><td>A degraded dependency can exhaust the caller before protection engages</td></tr><tr><td>Per-instance breaker state</td><td>Simple, local, and fast with no coordination</td><td>The fleet view is inconsistent and some instances keep sending traffic while others are open</td></tr><tr><td>Mesh-level breaker</td><td>Uniform policy across languages and services</td><td>Coarser than business semantics and unable to distinguish a business failure from a transport failure</td></tr><tr><td>Cached fallback</td><td>Keeps a usable page or estimate when the dependency is down</td><td>Can serve stale or incorrect data, especially if the entry has no expiry</td></tr><tr><td>Retry budget</td><td>Bounds amplification during an incident</td><td>Rejects some requests that might have recovered on a retry</td></tr><tr><td>Short open window</td><td>Restores service quickly when the dependency recovers</td><td>Hammers a dependency that is still down and causes repeated flapping</td></tr></tbody></table></div>
+        <ul><li>Tune the slow-call threshold between the dependency's normal p99 and the timeout, and revisit it after traffic or dependency changes.</li><li>Use bucketed counters or atomics for the sliding window instead of a global lock on every call.</li><li>Jitter the open duration and keep half-open probes to a handful so recovery does not become a thundering herd.</li><li>Serve a cached fallback with a short TTL and mark the response as degraded, both in the payload and in metrics.</li><li>Retry only transient, retryable, idempotent operations, at exactly one layer, with exponential backoff and jitter.</li><li>Split breakers by endpoint, cluster, or tenant where one bad route or noisy tenant would otherwise disable healthy traffic.</li><li>Precompute and atomically swap the policy snapshot so policy reads cost nothing at call time.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why is a timeout not enough?</strong> A timeout bounds one call, but every doomed call still consumes its full duration, so at high volume the pool still fills; the breaker stops issuing calls entirely for a cool-down.</div><div class="followup"><strong>Explain the three states.</strong> Closed passes calls and records outcomes, open rejects immediately for a cool-down, and half-open admits a few probes that either close the breaker or reopen it.</div><div class="followup"><strong>Why count slow calls as failures?</strong> A dependency can return success too slowly to be usable, and those slow calls still hold threads, so counting them lets the breaker trip before the caller is exhausted.</div><div class="followup"><strong>Why is a minimum request volume needed?</strong> Without it, two failures out of two calls trip a low-traffic dependency, causing constant flapping instead of protection.</div><div class="followup"><strong>What is a good fallback for payment versus recommendations?</strong> Recommendations can serve a cached list or disappear from the page, while payment must return an explicit failure or queue the attempt, never a fake success.</div><div class="followup"><strong>Breaker, bulkhead, rate limiter: what is the difference?</strong> A breaker stops calls after failures are detected, a bulkhead caps how many resources one dependency can consume, and a rate limiter caps request rate over time.</div><div class="followup"><strong>Is breaker state shared across the fleet?</strong> Usually not; each instance keeps its own state, so aggregate metrics across instances and accept that recovery is gradual and slightly uneven.</div><div class="followup"><strong>How do you avoid a thundering herd in half-open?</strong> Jitter the open timer and admit only a few probe calls, so the fleet does not all test the dependency at the same instant.</div><div class="followup"><strong>Where should the breaker live?</strong> In-process when business semantics matter, in a sidecar or mesh for uniform cross-language policy, or at the gateway for north-south traffic, with one owner per hop.</div><div class="followup"><strong>How do breakers and retries interact?</strong> Retries add load when the dependency is weakest, so retry only transient idempotent failures, cap attempts with a budget, and suppress retries while the breaker is open.</div><div class="followup"><strong>How do you test a breaker?</strong> Inject latency and errors in staging, verify it trips at the configured threshold, check the fallback, and confirm it closes cleanly when the dependency recovers.</div><div class="followup"><strong>How do you decide fail-open or fail-closed?</strong> Fail open only when the feature is non-critical and a safe degraded answer exists; fail closed for payments, authorization, and anything where a wrong success is worse than an error.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Adding a breaker without a timeout, so slow calls never produce a bounded outcome to count.</li><li>Using one global breaker for all dependencies, letting a broken recommendation service block checkout.</li><li>Tripping on a single failure with no minimum volume, which produces constant flapping.</li><li>Retrying at the gateway, the sidecar, and the application at once, multiplying attempts during an outage.</li><li>Returning fake success from a fallback for a payment or other critical operation.</li><li>Assuming breaker state is fleet-wide when it is usually per instance.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="observability.html"><span>← Previous</span><strong>Design Observability</strong></a><a class="next" href="serverless-architecture.html"><span>Next →</span><strong>Serverless Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

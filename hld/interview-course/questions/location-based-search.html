@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Location-Based Search — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 30 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p2">P2 · Specialized</span></div>
+    <h1>Location-Based Search</h1>
+    <p class="dek">It tests whether you can turn a two-dimensional proximity query into an indexable one, and whether you separate fast-moving live positions from slowly changing places.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Map latitude and longitude to hierarchical cells, query the cell plus its neighbours, then filter by exact distance; keep live positions in a TTL cache and places in a spatial store.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Find places within a radius or the nearest k, filtered by category and open status.</li><li>Return distance plus the basic attributes needed to rank results.</li><li>Accept live location pings from drivers or couriers and expire stale ones.</li><li>Support viewport or bounding-box search for a map.</li><li>Track a trip by streaming position updates to the rider.</li><li>Optionally detect geofence enter and exit events.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Nearby query p99 under about 150 ms including ranking.</li><li>Live positions fresh within a few seconds, and stale entries must disappear.</li><li>Handle skewed density: dense city centres and empty rural cells.</li><li>Read-heavy, with a high write rate from moving objects.</li><li>Use haversine distance rather than flat degree arithmetic.</li><li>Coarsen or fuzz coordinates wherever privacy requires it.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 50M static places and 300k active drivers pinging every 5 s, about 60k location writes/s at peak.</li><li>Nearby reads: roughly 30k/s average and 90k/s at peak.</li><li>A place document is about 500 B, so roughly 25 GB before indexes and replicas.</li><li>A live position record is under 200 B, so 300k records fit comfortably in memory.</li><li>At 5 s heartbeats, a 30 s TTL tolerates a few missed pings without showing ghosts.</li><li>A 1 km radius needs a handful of cells at moderate precision, and dense cells may return thousands of candidates, so cap the candidate set and rank.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Place</span><span class="fields">place_id, name, category, lat, lng, geohash, rating, open_hours, status, updated_at</span></div><div class="entity"><span class="name">LiveLocation</span><span class="fields">entity_id, lat, lng, accuracy_m, heading, speed, recorded_at, seq, expires_at</span></div><div class="entity"><span class="name">GeoCell</span><span class="fields">geohash, precision, country, shard_id, place_count</span></div><div class="entity"><span class="name">Geofence</span><span class="fields">fence_id, name, polygon, type, active, version</span></div><div class="entity"><span class="name">Trip</span><span class="fields">trip_id, rider_id, driver_id, status, started_at, last_location_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/v1/places/nearby</code></td><td>Radius or nearest-k search with category filter, cursor, and an explicit radius cap.</td></tr><tr><td><code>GET</code></td><td><code>/v1/places/{placeId}</code></td><td>Fetch full details after the nearby call returned place IDs.</td></tr><tr><td><code>PUT</code></td><td><code>/v1/locations/{entityId}</code></td><td>Ingest a position ping with device timestamp, accuracy, and sequence number.</td></tr><tr><td><code>DELETE</code></td><td><code>/v1/locations/{entityId}</code></td><td>Remove a driver immediately when the app goes offline or the shift ends.</td></tr><tr><td><code>GET</code></td><td><code>/v1/trips/{tripId}/stream</code></td><td>Send a position snapshot, then incremental updates over SSE.</td></tr><tr><td><code>POST</code></td><td><code>/v1/geofences</code></td><td>Create or version a polygon fence used for enter and exit events.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Spatial index</td><td>Geohash prefix at two or three precisions in a KV or search index, queried with the eight neighbours</td><td>Turns proximity into a small set of range scans and prunes the world before exact distance.</td></tr><tr><td>Candidate fetch</td><td>Return IDs and lightweight fields first, then hydrate full documents only for the top results</td><td>A dense cell can hold thousands of places, and hydrating all of them wastes I/O.</td></tr><tr><td>Distance filter</td><td>Bounding box prefilter, then haversine on the shortlist</td><td>Cell membership is not the same as being inside the radius, and degrees are not a flat grid.</td></tr><tr><td>Live positions</td><td>In-memory geo store keyed by entity, overwritten on each ping, with a 30 s TTL</td><td>One small record per driver, low latency, and silent drivers disappear automatically.</td></tr><tr><td>History</td><td>Append pings to a time-partitioned stream or table, separate from the live index</td><td>Keeps the hot index small while still supporting replay, ETA models, and audits.</td></tr><tr><td>Sharding</td><td>Shard by geohash prefix or city, duplicating border cells or querying adjacent shards</td><td>Nearby queries stay local and one hot city does not fan out across the whole cluster.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Rider app] --> G[🛡️ API gateway]
+  G --> N[🔎 Nearby service]
+  N --> X[⚡ Geo cell index]
+  N --> P[(🗄️ Places store)]
+  N --> K[📊 Rank and filter]
+  K --> G
+  D[🚗 Driver app] --> I[📥 Location ingest]
+  I --> L[⚡ Live position cache]
+  I --> S[📬 Ping stream]
+  S --> H[(🗄️ History store)]
+  L --> N
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef service fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef hot fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  class C,D client;
+  class G,N,K,I service;
+  class P,H store;
+  class X,L,S hot;</div><div class="diagram-caption">Static places and live driver positions take separate paths: the nearby service reads cells and place details, then ranks, while ingest feeds a TTL cache and a durable stream.</div></div>
+        <ul><li>Static places are read-mostly and live positions are write-heavy and ephemeral, so they get different stores.</li><li>The nearby path is a funnel: resolve the cell, fetch candidates, filter by exact distance, apply availability, rank, then limit.</li><li>Query the cell and its neighbours because a radius circle crosses rectangular cell boundaries.</li><li>Pick precision from the requested radius and local density, not one global constant.</li><li>Return last_seen or a freshness flag so the client can label stale results instead of presenting them as current.</li><li>Shard by geography, and handle borders by duplicating edge cells or merging results from adjacent shards.</li><li>If the spatial index is unavailable, fall back to a coarse cached viewport or a bounded database query, never a full scan.</li><li>Live tracking sends a snapshot on subscribe and then sequence-numbered updates; reconnect always resnapshots.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Geohash cells</td><td>Simple prefix index, easy sharding, low update cost</td><td>Rectangular cells need neighbour queries and distort at high latitudes</td></tr><tr><td>Quadtree or R-tree</td><td>Adapts to uneven density and arbitrary shapes</td><td>More complex updates and rebalancing as objects move</td></tr><tr><td>In-memory live positions</td><td>Low-latency writes and reads for moving objects</td><td>Less durable and needs a rebuild path after a node loss</td></tr><tr><td>ID-only candidates before hydration</td><td>Avoids reading thousands of full documents</td><td>An extra round trip and merge step</td></tr><tr><td>Coarse geohash precision</td><td>Fewer cell lookups and smaller index</td><td>More candidates to filter and weaker ranking</td></tr><tr><td>Short result cache</td><td>Absorbs viewport and repeat searches</td><td>Stale availability and distance after movement</td></tr><tr><td>Geographic sharding</td><td>Nearby queries stay on one partition</td><td>Hot cities and cross-border queries need special handling</td></tr><tr><td>Fuzzed public locations</td><td>Protects user privacy</td><td>Weaker matching accuracy and distance display</td></tr></tbody></table></div>
+        <ul><li>Cache viewport and popular pickup-point results for 5 to 30 s, but never cache live availability for long.</li><li>Fetch candidate IDs first and hydrate only the top results.</li><li>Cap radius and result count, and reject unbounded queries.</li><li>Batch and coalesce pings per device, and drop out-of-order updates using the sequence number.</li><li>Precompute the geohash at write time and store two or three precisions for different radii.</li><li>Use coarse cells for rural areas and finer cells for dense cities.</li><li>Serve places from read replicas and keep live positions in a separate in-memory cluster.</li><li>Throttle display updates for tracking and interpolate on the client.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>Why can a normal B-tree index not answer a nearby query?</strong> A B-tree orders one dimension, so a radius predicate on both latitude and longitude scatters matches across the index; a spatial index maps both dimensions into cells so most data is pruned first.</div><div class="followup"><strong>How does a geohash work?</strong> It interleaves longitude and latitude bits and encodes them in base32, so a shared prefix identifies one rectangular cell and proximity becomes a prefix range scan.</div><div class="followup"><strong>Why query the eight neighbouring cells?</strong> The radius is a circle while the cell is a rectangle, so nearby points can sit just outside the user's cell and must be fetched before the exact distance filter.</div><div class="followup"><strong>How do you choose geohash precision?</strong> Match cell size to the requested radius and local density: too coarse returns too many candidates, too fine needs many cell lookups.</div><div class="followup"><strong>When would you use a quadtree instead?</strong> When density is highly uneven and the index can live in memory, because a quadtree subdivides crowded regions further, at the cost of splits and merges as objects move.</div><div class="followup"><strong>How do you store live driver locations?</strong> In a fast in-memory spatial store keyed by driver, overwriting the latest position, with a TTL, while a separate durable stream keeps history.</div><div class="followup"><strong>How do you avoid showing a driver who went offline?</strong> Expire records with a TTL, remove them explicitly on disconnect, and check the last heartbeat at read time, returning freshness with the result.</div><div class="followup"><strong>How do you handle the antimeridian and the poles?</strong> Normalize longitude wrapping and split a query that crosses the antimeridian into two ranges; near the poles use a spherical cell system because rectangles distort badly.</div><div class="followup"><strong>What about a stadium or a hot city cell?</strong> Split dense cells into finer sub-cells, add replicas for the hot partition, pre-aggregate results, and cap candidate counts.</div><div class="followup"><strong>How do you scale across cities?</strong> Shard by city or cell so nearby queries stay local, replicate hot partitions, and resolve border queries by duplicating edge cells or querying adjacent shards.</div><div class="followup"><strong>What are the privacy concerns?</strong> Exact coordinates reveal home and routines, so coarsen public locations, restrict access, set retention limits, and keep raw trails out of broad analytics.</div><div class="followup"><strong>What would you monitor?</strong> Query latency by cell, candidate-set size, stale heartbeat rate, hot-cell skew, update lag, and the share of queries falling back to a degraded path.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Computing distance to every row and assuming it scales because the dataset is small today.</li><li>Using a geohash prefix query without fetching the neighbouring cells.</li><li>Treating latitude and longitude as a flat Cartesian grid everywhere.</li><li>Indexing only latitude and expecting the longitude predicate to be cheap.</li><li>Leaving stale drivers visible because there is no TTL or disconnect cleanup.</li><li>Sharding by geography without planning for hot cities and cross-boundary queries.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="long-running-tasks.html"><span>← Previous</span><strong>Long-Running Tasks and Scheduling</strong></a><a class="next" href="unique-id-generation.html"><span>Next →</span><strong>Generate Unique IDs</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

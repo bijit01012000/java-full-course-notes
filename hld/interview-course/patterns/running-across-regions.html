@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Running Across Multiple Regions — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 11 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Running Across Multiple Regions</h1>
+    <p class="dek">Interview Patterns · Staying Reliable</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/multi-region-architecture">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why run in multiple regions</a>
+<a href="#s2">The hard part: distance and data</a>
+<a href="#s3">Topology options</a>
+<a href="#s4">Routing users to a region</a>
+<a href="#s5">Replicating data across regions</a>
+<a href="#s6">Consistency across regions</a>
+<a href="#s7">Conflict resolution</a>
+<a href="#s8">Active-active writes</a>
+<a href="#s9">Failover and failback</a>
+<a href="#s10">Capacity planning for region loss</a>
+<a href="#s11">Data residency and compliance</a>
+<a href="#s12">Stateful supporting systems</a>
+<a href="#s13">Operating and testing multi-region</a>
+<a href="#s14">Interview walkthrough and when not to go multi-region</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Multi-region buys latency and regional fault tolerance by paying for it twice: every extra region must be provisioned, and every write across regions becomes a <strong>consistency decision</strong>.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Region</dt><dd>An independent geographic deployment of cloud infrastructure with its own power, network, and failure domain.</dd></div><div class="term"><dt>Availability zone</dt><dd>An isolated data center group inside a region; multi-AZ is the first redundancy step before multi-region.</dd></div><div class="term"><dt>Active-passive</dt><dd>One region serves traffic while another stands by, ready to take over after a failure.</dd></div><div class="term"><dt>Active-active</dt><dd>Two or more regions serve traffic simultaneously, which requires a plan for concurrent writes.</dd></div><div class="term"><dt>RPO (recovery point objective)</dt><dd>How much data loss is acceptable, expressed as a time window of lost writes.</dd></div><div class="term"><dt>RTO (recovery time objective)</dt><dd>How long the system may be unavailable before recovery must complete.</dd></div><div class="term"><dt>Replication lag</dt><dd>The delay between a write in one region and its visibility in another; it sets the staleness users can see.</dd></div><div class="term"><dt>Geo-routing</dt><dd>Directing each user to a region using DNS, anycast, or latency-based routing.</dd></div><div class="term"><dt>Split brain</dt><dd>Two regions both believe they are the writer after a partition, producing divergent data.</dd></div><div class="term"><dt>Home region</dt><dd>The region that owns writes for a given partition of users or data, keeping conflict resolution simple.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why run in multiple regions</h2>
+<p class="lede">Many systems work well in a single region. Multi-region becomes justified when latency, availability, or regulation cannot be met any other way.</p>
+<ul><li><strong>Latency:</strong> a user far from the region pays the speed-of-light round trip on every request, which hurts chatty protocols and page loads.</li><li><strong>Availability:</strong> a regional outage takes down every availability zone at once; only another region survives it.</li><li><strong>Disaster recovery:</strong> an RTO shorter than a rebuild-from-backup forces a warm standby somewhere else.</li><li><strong>Data residency:</strong> laws or contracts may require data to stay inside a country or region.</li><li><strong>Traffic locality:</strong> serving content and APIs near users can reduce egress cost and improve experience.</li><li>These benefits are not free: multi-region roughly multiplies infrastructure, operational, and testing complexity.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The hard part: distance and data</h2>
+<ul><li>Light in fiber travels roughly 200 km per millisecond, so a cross-continent round trip costs tens to hundreds of milliseconds before any processing.</li><li>Synchronous replication across an ocean makes every write wait for the far region, which raises write latency for everyone.</li><li>Asynchronous replication keeps writes fast but opens a window of lost or stale data during failover.</li><li>The speed of light cannot be engineered away, so the real design question is which operations may be stale and which may not.</li><li>Coordination services, distributed locks, and consensus across regions are slow for the same reason; keep them regional where possible.</li><li>Users notice inconsistency more than they notice a few milliseconds, so most global systems choose locality plus eventual consistency for reads.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Topology options</h2>
+<ul><li><strong>Single region with backups:</strong> cheapest, but RTO is measured in hours and a regional outage is a full outage.</li><li><strong>Active-passive (warm standby):</strong> a second region runs at reduced capacity and is promoted on failure; simple writes, slow recovery.</li><li><strong>Active-passive (hot standby):</strong> the standby runs full capacity and replicates continuously; faster failover, double the cost.</li><li><strong>Read-local, write-global:</strong> reads served nearby, writes routed to a primary region; good latency for read-heavy products.</li><li><strong>Active-active:</strong> every region accepts writes; hardest to keep correct, best for latency and availability.</li><li><strong>Cell or shard-per-region:</strong> each region owns a subset of users and writes only their data, which avoids most conflicts.</li><li>Pick the least complex topology that meets the latency and availability targets, and state what it cannot do.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Topology</th><th>Write latency</th><th>Failover</th><th>Main cost</th></tr></thead><tbody><tr><td>Single region + backup</td><td>Local</td><td>Hours, restore from backup</td><td>No regional availability</td></tr>
+<tr><td>Warm standby</td><td>Local</td><td>Minutes, promote standby</td><td>Idle capacity, possible data loss</td></tr>
+<tr><td>Read-local, write-global</td><td>Cross-region for writes</td><td>Promote writer region</td><td>Write latency, read staleness</td></tr>
+<tr><td>Active-active</td><td>Local</td><td>Traffic shifts instantly</td><td>Conflict resolution complexity</td></tr>
+<tr><td>Shard-per-region</td><td>Local</td><td>Move or reassign shards</td><td>Rebalancing and hot regions</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Routing users to a region</h2>
+<ul><li><strong>GeoDNS</strong> resolves a hostname to a nearby region; simple, but clients and resolvers cache the answer, slowing failover.</li><li><strong>Anycast</strong> advertises the same IP from multiple regions and lets the network pick the closest; fast, but harder to control.</li><li><strong>Latency-based routing</strong> sends users to the region with the best measured latency rather than strict geography.</li><li><strong>Failover routing</strong> with health checks removes a failed region from DNS, subject to TTL and resolver behavior.</li><li>Keep TTLs short for failover records, and accept that some clients will hold stale answers anyway.</li><li>A global load balancer or API gateway can absorb routing logic and provide a stable endpoint while regions change.</li><li>Routing must also handle <strong>session affinity</strong>: a user's writes may need to reach the region that owns their data.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Replicating data across regions</h2>
+<ul><li>Use the database's native cross-region replication where possible; it handles log shipping, catch-up, and promotion.</li><li><strong>Synchronous replication</strong> gives an RPO near zero at the cost of write latency and availability when the far region is unreachable.</li><li><strong>Asynchronous replication</strong> keeps writes local and fast but allows recent writes to be lost on failover.</li><li>Semi-synchronous replication waits for one replica, usually in another AZ, and lets more distant copies lag.</li><li>Replicate the write-ahead log or change stream rather than dual-writing from the application, which can diverge.</li><li>Replication lag is a user-facing property: it decides how stale a read from another region can be.</li><li>Plan for <strong>replica catch-up</strong> after a partition; a region that was unreachable for an hour must not be promoted instantly.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Consistency across regions</h2>
+<ul><li><strong>Strong consistency</strong> across regions requires coordination on every write or read, which is expensive at distance.</li><li><strong>Eventual consistency</strong> lets each region serve local reads and converge later; users may see stale data briefly.</li><li><strong>Read-your-writes</strong> can be preserved per user by routing their reads to the region that accepted their write, or by tracking a version.</li><li><strong>Bounded staleness</strong> promises reads are no older than a defined window, which is often easier to reason about than pure eventual consistency.</li><li>Per-key consistency is usually enough: a user's own profile must be current, while a global counter can lag.</li><li>Be explicit about which screens tolerate staleness and which cannot, then design those paths separately.</li><li>A common pattern is to keep the authoritative write in one region and serve reads locally with a version check for critical views.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>Guarantee</th><th>Cost</th></tr></thead><tbody><tr><td>Strong</td><td>Every read sees the latest committed write</td><td>Cross-region coordination on the hot path</td></tr>
+<tr><td>Bounded staleness</td><td>Reads lag by at most a defined window</td><td>Lag monitoring and per-read validation</td></tr>
+<tr><td>Read-your-writes</td><td>A user sees their own updates</td><td>Route by user or track a version token</td></tr>
+<tr><td>Eventual</td><td>Regions converge, order not guaranteed</td><td>Users may see stale or out-of-order data</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Conflict resolution</h2>
+<ul><li><strong>Last-write-wins</strong> by timestamp is simple but silently loses updates and depends on synchronized clocks.</li><li><strong>Version vectors</strong> detect concurrent edits and let the application decide instead of picking a winner blindly.</li><li><strong>CRDTs</strong> converge automatically for counters, sets, and text, but not every business rule can be expressed as one.</li><li><strong>Application merge</strong> — union of items, highest bid, latest confirmed status — often encodes the real business rule better than a generic algorithm.</li><li>Avoid concurrent writes to the same record by giving each key a <strong>home region</strong>; this is the simplest conflict resolution.</li><li>Record conflicts for review when automatic merging could produce a wrong business outcome, such as a double-booked seat.</li><li>Conflict handling must be tested with real partitions; a merge rule that only exists in a design doc is not a mechanism.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Active-active writes</h2>
+<ul><li>Partition data so each key is writable in exactly one region at a time; route the user to that region or proxy the write.</li><li>Use <strong>home region</strong> assignment by user ID so a user's writes stay ordered and conflict-free.</li><li>For genuinely multi-writer data, restrict operations to commutative ones: add to a set, increment a counter, append an event.</li><li>Accept that cross-region reads may be stale and disclose or hide that depending on the feature.</li><li>Keep request paths regional: a write that fans out to three regions multiplies latency and failure modes.</li><li>Failover of a home region requires transferring ownership, not just redirecting traffic, or writes will land in two places.</li><li>Active-active is a data design problem first and a traffic-routing problem second.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Failover and failback</h2>
+<ul><li>Detect regional failure from outside the region; a region's own monitoring cannot report its own outage.</li><li>Decide who is allowed to promote a region and require a quorum or an external coordinator to avoid two primaries.</li><li>Use <strong>fencing</strong> so a partitioned old primary cannot accept writes after a new one is promoted.</li><li>Redirect traffic with DNS, anycast withdrawal, or a global load balancer, and expect cached DNS to delay some clients.</li><li>Warm caches, connection pools, and autoscaling capacity in the standby before shifting full load.</li><li>Failback is a second migration: re-establish replication, reconcile divergent writes, and shift traffic gradually.</li><li>Every step should be a rehearsed runbook with a measured RTO, not an improvisation during an incident.</li></ul>
+
+<div class="flow"><span class="flow-step">Detect region failure</span><span class="flow-arrow">→</span><span class="flow-step">Confirm quorum</span><span class="flow-arrow">→</span><span class="flow-step">Fence old primary</span><span class="flow-arrow">→</span><span class="flow-step">Promote standby</span><span class="flow-arrow">→</span><span class="flow-step">Shift routing</span><span class="flow-arrow">→</span><span class="flow-step">Warm capacity</span><span class="flow-arrow">→</span><span class="flow-step">Reconcile data</span><span class="flow-arrow">→</span><span class="flow-step">Fail back later</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Capacity planning for region loss</h2>
+<ul><li>If traffic must survive losing a region, the remaining regions need enough headroom to absorb it, which means paying for idle capacity.</li><li>N+1 region capacity is the usual target for active-passive; active-active needs each region sized for its share plus failover spill.</li><li>Autoscaling helps only if the remaining region can scale fast enough; instance quotas and image pull times are real limits.</li><li>Shared dependencies — identity, config, DNS, third-party APIs — must also survive regional loss, or the extra region does not help.</li><li>Test at realistic peak, not average: failover usually happens during the busiest hour.</li><li>State the cost of the headroom explicitly; it is the price of the availability target.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Data residency and compliance</h2>
+<ul><li>Some data must remain within a jurisdiction, which constrains replication and backup locations.</li><li>Keep personally identifiable data in its home region and replicate only derived or aggregated data globally.</li><li>Encryption keys and audit logs may have their own residency rules separate from the primary data.</li><li>A global system may need region-aware routing so a user's data never leaves the allowed geography.</li><li>Deletion requests must propagate to every replica and backup, which complicates multi-region retention.</li><li>Compliance requirements are design constraints, not afterthoughts; they can rule out an otherwise elegant active-active design.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Stateful supporting systems</h2>
+<ul><li><strong>Caches</strong> are usually regional; a global cache adds latency and a cross-region invalidation problem.</li><li><strong>Queues and streams</strong> may replicate across regions, but consumers must handle duplicates after failover.</li><li><strong>Search indexes</strong> are rebuilt or replicated per region; a stale index is a common post-failover bug.</li><li>Object storage should use cross-region replication for assets that must survive a regional loss.</li><li>Session stores and rate-limit counters need a regional home or a relaxed global approximation.</li><li>Each stateful dependency needs its own RPO and failover story; the application tier being multi-region is not enough.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Operating and testing multi-region</h2>
+<ul><li>Measure cross-region latency and replication lag continuously; both are leading indicators of user-visible problems.</li><li>Run failure drills that actually remove a region from routing, not just a single instance.</li><li>Verify that dashboards and alerts work when the primary region's observability stack is down.</li><li>Track which region served each request so debugging does not become guesswork.</li><li>Game-day the runbook with the people who will execute it at 3 a.m., including the failback path.</li><li>Keep configuration and schema changes backward compatible across regions, since rollouts cannot be atomic worldwide.</li><li>Record the achieved RTO and RPO from each drill and compare them with the target.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Interview walkthrough and when not to go multi-region</h2>
+<ul><li>Start with the requirement: which latency target, which availability target, which data residency rules.</li><li>Ask whether multi-AZ plus backups meets the target; if it does, do not add regions.</li><li>Choose a topology and say what it gives up: write latency, staleness, cost, or conflict complexity.</li><li>Explain routing, replication direction, and the consistency model per data type.</li><li>Describe failure detection, promotion, fencing, and the failback path.</li><li>Size the remaining capacity for region loss and name the shared dependencies that could still break.</li><li>Close with the tests and metrics that would prove the design works.</li></ul>
+
+
+<div class="note">A single region with multi-AZ deployment and tested backups is often the correct answer for an interview unless global latency or regional survival is explicitly required.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Multi-region latency</strong> improves user experience near each region but adds cross-region replication and operational cost.</li><li><strong>Active-active</strong> gives the fastest failover and best locality but requires conflict resolution for every writable dataset.</li><li><strong>Active-passive</strong> keeps writes simple but leaves expensive idle capacity and a slower, riskier recovery.</li><li><strong>Synchronous replication</strong> minimizes data loss but raises write latency and can block writes when a region is unreachable.</li><li><strong>Asynchronous replication</strong> keeps writes fast but accepts an RPO greater than zero.</li><li><strong>Global strong consistency</strong> simplifies reasoning but pays coordination latency on every request.</li><li><strong>Home-region ownership</strong> avoids conflicts but creates a migration problem when that region fails.</li><li><strong>Short DNS TTLs</strong> speed failover but increase query volume and still do not control client caching.</li><li><strong>Extra regional headroom</strong> protects availability but is capacity that sits idle most of the time.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why would you run a system in multiple regions?</summary><div class="answer"><p>To reduce latency for distant users, survive a full regional outage, meet a short RTO, or satisfy data residency requirements. Each reason implies a different topology, so state the requirement before the design.</p></div></details>
+<details><summary>2. What is the hardest part of multi-region?</summary><div class="answer"><p>Keeping data correct across distance. Replication is either synchronous and slow or asynchronous and lossy, and concurrent writes in two regions need ownership or conflict resolution.</p></div></details>
+<details><summary>3. What is the difference between multi-AZ and multi-region?</summary><div class="answer"><p>Multi-AZ spreads instances across isolated data centers in one region and handles most hardware and facility failures. Multi-region survives the loss of an entire region but adds cross-region latency and data consistency problems.</p></div></details>
+<details><summary>4. Explain active-active versus active-passive.</summary><div class="answer"><p>Active-active serves traffic from multiple regions at once and needs conflict handling for writes. Active-passive keeps a standby that is promoted on failure, which is simpler but slower to recover and wastes standby capacity.</p></div></details>
+<details><summary>5. How do you route users to the right region?</summary><div class="answer"><p>Use GeoDNS, anycast, or a global load balancer with latency-based and failover routing. Keep TTLs short for failover records, and account for clients that cache DNS longer than you would like.</p></div></details>
+<details><summary>6. What are RPO and RTO?</summary><div class="answer"><p>RPO is how much data you can afford to lose, measured in time. RTO is how long recovery may take. They drive the replication mode and the topology, and both must be tested rather than assumed.</p></div></details>
+<details><summary>7. How do you keep data consistent across regions?</summary><div class="answer"><p>Choose per data type: strong consistency for money and inventory, read-your-writes for user profiles, eventual consistency for feeds and counters. Ownership by home region avoids conflicts for most user data.</p></div></details>
+<details><summary>8. How do you resolve write conflicts?</summary><div class="answer"><p>Avoid them with home-region ownership; otherwise use version vectors to detect concurrency and merge by business rule, or CRDTs for commutative data. Avoid naive last-write-wins for anything valuable.</p></div></details>
+<details><summary>9. How do you prevent split brain during failover?</summary><div class="answer"><p>Require quorum to elect a new primary, fence the old one with a token or lease, and make the write path reject a leader that cannot prove it holds the lease. Then reconcile any divergent writes.</p></div></details>
+<details><summary>10. Why is failback often harder than failover?</summary><div class="answer"><p>Both regions may have accepted writes, so data must be reconciled before replication resumes in the original direction. Caches, indexes, and queues also need rebuilding, and traffic must shift gradually.</p></div></details>
+<details><summary>11. How much spare capacity does a region need?</summary><div class="answer"><p>Enough to carry its own traffic plus the traffic of a failed region, at peak. That usually means N+1 regional capacity, and it must be tested with a real traffic shift.</p></div></details>
+<details><summary>12. How does multi-region affect deployments?</summary><div class="answer"><p>Rollouts cannot be atomic, so schema and API changes must be backward compatible across versions running in different regions. Deploy region by region and verify replication before moving on.</p></div></details>
+<details><summary>13. What would you monitor?</summary><div class="answer"><p>Per-region success rate and latency, cross-region replication lag, routing health, failover readiness, and capacity headroom for region loss. Also verify that observability works when one region is down.</p></div></details>
+<details><summary>14. When is a single region enough?</summary><div class="answer"><p>When multi-AZ redundancy and tested backups meet the availability target and users are not latency-sensitive across continents. Most systems do not need multi-region, and saying so is a strong answer.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Adding a second region without deciding how writes behave when both regions are reachable.</li><li>Claiming active-active while quietly routing all writes to one region.</li><li>Using last-write-wins on valuable data and calling the conflicts resolved.</li><li>Forgetting that DNS caching makes failover slower than the TTL suggests.</li><li>Sizing the standby for normal load instead of the load it must carry during a failure.</li><li>Promoting a lagging replica without stating the data loss, or without fencing the old primary.</li><li>Ignoring shared global dependencies such as identity, config, and third-party APIs.</li><li>Never testing failover or failback, so the RTO and RPO are aspirational.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="preventing-duplicate-processing.html"><span>← Previous</span><strong>Preventing Duplicate Processing</strong></a><a class="next" href="coordinating-transactions.html"><span>Next →</span><strong>Coordinating Transactions Across Services</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/multi-region-architecture">AlgoMaster — Running Across Multiple Regions</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Top 30 System Design Concepts — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 02 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Top 30 System Design Concepts</h1>
+    <p class="dek">Introduction · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/top-30-system-design-concepts">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Networking Foundations</a>
+<a href="#s2">APIs and Communication</a>
+<a href="#s3">Data Storage</a>
+<a href="#s4">Scaling</a>
+<a href="#s5">Distributed Systems</a>
+<a href="#s6">Architecture Patterns</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Thirty building blocks, grouped from the network upward: how machines connect, how applications exchange data, where data lives, how systems scale, what breaks across multiple machines, and how to organize the whole thing.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Client-server model</dt><dd>A requester (client) asks a listener (server) for something and receives a response; the basis of nearly every web interaction.</dd></div><div class="term"><dt>DNS</dt><dd>The distributed naming system that resolves a human-readable domain into an IP address, with caching at every level.</dd></div><div class="term"><dt>Reverse proxy</dt><dd>A server-side middleman that hides backend servers and can terminate TLS, cache, compress, and route traffic.</dd></div><div class="term"><dt>Latency</dt><dd>The time for data to travel from one point to another, including propagation, serialization, processing, and queuing.</dd></div><div class="term"><dt>REST</dt><dd>A resource-oriented API style using standard HTTP methods, stateless requests, and cacheable responses.</dd></div><div class="term"><dt>GraphQL</dt><dd>A query language and server runtime that lets clients request exactly the fields they need in one request.</dd></div><div class="term"><dt>Idempotency</dt><dd>The property that repeating an operation produces the same result and the same side effects as running it once.</dd></div><div class="term"><dt>Replication</dt><dd>Copying the same data to multiple nodes so reads can scale and a failed node can be replaced.</dd></div><div class="term"><dt>Sharding</dt><dd>Partitioning different subsets of data across nodes by a shard key to scale storage and writes.</dd></div><div class="term"><dt>CAP theorem</dt><dd>During a network partition, a replicated system must choose between consistency and availability for affected operations.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Networking Foundations</h2>
+<p class="lede">Every request crosses a network before any business logic runs. These six concepts describe the path from a name to a reachable machine and the delay incurred along the way.</p>
+<ul><li>Learn the order: name resolution → IP routing → transport connection → HTTP exchange.</li><li>The same primitives reappear at every scale: a load balancer is a server to its clients and a client to its backends.</li><li>Networking problems — DNS errors, packet loss, added round trips — surface as application failures, so they belong in the design.</li><li>Names and addresses are separate concerns: DNS maps stable names to changing IPs, which is what makes autoscaling and failover possible.</li><li>Every network hop adds latency and a failure mode, so the shortest correct path is usually the most available one.</li></ul>
+<h3>1. Client-Server Model</h3>
+<ul><li>The <strong>client</strong> initiates a request; the <strong>server</strong> listens, processes, and responds.</li><li>The split lets each side evolve independently: a mobile app can be added without changing the server, and servers can scale without changing clients.</li><li>The server is a shared, centralized resource, so it needs replication and load balancing once demand exceeds one machine.</li><li>A server can itself be a client of a database or another service; the roles describe who initiates, not a fixed tier.</li></ul>
+
+
+<h3>2. IP Address</h3>
+<ul><li>An IP address identifies an interface on a network so routers know where to deliver packets.</li><li><strong>IPv4</strong> provides roughly 4.3 billion addresses; <strong>IPv6</strong> removes that practical scarcity with a vastly larger address space.</li><li>Servers, load balancers, and database nodes are all addressed by IP, but clients normally reach them through DNS names.</li><li>Addresses change when instances restart or autoscale, so hardcoding IPs is fragile; use DNS or service discovery.</li></ul>
+
+
+<h3>3. DNS (Domain Name System)</h3>
+<ul><li>DNS is the internet's phone book: it maps <code>example.com</code> to an IP address the machine can route to.</li><li>Resolution walks from local cache to a resolver, then root servers, TLD servers, and the domain's authoritative name server; answers are cached with a TTL.</li><li>DNS can steer traffic by returning different addresses for the same name, which supports load balancing, geo-routing, and failover.</li><li>A short TTL makes failover faster but increases query volume; a long TTL reduces queries but leaves stale answers cached longer.</li></ul>
+
+
+<h3>4. Proxy vs Reverse Proxy</h3>
+<ul><li>A <strong>forward proxy</strong> sits in front of clients and hides the client's identity from servers; VPNs and corporate egress filters are examples.</li><li>A <strong>reverse proxy</strong> sits in front of servers and hides the backend topology from clients; Nginx and HAProxy are common.</li><li>Reverse proxies handle TLS termination, caching, compression, and load balancing, so every backend does not repeat that work.</li><li>Decide by whose identity is being protected and where the trust boundary sits, not by the word <em>proxy</em>.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Forward proxy</th><th>Reverse proxy</th></tr></thead><tbody><tr><td>Position</td><td>In front of clients</td><td>In front of servers</td></tr>
+<tr><td>Hides</td><td>Client identity</td><td>Server identity and topology</td></tr>
+<tr><td>Typical use</td><td>Privacy, filtering, egress control</td><td>TLS, caching, routing, load balancing</td></tr>
+<tr><td>Who configures it</td><td>Client or network operator</td><td>Service operator</td></tr></tbody></table></div>
+
+<h3>5. Latency</h3>
+<ul><li>Latency is the time for data to move from point A to point B, usually reported as a round-trip time in milliseconds.</li><li>Its sources are propagation distance, serialization, server processing, and queuing when the server is busy.</li><li>Physics sets a floor: a request between distant continents cannot beat the speed of light in fiber.</li><li>Reduce perceived latency with CDNs, caching, regional deployment, batching, and fewer sequential round trips; measure p95/p99 rather than only the average.</li></ul>
+
+
+<h3>6. HTTP / HTTPS</h3>
+<ul><li>HTTP defines the request/response format: method, path, headers, optional body, and a status code in the response.</li><li>It is <strong>stateless</strong> — each request stands alone — which makes horizontal scaling easy but requires cookies, tokens, or sessions for continuity.</li><li>Know the methods and semantics: GET reads, POST creates, PUT replaces, PATCH updates, DELETE removes; GET, PUT, and DELETE are idempotent.</li><li>HTTPS is HTTP over TLS: the handshake authenticates the server and negotiates keys, adding a round trip but providing confidentiality and integrity.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends ClientHello with TLS versions and ciphers</span><span class="flow-arrow">→</span><span class="flow-step">Server responds with ServerHello and certificate</span><span class="flow-arrow">→</span><span class="flow-step">Both sides complete key exchange</span><span class="flow-arrow">→</span><span class="flow-step">Encrypted HTTP requests and responses flow</span><span class="flow-arrow">→</span><span class="flow-step">Connection is reused for subsequent requests</span></div>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>APIs and Communication</h2>
+<p class="lede">An API is a contract: what you may ask for, how to ask, and what comes back. The style should follow the interaction pattern — request-response, client-shaped queries, server push, or event notification.</p>
+<ul><li>Synchronous request-response suits immediate answers; asynchronous events suit work that can happen later.</li><li>The contract, not the implementation, is what other teams depend on, so versioning and error semantics matter.</li><li>Choose the simplest style that fits the interaction; every richer style adds server and operational complexity.</li><li>Pull-and-poll, server push, and event callbacks solve different problems; mixing them without a reason creates duplicate paths.</li><li>Whatever the style, define timeouts, retries, idempotency, and error semantics so callers know how to behave when a response is missing.</li></ul>
+<h3>7. APIs (Application Programming Interfaces)</h3>
+<ul><li>An API hides implementation behind a stable contract, much like a menu hides the kitchen.</li><li>A typical HTTP API defines an endpoint, method, request schema, response schema, status codes, and error format.</li><li>Because callers depend on the contract, breaking changes require versioning or a deprecation window.</li><li>Good APIs are predictable, documented, and explicit about authentication, pagination, and failure behavior.</li></ul>
+
+
+<h3>8. REST API</h3>
+<ul><li>REST models everything as a <strong>resource</strong> with its own URL and uses HTTP methods for CRUD operations.</li><li>Key constraints: statelessness, cacheability, a uniform interface, and consistent resource naming.</li><li>Example mapping: <code>GET /users/123</code> reads, <code>POST /users</code> creates, <code>PUT /users/123</code> replaces, <code>DELETE /users/123</code> removes.</li><li>Its weakness is fixed response shapes: clients may get too much data or need several round trips for related resources.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Operation</th><th>Method</th><th>Example</th></tr></thead><tbody><tr><td>List</td><td>GET</td><td>GET /users</td></tr>
+<tr><td>Read one</td><td>GET</td><td>GET /users/123</td></tr>
+<tr><td>Create</td><td>POST</td><td>POST /users</td></tr>
+<tr><td>Replace</td><td>PUT</td><td>PUT /users/123</td></tr>
+<tr><td>Delete</td><td>DELETE</td><td>DELETE /users/123</td></tr></tbody></table></div>
+
+<h3>9. GraphQL</h3>
+<ul><li>GraphQL exposes a single endpoint where the client sends a query describing the exact fields it wants.</li><li>The server resolves each field, potentially calling several downstream services, and returns one combined result.</li><li>It removes over-fetching and under-fetching, which is valuable for mobile clients and varied UIs.</li><li>The costs are server-side resolver complexity, harder HTTP caching because queries differ, and expensive deeply nested queries that need depth and complexity limits.</li></ul>
+
+
+<h3>10. WebSockets</h3>
+<ul><li>A WebSocket starts as an HTTP request, receives <code>101 Switching Protocols</code>, and becomes a persistent bidirectional connection.</li><li>Either side can send messages at any time without a new HTTP request, which suits chat, live scores, and collaborative editing.</li><li>Connections are <strong>stateful</strong>: the server tracks every open socket, so scaling requires connection-aware routing or a shared pub/sub layer.</li><li>Design for reconnect, backoff, heartbeats, backpressure, and the loss of all connections when one server dies.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends an HTTP Upgrade request</span><span class="flow-arrow">→</span><span class="flow-step">Server responds 101 Switching Protocols</span><span class="flow-arrow">→</span><span class="flow-step">Connection stays open</span><span class="flow-arrow">→</span><span class="flow-step">Client and server exchange messages in both directions</span><span class="flow-arrow">→</span><span class="flow-step">Connection closes or is re-established after failure</span></div>
+<h3>11. Webhooks</h3>
+<ul><li>Webhooks invert polling: the client registers a callback URL and the provider POSTs an event when something happens.</li><li>They are the standard integration mechanism for payment events, code pushes, and delivery status changes.</li><li>Delivery is typically at-least-once, so receivers must verify signatures, tolerate duplicates, and be idempotent.</li><li>The receiver should acknowledge quickly, enqueue the event, and process it asynchronously; providers usually retry failed deliveries.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Data Storage</h2>
+<p class="lede">Choosing storage is one of the highest-leverage decisions in a design. Match the data model, access pattern, consistency requirement, and growth path rather than picking a familiar database.</p>
+<ul><li>There is no best database in general, only a best fit for a dataset and its queries.</li><li>Reads and writes have different optimization paths: indexes and caches help reads, partitioning and batching help writes.</li><li>Most production systems use more than one storage type, each for the data it handles best.</li><li>Every dataset needs one declared source of truth; caches and denormalized copies must be rebuildable from it.</li><li>Storage choices are hard to reverse later, because changing the data model also changes every query and migration path.</li></ul>
+<h3>12. Databases</h3>
+<ul><li>A database provides organized storage with efficient create, read, update, and delete operations plus durability and concurrency control.</li><li>Relational databases use tables and relationships; document stores use flexible JSON-like documents; key-value stores act like distributed hash maps; graph databases make relationships first-class.</li><li>The choice depends on the shape of the data, the queries you need, consistency requirements, and expected scale.</li><li>Using several database types in one system is normal, but each adds an operational and consistency boundary.</li></ul>
+
+
+<h3>13. SQL vs NoSQL</h3>
+<ul><li><strong>SQL</strong> enforces a schema, supports ACID transactions and joins, and is strong for money, inventory, and well-defined relational data.</li><li><strong>NoSQL</strong> trades rigid schema and joins for flexible documents or keys, horizontal partitioning, and tunable consistency.</li><li>Choose SQL when correctness and complex queries dominate; choose NoSQL when schema evolves quickly, write volume is high, or data is naturally unstructured.</li><li>The realistic answer is often both: orders in a relational store, product catalog or activity feed in a document or wide-column store.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>SQL</th><th>NoSQL</th></tr></thead><tbody><tr><td>Schema</td><td>Fixed and enforced</td><td>Flexible or schema-on-read</td></tr>
+<tr><td>Transactions</td><td>ACID, multi-row</td><td>Often limited or per-document</td></tr>
+<tr><td>Queries</td><td>Joins and aggregations</td><td>Denormalized access by key</td></tr>
+<tr><td>Scaling</td><td>Vertical plus replicas, then sharding</td><td>Horizontal partitioning built in</td></tr>
+<tr><td>Best for</td><td>Money, inventory, relations</td><td>Feeds, logs, catalogs, high write volume</td></tr></tbody></table></div>
+
+<h3>14. Database Indexing</h3>
+<ul><li>Without an index, finding a row means scanning every row — fine for hundreds, disastrous for hundreds of millions.</li><li>Most databases use a <strong>B-tree</strong>, a sorted balanced structure that gives <code>O(log n)</code> lookups.</li><li>Index columns used in <code>WHERE</code> and <code>JOIN</code> conditions; composite index order matters, and a covering index can avoid table lookups.</li><li>Every index slows inserts and updates and consumes storage, so index deliberately rather than indexing every column.</li></ul>
+
+
+<h3>15. Vertical Partitioning</h3>
+<ul><li>Vertical partitioning splits a wide table into narrower tables by column, joined by a shared key.</li><li>Group columns by access pattern: profile data, authentication data, and billing data rarely need to be read together.</li><li>Each query reads fewer bytes, and sensitive columns can get stricter access controls and independent tuning.</li><li>The cost is more tables and joins when a request genuinely needs columns from several partitions.</li></ul>
+
+
+<h3>16. Caching</h3>
+<ul><li>A cache stores frequently accessed data in a faster layer, usually memory, to avoid repeated database work.</li><li>The common <strong>cache-aside</strong> pattern checks the cache first, reads the database on a miss, then populates the cache.</li><li>Invalidation is the hard part: use a TTL, write-through updates, or write-behind with an explicit durability trade-off.</li><li>Watch hit ratio, stampedes on popular keys, and staleness; a low hit ratio adds complexity for little benefit.</li></ul>
+
+<div class="flow"><span class="flow-step">Application checks the cache</span><span class="flow-arrow">→</span><span class="flow-step">Hit: return the cached value</span><span class="flow-arrow">→</span><span class="flow-step">Miss: read from the database</span><span class="flow-arrow">→</span><span class="flow-step">Store the result in the cache</span><span class="flow-arrow">→</span><span class="flow-step">Return the value to the client</span></div>
+<h3>17. Denormalization</h3>
+<ul><li>Normalization removes duplication; denormalization deliberately adds it to avoid expensive joins.</li><li>Storing a user's name and a product title directly in an orders row turns a three-table join into a single read.</li><li>It is a read optimization for read-heavy, join-heavy paths, and it is common where the database does not support joins.</li><li>The price is update amplification: a changed name or title must be propagated to every copy, so pair it with a consistency strategy.</li></ul>
+
+
+<h3>18. Blob Storage</h3>
+<ul><li>Blob storage holds large, usually immutable binary objects such as images, videos, PDFs, and backups.</li><li>Store the bytes in object storage and keep only the URL or key in the database, so the database stays lean.</li><li>Blob stores provide durability, replication, cheap capacity, and CDN integration for delivery.</li><li>Use pre-signed URLs for controlled uploads and downloads, and lifecycle rules for retention; do not use blob storage for transactional records.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Scaling</h2>
+<p class="lede">Scaling is about handling more traffic, data, and users without collapse. The two fundamental approaches — bigger machines and more machines — are complementary, and both eventually push pressure onto the database.</p>
+<ul><li>Measure the bottleneck before choosing a technique; adding servers to a database-bound system changes nothing.</li><li>Application servers scale horizontally when they are stateless; databases need replication or partitioning.</li><li>Each added layer improves capacity but also adds a failure mode and operational work.</li><li>Scaling the application tier does not scale the database; reads and writes need their own plan.</li><li>Capacity has a cost curve: the goal is the cheapest design that survives peak load and a single failure.</li></ul>
+<h3>19. Vertical Scaling (Scale Up)</h3>
+<ul><li>Vertical scaling gives one machine more CPU, RAM, or faster disks; no code changes are required.</li><li>It is simple and often the right first move for a small system or a database primary.</li><li>There is a hard hardware ceiling, larger instances cost disproportionately more, and the machine remains a single failure domain.</li></ul>
+
+
+<h3>20. Horizontal Scaling (Scale Out)</h3>
+<ul><li>Horizontal scaling adds more machines and spreads load across them, removing the single-machine ceiling.</li><li>Application servers must be <strong>stateless</strong>, with sessions and carts in a shared store such as Redis.</li><li>A load balancer distributes traffic, and failed instances are replaced rather than repaired in place.</li><li>The database still needs its own strategy — replicas for reads, sharding for writes — and distributed coordination adds complexity.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Vertical</th><th>Horizontal</th></tr></thead><tbody><tr><td>Approach</td><td>Bigger machine</td><td>More machines</td></tr>
+<tr><td>Code changes</td><td>None</td><td>Stateless design required</td></tr>
+<tr><td>Ceiling</td><td>Hardware limit</td><td>Effectively unbounded</td></tr>
+<tr><td>Failure domain</td><td>One machine</td><td>Multiple machines</td></tr>
+<tr><td>Complexity</td><td>Low</td><td>Load balancing, shared state, operations</td></tr></tbody></table></div>
+
+<h3>21. Load Balancers</h3>
+<ul><li>A load balancer sits between clients and a server pool and distributes requests so no single server is overwhelmed.</li><li>Common algorithms: round robin, least connections, and weighted routing for machines with different capacity.</li><li>Health checks remove unhealthy servers from rotation, which turns redundancy into actual availability.</li><li>The load balancer itself must be redundant; otherwise it becomes the single point of failure for every healthy backend.</li></ul>
+
+
+<h3>22. Replication</h3>
+<ul><li>Replication copies data across database servers; the usual pattern sends all writes to a primary and reads to replicas.</li><li>It scales read throughput, provides failover capacity, and lets a replica be promoted if the primary fails.</li><li>Replication is often asynchronous, so replicas can be stale; read-after-write operations may need the primary.</li><li>Replication does not increase write capacity, because every replica still applies the same writes.</li></ul>
+
+
+<h3>23. Sharding</h3>
+<ul><li>Sharding splits data across nodes so each holds a different subset, distributing both storage and write load.</li><li>Choose a shard key for even distribution and common query access; a poor key creates hot shards.</li><li>Hash-based sharding spreads keys evenly but makes range queries harder; range-based sharding supports ranges but risks hotspots.</li><li>Cross-shard joins, transactions, and rebalancing are expensive, so sharding is a late-stage tool.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Distributed Systems</h2>
+<p class="lede">Once data and computation span multiple machines, failures become independent and the network becomes an unreliable participant. Coordination, not raw capacity, becomes the hard problem.</p>
+<ul><li>A node can be healthy while the path to it is broken; the system must define behavior for that case.</li><li>Retries are necessary but dangerous: without idempotency they duplicate side effects.</li><li>Caching content near users is often cheaper than making every request travel to the origin.</li><li>Coordination is expensive: consensus, locks, and cross-node transactions add latency and new failure modes.</li><li>Design for partial failure — timeouts, retries, idempotency, and reconciliation — rather than assuming all nodes see the same state.</li></ul>
+<h3>24. CAP Theorem</h3>
+<ul><li>CAP says that during a network partition, a replicated system cannot guarantee both strong consistency and availability for affected requests.</li><li>Partition tolerance is not optional in a distributed system, so the real choice is <strong>CP</strong> or <strong>AP</strong>.</li><li>CP systems reject or wait rather than return stale data; AP systems serve local data and reconcile later.</li><li>The choice belongs to each operation, not to an entire database: browsing a catalog can be AP while reserving the last item must be CP.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Choice</th><th>Behavior during a partition</th><th>Typical use</th></tr></thead><tbody><tr><td>CP</td><td>Reject or wait rather than serve stale data</td><td>Inventory, payments, locks</td></tr>
+<tr><td>AP</td><td>Serve local data and merge later</td><td>Feeds, carts, catalogs, analytics</td></tr>
+<tr><td>CA</td><td>Only meaningful when no partition exists</td><td>Single-node or partition-free systems</td></tr></tbody></table></div>
+
+<h3>25. CDN (Content Delivery Network)</h3>
+<ul><li>A CDN is a globally distributed set of edge servers that cache and serve content close to users.</li><li>The first request in a region misses and goes to the origin; later requests hit the edge, cutting latency and origin load.</li><li>CDNs primarily serve static assets — images, CSS, JavaScript, video — and some also cache dynamic content or run edge functions.</li><li>Cached content can still be served when the origin is down, which improves availability as well as speed.</li></ul>
+
+
+<h3>26. Idempotency</h3>
+<ul><li>An idempotent operation produces the same result whether executed once or many times; GET and DELETE are naturally idempotent.</li><li>POST is not, so payment and order APIs accept an <strong>idempotency key</strong> that uniquely identifies the attempt.</li><li>The server records the key and the result; a retry with the same key returns the stored result instead of charging again.</li><li>This matters because a timeout does not prove failure: the server may have succeeded while the response was lost.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends a request with an idempotency key</span><span class="flow-arrow">→</span><span class="flow-step">Server checks whether the key was already processed</span><span class="flow-arrow">→</span><span class="flow-step">New key: execute, store the key and result</span><span class="flow-arrow">→</span><span class="flow-step">Duplicate key: return the stored result</span><span class="flow-arrow">→</span><span class="flow-step">No duplicate side effect occurs</span></div>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Architecture Patterns</h2>
+<p class="lede">With networking, storage, and scaling primitives in place, architecture patterns decide how to organize them into a coherent system that teams can build and operate.</p>
+<ul><li>Patterns are trade-off bundles, not maturity badges; each solves one problem while creating another.</li><li>Centralize cross-cutting concerns so individual services do not each reinvent authentication, limits, and routing.</li><li>Prefer the simplest structure that supports independent team ownership and the required scale.</li><li>Boundaries should follow business capabilities and data ownership, not the org chart of the moment.</li><li>Every pattern here changes the failure model, so pair it with observability, retries, and a rollback plan.</li></ul>
+<h3>27. Microservices</h3>
+<ul><li>Microservices split an application into small services aligned to business capabilities, each independently deployable and owning its data.</li><li>They allow independent scaling, deployment, and team ownership, and permit different languages or runtimes per service.</li><li>The costs are network calls instead of function calls, partial failure, cross-service data consistency, and heavy observability needs.</li><li>A monolith is often the better starting point; split services when team scale or independent deployment justifies the coordination cost.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Monolith</th><th>Microservices</th></tr></thead><tbody><tr><td>Deployment</td><td>One unit</td><td>Independent services</td></tr>
+<tr><td>Data</td><td>Shared database</td><td>Database per service</td></tr>
+<tr><td>Scaling</td><td>Whole application</td><td>Per service</td></tr>
+<tr><td>Debugging</td><td>Single process</td><td>Distributed tracing required</td></tr>
+<tr><td>Best when</td><td>Small team, early product</td><td>Many teams, independent domains</td></tr></tbody></table></div>
+
+<h3>28. Message Queues</h3>
+<ul><li>A queue sits between producers and consumers, storing messages until a consumer is ready to process them.</li><li>It decouples services, absorbs bursts, persists work when a consumer is down, and lets consumers scale independently.</li><li>Delivery is usually at-least-once, so consumers must be idempotent; ordering and poison messages need explicit handling.</li><li>Kafka is a high-throughput event log, RabbitMQ a traditional broker, and SQS a managed queue; the right choice depends on replay, ordering, and operations.</li></ul>
+
+
+<h3>29. Rate Limiting</h3>
+<ul><li>Rate limiting caps how many requests a client may make in a time window, protecting backends and enforcing fairness.</li><li>Common algorithms: token bucket for bursts with a refill rate, sliding window for smoother accuracy, fixed window for simplicity.</li><li>Limiters usually run at the API gateway and keep counters in a fast shared store such as Redis.</li><li>Return <code>429 Too Many Requests</code> with retry guidance, and choose limits per user, API key, IP, or endpoint.</li></ul>
+
+
+<h3>30. API Gateway</h3>
+<ul><li>An API gateway is a single entry point that routes client requests to the appropriate backend service.</li><li>It centralizes authentication, rate limiting, logging, and request/response transformation instead of duplicating them in every service.</li><li>It can aggregate responses from several services, cache results, and apply circuit breaking for failing backends.</li><li>Keep business logic out of the gateway, and deploy it redundantly so it does not become the bottleneck or single point of failure.</li></ul>
+
+
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Reverse proxies</strong> simplify TLS, caching, and routing for backends but add a hop and another component that must be highly available.</li><li><strong>GraphQL</strong> eliminates over-fetching and multiple round trips but complicates caching and exposes the server to expensive nested queries.</li><li><strong>WebSockets</strong> enable instant server push but hold stateful connections that are harder to scale and reconnect.</li><li><strong>NoSQL</strong> offers flexible schemas and horizontal scale but often gives up joins and multi-record transactions.</li><li><strong>Indexes</strong> accelerate reads but slow writes and consume storage.</li><li><strong>Denormalization</strong> removes joins from reads but multiplies update work and risks inconsistent copies.</li><li><strong>Sharding</strong> unlocks write and storage scale but makes cross-shard queries, transactions, and rebalancing expensive.</li><li><strong>Microservices</strong> improve independent deployment and ownership but turn function calls into failure-prone network calls.</li><li><strong>Message queues</strong> decouple and buffer but introduce eventual completion, duplicates, and ordering concerns.</li><li><strong>API gateways</strong> centralize cross-cutting concerns but add latency and a shared dependency in front of every service.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What happens between typing a domain and receiving a response?</summary><div class="answer"><p>DNS resolves the name to an IP, the client opens a transport connection and performs a TLS handshake for HTTPS, then sends an HTTP request. A reverse proxy or load balancer may terminate TLS and route the request to an application server, which queries storage and returns a response. Each step adds latency and a possible failure point.</p></div></details>
+<details><summary>2. What is the difference between a forward and a reverse proxy?</summary><div class="answer"><p>A forward proxy represents clients to servers and hides client identity; a VPN or corporate filter is typical. A reverse proxy represents servers to clients and hides backend topology, handling TLS, caching, and routing. The direction of protection, not the software, defines the type.</p></div></details>
+<details><summary>3. Where does latency come from, and how do you reduce it?</summary><div class="answer"><p>Latency comes from propagation distance, serialization, server processing, and queuing. You cannot beat physics, so reduce round trips with caching and CDNs, place servers near users, batch or parallelize calls, and keep servers from saturating. Measure percentiles because averages hide the slow tail.</p></div></details>
+<details><summary>4. Why does HTTP being stateless matter for scaling?</summary><div class="answer"><p>If each request carries everything needed to process it, any server can handle it, so a load balancer can distribute freely and failed instances can be replaced. State moves to cookies, tokens, or a shared session store. That is what makes horizontal scaling and rolling deploys practical.</p></div></details>
+<details><summary>5. When would you choose GraphQL over REST?</summary><div class="answer"><p>Choose GraphQL when clients need varied or nested data shapes and REST would require many round trips or return excess fields, such as a mobile feed with user, post, and comment data. Stay with REST when simple resource CRUD, HTTP caching, and predictable per-endpoint limits matter more, since GraphQL adds resolver and query-cost complexity.</p></div></details>
+<details><summary>6. WebSockets, webhooks, or polling: how do you choose?</summary><div class="answer"><p>Use WebSockets when a client needs low-latency bidirectional updates, such as chat or live collaboration. Use webhooks when a third-party service must notify your server about an event, such as a completed payment. Use polling when updates are infrequent and simplicity matters more than immediacy.</p></div></details>
+<details><summary>7. How do you choose between SQL and NoSQL?</summary><div class="answer"><p>Choose SQL when the data is relational, transactions must be atomic, and queries need joins or aggregations — orders, payments, inventory. Choose NoSQL when the schema changes often, writes are high volume, or access is primarily by key — feeds, logs, catalogs. Most systems can use both for different datasets.</p></div></details>
+<details><summary>8. Why does an index speed up reads but slow writes?</summary><div class="answer"><p>An index is a separate sorted structure, usually a B-tree, that maps values to row locations and allows <code>O(log n)</code> lookup instead of a full scan. Every insert, update, or delete must also update every affected index and write additional pages, and the index consumes storage. Index the columns your queries actually filter and join on.</p></div></details>
+<details><summary>9. What is vertical partitioning, and when do you use it?</summary><div class="answer"><p>It splits a wide table into narrower tables by column, grouped by access pattern — profile, authentication, and billing data, for example. Queries read fewer bytes, and sensitive columns can be secured separately. Use it when a table has many columns that are rarely read together; the cost is additional joins when data from several partitions is needed.</p></div></details>
+<details><summary>10. Explain cache-aside and its main risk.</summary><div class="answer"><p>The application checks the cache, returns on a hit, and on a miss reads the database, writes the result to the cache, and returns it. The main risk is staleness: the database may change while the cache still holds an old value. TTLs, explicit invalidation, and careful handling of hot-key stampedes are the usual mitigations.</p></div></details>
+<details><summary>11. Why store media in blob storage instead of the database?</summary><div class="answer"><p>Images and videos are large immutable objects that would bloat database rows, backups, and memory. Blob storage provides cheap durable capacity, replication, and CDN integration. The database keeps only a URL or object key, and pre-signed URLs control direct upload and download.</p></div></details>
+<details><summary>12. When do you scale vertically versus horizontally, and where does a load balancer fit?</summary><div class="answer"><p>Scale vertically when the system is small or the database is hard to distribute; it is simple but has a ceiling and one failure domain. Scale horizontally for application servers when you need capacity and fault isolation; it requires stateless servers and a load balancer to distribute traffic and remove unhealthy instances. The database then needs its own read or write scaling plan.</p></div></details>
+<details><summary>13. Replication versus sharding — what is the difference?</summary><div class="answer"><p>Replication copies the same data to multiple nodes, scaling reads and providing failover. Sharding partitions different data across nodes, scaling storage and writes. They solve different problems and are often combined: each shard can have its own replicas.</p></div></details>
+<details><summary>14. How do CAP, queues, rate limiting, and an API gateway fit into a microservices design?</summary><div class="answer"><p>CAP forces a per-operation choice between consistency and availability when services cannot communicate. Queues decouple services and absorb bursts, but require idempotent consumers. Rate limiting protects services from overload, and an API gateway centralizes routing, authentication, and limits so each service does not reimplement them. Together they trade simplicity for resilience and independent ownership.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Confusing a forward proxy with a reverse proxy and describing the wrong side of the connection.</li><li>Saying CAP means choosing any two of three; partition tolerance is mandatory, so the real choice is CP versus AP per operation.</li><li>Reaching for sharding before caching, replication, or query optimization has been measured.</li><li>Calling application servers stateless while sessions or carts still live in local memory.</li><li>Assuming WebSocket connections scale like stateless HTTP requests.</li><li>Treating webhook delivery as exactly-once and processing duplicates without idempotency.</li><li>Indexing every column and then wondering why write throughput dropped.</li><li>Choosing microservices for a small team or early product before the coordination cost is justified.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="what-is-system-design.html"><span>← Previous</span><strong>What is System Design?</strong></a><a class="next" href="scalability.html"><span>Next →</span><strong>Scalability</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/top-30-system-design-concepts">AlgoMaster — Top 30 System Design Concepts</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design a Chat Application — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 04 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Product design</span></div>
+    <h1>Design a Chat Application</h1>
+    <p class="dek">It combines a stateful real-time transport with durable ordered history, so it exposes whether you understand connection routing, sequence numbers, and reconnect recovery.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">7 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Terminate WebSockets at a connection tier, persist every message with a per-conversation sequence before publishing it, and let reconnecting clients replay everything after their last seen sequence.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>One-to-one and group conversations, with group sizes from a few users to a few hundred members.</li><li>Send and receive text, media, and small files in real time, with delivered and read receipts.</li><li>Show conversation history with pagination, plus an inbox ordered by most recent activity.</li><li>Support multiple devices per user, with the same messages and read state synchronized across them.</li><li>Deliver push notifications to offline users and replay missed messages when they reconnect.</li><li>Support online presence, typing indicators, and message edit or delete within a limited window.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Deliver a message to an online recipient in well under a second in the same region, with a p99 target around a few hundred milliseconds.</li><li>Preserve per-conversation ordering for all participants, and never lose an acknowledged message.</li><li>Deliver at least once and deduplicate on the client, so a retry does not create a second visible message.</li><li>Support around 10M concurrent connections and tens of thousands of message writes per second.</li><li>Keep history durable and readable for years, while keeping the hot path independent of the history store's query load.</li><li>Survive a connection-server failure without a mass reconnect that takes down the rest of the fleet.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 50M daily active users sending 40 messages a day: about 2B messages per day, roughly 23k writes per second average and 3x that at peak.</li><li>At 10M concurrent connections and roughly 100k connections per tuned gateway, the connection tier needs on the order of 100 gateway nodes plus headroom.</li><li>A 300-byte average message plus indexes and replicas is roughly 1TB per day before compression, so history must be partitioned and aged out of hot storage.</li><li>Most conversations are small, but a 500-member group makes one send become 500 delivery decisions; fan-out cost is per recipient device, not per conversation.</li><li>Read receipts and typing events are far more frequent than messages, so they must be coalesced and must never be stored per event.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">User</span><span class="fields">user_id, handle, display_name, avatar_url, last_seen_at, status</span></div><div class="entity"><span class="name">Conversation</span><span class="fields">conversation_id, type (direct/group), title, created_by, created_at, last_message_seq, next_seq</span></div><div class="entity"><span class="name">Membership</span><span class="fields">conversation_id, user_id, role, joined_at, left_at, muted_until, last_read_seq, last_delivered_seq</span></div><div class="entity"><span class="name">Message</span><span class="fields">conversation_id, seq, message_id, sender_id, client_message_id, type, body, media_id, created_at, edited_at, deleted_at</span></div><div class="entity"><span class="name">DeviceSession</span><span class="fields">user_id, device_id, gateway_id, connection_id, last_heartbeat_at, app_version, push_token</span></div><div class="entity"><span class="name">Receipt</span><span class="fields">conversation_id, user_id, last_read_seq, last_delivered_seq, updated_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/v1/ws</code></td><td>Upgrade to a WebSocket, authenticate the device, register the connection, and start receiving live events.</td></tr><tr><td><code>POST</code></td><td><code>/v1/conversations/{id}/messages</code></td><td>Send a message with a client_message_id for idempotency; persists it, assigns a sequence, and triggers delivery.</td></tr><tr><td><code>GET</code></td><td><code>/v1/conversations/{id}/messages?before_seq=...&amp;limit=50</code></td><td>Page backwards through durable history using a sequence cursor.</td></tr><tr><td><code>POST</code></td><td><code>/v1/conversations/{id}/read</code></td><td>Advance the caller's read watermark to a sequence number and notify other members.</td></tr><tr><td><code>GET</code></td><td><code>/v1/conversations</code></td><td>Return the user's inbox: conversations ordered by last activity, with unread counts and last message preview.</td></tr><tr><td><code>POST</code></td><td><code>/v1/conversations</code></td><td>Create a direct or group conversation and add the initial membership rows.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Message storage</td><td>A wide-column store partitioned by conversation_id and clustered by seq descending, with the message body stored once per conversation.</td><td>History is always read by conversation in reverse order, so this makes a page a single partition range read and avoids copying one message into every member's mailbox.</td></tr><tr><td>Ordering</td><td>Assign a per-conversation sequence by atomically incrementing next_seq on the conversation row, store it with the message under a unique (conversation_id, seq) constraint, and sort by seq.</td><td>Timestamps and Snowflake ids can tie or skew across senders, while one durable sequence gives every participant the same total order and a simple cursor that survives a cache restart.</td></tr><tr><td>Idempotency</td><td>Store client_message_id in a dedupe table unique per conversation and return the existing message when the same id is retried.</td><td>A mobile client that times out will retry, and without a dedupe key the recipient sees the same message twice; the database constraint also resolves two concurrent retries.</td></tr><tr><td>Inbox and per-user state</td><td>A per-user conversation summary sharded by user_id containing last_message_seq, unread_count, and a short preview; read receipts are a per-conversation watermark, and presence is a heartbeat-backed TTL key.</td><td>The inbox query stays cheap and independent of history, a watermark avoids one receipt row per message, and presence is ephemeral enough not to need durable storage.</td></tr><tr><td>Connection routing</td><td>A Redis registry mapping user and device to gateway with a short TTL, plus pub/sub channels for delivery.</td><td>With many gateways the application must find the node holding a socket; TTL entries expire automatically when a gateway crashes.</td></tr><tr><td>Media</td><td>Upload directly to object storage with a pre-signed URL, send only the media id in the message, and serve through a CDN.</td><td>Large binaries should not flow through the chat service or sit in the message row, and a CDN keeps repeated downloads off the origin.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  D1[📱 Device A] --> GW[🛡️ WebSocket Gateway]
+  D2[📱 Device B] --> GW
+  GW --> CS[⚙️ Chat Service]
+  GW -->|register connection| REG[⚡ Connection Registry]
+  CS -->|lookup device| REG
+  CS --> SEQ[🔢 Sequencer]
+  CS --> MDB[(🗄️ Message Store)]
+  CS --> IB[(🗄️ Inbox Store)]
+  CS --> PS[📬 Pub/Sub]
+  PS --> GW
+  CS --> Q[📬 Push Queue]
+  Q --> PW[👷 Push Worker]
+  PW --> PN[🔔 APNs and FCM]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef svc fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef store fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  class D1,D2 client;
+  class GW edge;
+  class CS,SEQ,PW svc;
+  class REG,MDB,IB,PS,Q,PN store;</div><div class="diagram-caption">The gateway holds sockets and looks up where a user is connected; the chat service persists the message with a conversation sequence, publishes it for live delivery, and falls back to a push queue for offline devices.</div></div>
+        <ul><li>Use WebSockets because chat needs both directions frequently: sending, typing, and receipts travel client to server while messages and presence travel back. SSE would need a separate HTTP path for every send.</li><li>Split the connection tier from the application tier. The gateway authenticates, tracks heartbeats, and delivers bytes; the chat service owns membership, sequencing, persistence, and fan-out.</li><li>Save before send. Persist the message and its sequence, then publish to the gateway. Redis Pub/Sub does not retain messages, so a live publish alone can silently lose an update for a disconnected device.</li><li>On reconnect, the client sends its highest contiguous sequence per conversation and the server returns everything after it. Live and replayed messages are deduplicated by sequence on the client.</li><li>Route with a registry or per-user pub/sub. The registry approach sends only where needed but must be updated on every connect, disconnect, and gateway move; the pub/sub approach is simpler but broadcasts to all gateways.</li><li>Group fan-out is one write to the conversation store plus one delivery decision per member device. Resolve membership once per message and cache it briefly rather than querying per recipient.</li><li>Coalesce receipts and typing events: keep only the latest value per user and conversation, and send at most a few updates per second. Never persist typing events.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>WebSockets</td><td>Low per-message overhead and true bidirectional communication for sends, typing, receipts, and presence.</td><td>Stateful connections are harder to load balance, need heartbeats and reconnect logic, and a gateway failure affects every socket it holds.</td></tr><tr><td>Save then publish</td><td>A message is durable before anyone is told it exists, so a crash or a missed pub/sub event does not lose it.</td><td>Adds a write before delivery latency and doubles the path length compared with fire-and-forget broadcast.</td></tr><tr><td>Per-conversation sequence</td><td>A simple total order and a stable cursor that every participant and device can use for catch-up.</td><td>The sequence allocator is a per-conversation hot spot, and a failed allocation can stall sends for that conversation.</td></tr><tr><td>Store one copy per conversation</td><td>Storage does not multiply by group size, edits and deletes are a single row update, and history has one source of truth.</td><td>Delivery still fans out to every member, and a per-user mailbox view requires a separate inbox read model.</td></tr><tr><td>Per-device delivery</td><td>Every device stays in sync and a user can move between phone and laptop without losing messages.</td><td>Fan-out multiplies by device count, and read state must be reconciled across devices.</td></tr><tr><td>Watermark receipts</td><td>One small update per user per conversation instead of one row per message, which keeps receipt traffic manageable.</td><td>It cannot express per-message exceptions and relies on monotonically advancing sequence numbers.</td></tr><tr><td>Presence as best effort</td><td>Cheap, eventually consistent indicators that do not need a durable record or a transaction.</td><td>A user may briefly appear online after a crash until the TTL expires, and presence can flap on unreliable networks.</td></tr></tbody></table></div>
+        <ul><li>Batch message inserts and sequence allocation for a busy conversation instead of one round trip per message.</li><li>Cache recent conversation history in the gateway or chat service so scrolling back a few pages does not hit the history store every time.</li><li>Use a separate read model for the inbox, updated asynchronously, so the inbox query never scans message partitions.</li><li>Compress and batch WebSocket frames for typing and presence, and avoid sending presence updates to users who are not viewing the conversation.</li><li>Back off reconnects with full jitter and spread clients across gateways, so one gateway failure does not create a synchronized reconnect storm.</li><li>Keep a small per-device outbound buffer and drop presence or typing updates before dropping message events when the client is slow.</li><li>Archive old messages to cheaper storage and keep a recent window hot; history pagination beyond the hot window can tolerate higher latency.</li><li>Use pre-signed uploads and CDN delivery for media, and send a placeholder message before the upload completes so the UI feels immediate.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>How do you guarantee message ordering?</strong> Assign one monotonically increasing sequence per conversation on the write path and have every client and device sort by it.</div><div class="followup"><strong>What happens if a client disconnects and misses messages?</strong> On reconnect it sends its last contiguous sequence per conversation, and the server replays everything newer from durable storage.</div><div class="followup"><strong>How do multiple devices stay in sync?</strong> Every device gets its own connection and delivery, and read state advances by sequence watermark so a read on one device updates the others.</div><div class="followup"><strong>How does a group message reach 500 members?</strong> Write the message once, resolve membership once, then publish one delivery event per online member device and one push per offline user.</div><div class="followup"><strong>Is presence strongly consistent?</strong> No, it is best effort: a heartbeat refreshes a short TTL, so presence can be stale for a few seconds after a crash.</div><div class="followup"><strong>How do you prevent duplicate messages on retry?</strong> Require a client_message_id per send, enforce uniqueness per conversation, and return the original message when the same id arrives again.</div><div class="followup"><strong>What if a gateway with 50k connections dies?</strong> Clients reconnect with exponential backoff plus jitter to other gateways, and catch-up queries are bounded by sequence so the history store is not stampeded.</div><div class="followup"><strong>How are offline users notified?</strong> The chat service enqueues a push job after persisting the message, and a worker sends through APNs or FCM using the device token.</div><div class="followup"><strong>Why not use Kafka as the message store?</strong> Kafka is a delivery log, not a low-latency random-access history store; it is useful for fan-out and events, while message history needs indexed reads by conversation and sequence.</div><div class="followup"><strong>How do read receipts scale?</strong> Store only a per-user, per-conversation watermark, coalesce rapid updates, and broadcast the latest value rather than one event per message.</div><div class="followup"><strong>How would end-to-end encryption change the design?</strong> The server stores and routes ciphertext and cannot read message bodies, which breaks server-side search and requires per-device key management and encrypted group keys.</div><div class="followup"><strong>How do you paginate history?</strong> Use before_seq with a fixed limit and return a next cursor, so new messages do not shift the page and repeated reads are stable.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Publishing a message over pub/sub before persisting it, so a subscriber crash or a disconnected recipient loses the message permanently.</li><li>Using wall-clock timestamps for ordering, which allows ties and clock skew to show messages out of order to different users.</li><li>Keeping one global sequence for all conversations, which creates a hot allocator and unnecessary contention.</li><li>Forgetting reconnect catch-up, so a user with a brief network drop silently misses messages even though the socket reconnects.</li><li>Fanning out group messages by copying the full body into every member's inbox, which multiplies storage and makes edits and deletes inconsistent.</li><li>Treating presence or typing indicators as durable messages, which adds write load for data that is useful for only a few seconds.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="design-news-feed.html"><span>← Previous</span><strong>Design a News Feed</strong></a><a class="next" href="design-notification-service.html"><span>Next →</span><strong>Design a Notification Service</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cache Eviction Policies — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 26 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Cache Eviction Policies</h1>
+    <p class="dek">Caching · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/cache-eviction-policies">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why cache eviction is necessary</a>
+<a href="#s2">Eviction versus expiration</a>
+<a href="#s3">What makes a good eviction policy</a>
+<a href="#s4">Least Recently Used (LRU)</a>
+<a href="#s5">LRU and one-time scans</a>
+<a href="#s6">Least Frequently Used (LFU)</a>
+<a href="#s7">LRU versus LFU</a>
+<a href="#s8">First In, First Out (FIFO)</a>
+<a href="#s9">Random eviction</a>
+<a href="#s10">Most Recently Used (MRU)</a>
+<a href="#s11">TTL-based expiration</a>
+<a href="#s12">Evicting only entries with TTLs</a>
+<a href="#s13">Object size also matters</a>
+<a href="#s14">Cache pollution, admission control, and measuring the policy</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>An eviction policy decides which valid entry leaves when the cache is full — LRU by default, LFU for stable hot keys, FIFO or random for low overhead, with TTL handling freshness and admission control protecting against pollution.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Eviction policy</dt><dd>The rule that chooses which existing entry to remove when the cache needs memory for new data.</dd></div><div class="term"><dt>Expiration</dt><dd>Removing an entry because its TTL has ended and it is no longer considered valid.</dd></div><div class="term"><dt>Working set</dt><dd>The subset of data the application is likely to request again soon, which a good policy tries to keep.</dd></div><div class="term"><dt>LRU (Least Recently Used)</dt><dd>Evicts the entry that has gone longest without an access, assuming recent data will be reused soon.</dd></div><div class="term"><dt>LFU (Least Frequently Used)</dt><dd>Evicts the entry with the fewest accesses, assuming repeatedly used data is more valuable.</dd></div><div class="term"><dt>FIFO (First In, First Out)</dt><dd>Evicts the oldest inserted entry regardless of how often it was read.</dd></div><div class="term"><dt>Random eviction</dt><dd>Removes an arbitrary entry, requiring almost no access tracking.</dd></div><div class="term"><dt>MRU (Most Recently Used)</dt><dd>Evicts the entry accessed most recently, useful only for specific looping access patterns.</dd></div><div class="term"><dt>Cache pollution</dt><dd>Low-value data entering the cache and pushing out entries that were actually being reused.</dd></div><div class="term"><dt>Admission control</dt><dd>Deciding whether a new object should enter the cache at all, separate from deciding what to evict.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why cache eviction is necessary</h2>
+<p class="lede">Caches have limited memory. Once full, something must give when a new object arrives.</p>
+<ul><li>As requests arrive, more objects are added until the cache reaches its memory limit.</li><li>At that point there are two options: reject the new object, or remove an existing entry to make room.</li><li>Most caching systems choose to remove an existing entry.</li><li>The real question is <strong>which</strong> entry to remove: ideally one unlikely to be needed again.</li><li>A good policy keeps the data users are most likely to request next and discards the rest.</li><li>The choice shows up directly in latency and database load: evicting useful entries lowers the hit rate.</li><li>Keeping the wrong entries fills memory with data nobody asks for and still starves useful keys.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Eviction versus expiration</h2>
+<p class="lede">These are often conflated, but they answer different questions.</p>
+<ul><li><strong>Expiration</strong> happens because an entry is no longer valid — for example, its five-minute TTL has ended.</li><li><strong>Eviction</strong> happens because memory is needed, even though the entry may still be perfectly correct.</li><li>Expiration is triggered by time; eviction is triggered by memory pressure.</li><li>Expiration's main concern is freshness; eviction's main concern is memory management.</li><li>An expired entry may be stale; an evicted entry may still be valid.</li><li>Real caches use both: entries expire by TTL, and valid entries are evicted when the cache fills.</li><li>Confusing the two leads to the false belief that TTLs alone solve memory pressure.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Expiration</th><th>Eviction</th></tr></thead><tbody><tr><td>Why removed</td><td>It is no longer valid</td><td>Memory is needed for something else</td></tr>
+<tr><td>Triggered by</td><td>Time, when the TTL ends</td><td>Memory pressure</td></tr>
+<tr><td>Main concern</td><td>Freshness</td><td>Memory management</td></tr>
+<tr><td>Still correct?</td><td>No, it may be stale</td><td>Yes, it may be perfectly valid</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What makes a good eviction policy</h2>
+<ul><li>The goal is to maximize the usefulness of limited memory, not to be theoretically elegant.</li><li>If one value is requested thousands of times a minute and another was requested once hours ago, the second is the better victim.</li><li>A policy is a prediction about which entries belong in the <strong>working set</strong> — the data likely to be requested soon.</li><li>Different policies use different signals: recency (LRU), frequency (LFU), insertion order (FIFO), or nothing (random).</li><li>Each signal costs metadata and processing, so the policy must earn its overhead in hit rate.</li><li>No policy predicts perfectly; the right choice depends on whether popularity is stable, whether scans occur, and how much memory is available.</li><li>Object size is a separate dimension: evicting one large entry may free far more space than evicting many small ones.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Least Recently Used (LRU)</h2>
+<p class="lede">LRU evicts the entry that has not been accessed for the longest time.</p>
+<ul><li>The assumption is temporal locality: data accessed recently is likely to be accessed again soon.</li><li>With a cache holding A, B, and C, accessing A then C makes B the least recently used entry; inserting D evicts B.</li><li>A classic implementation pairs a hash map for O(1) lookup with a doubly linked list for recency order.</li><li>On access, the entry moves to the front; on eviction, the tail is removed — both O(1).</li><li>Large production caches often approximate this to save memory; Redis samples a handful of keys and evicts the least recent among them.</li><li>LRU is intuitive and a strong general-purpose default for read-heavy systems.</li><li>Its weakness is that it considers only recency, never how often an entry was used before.</li></ul>
+
+<div class="flow"><span class="flow-step">Access A</span><span class="flow-arrow">→</span><span class="flow-step">Access C</span><span class="flow-arrow">→</span><span class="flow-step">Insert D</span><span class="flow-arrow">→</span><span class="flow-step">B is least recent</span><span class="flow-arrow">→</span><span class="flow-step">Evict B</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>LRU and one-time scans</h2>
+<ul><li>A background job that scans millions of unique records once is the classic LRU failure case.</li><li>Every scanned record enters the cache and becomes more recent than the existing entries.</li><li>A large enough scan pushes genuinely useful data out of the cache.</li><li>After the scan, most newly cached records are never requested again, so the cache is full of dead entries.</li><li>This is <strong>cache pollution</strong>: one-time accesses treated as important merely because they happened recently.</li><li>Scan-resistant LRU variants make a new entry prove itself with a second access before treating it as hot.</li><li>This weakness is a main reason LFU and frequency-based admission exist.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Least Frequently Used (LFU)</h2>
+<p class="lede">LFU evicts the entry with the fewest accesses rather than the oldest access.</p>
+<ul><li>If A has 100 requests, B has 50, and C has 2, LFU evicts C first.</li><li>The assumption is that frequently accessed values are more valuable and should survive.</li><li>When counts tie, implementations usually break the tie by removing the less recently used entry.</li><li>LFU handles stable popularity well: a small set of consistently hot products stays cached.</li><li>A single scan is less damaging because scanned entries have low counts, so hot data survives.</li><li>Its weakness is stale popularity: an item that was briefly viral can keep a huge count long after anyone cares.</li><li>Real implementations add aging or decay; Redis's LFU mode uses a small logarithmic counter that decays when a key is not accessed.</li><li>LFU needs more metadata per entry because it must track access frequency.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>LRU versus LFU</h2>
+<ul><li>LRU prioritizes recent activity; LFU prioritizes repeated activity.</li><li>An item requested 1,000 times yesterday but untouched today favors LFU; an item requested 10 times in the last minute favors LRU.</li><li>LRU adapts quickly when popularity changes; LFU adapts slowly unless counts decay.</li><li>One-time scans can push hot data out of LRU, while scanned entries have low counts and leave LFU's hot data intact.</li><li>LRU needs recency ordering; LFU needs an access count, often with decay.</li><li>If popularity shifts fast, recency is more useful; if the same small set stays hot for long periods, frequency wins.</li><li>Modern caches blend both: Caffeine's W-TinyLFU uses a small LRU window for new entries plus a frequency estimate for admission.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>LRU</th><th>LFU</th></tr></thead><tbody><tr><td>Signal</td><td>Time since last access</td><td>Number of accesses</td></tr>
+<tr><td>Adapts to changing popularity</td><td>Quickly</td><td>Slowly, unless counts decay</td></tr>
+<tr><td>One-time scans</td><td>Can push out hot data</td><td>Scanned entries have low counts, so hot data survives</td></tr>
+<tr><td>Metadata per entry</td><td>Recency order</td><td>Access count, often with decay</td></tr>
+<tr><td>Best when</td><td>Recent data is reused</td><td>A stable set of keys stays hot</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>First In, First Out (FIFO)</h2>
+<ul><li>FIFO evicts the oldest inserted entry, regardless of how it was used.</li><li>If A enters first, then B, then C, inserting D when full removes A.</li><li>A read does not change anything, so a FIFO cache can be a plain queue.</li><li>Its advantage is simplicity and low metadata: far less tracking than LRU or LFU.</li><li>Its cost is that a heavily used entry can be evicted simply because it is old.</li><li>It works when insertion order roughly matches usefulness, which is uncommon for general web traffic.</li><li>It is a reasonable choice when the tracking budget is very low and the workload is not strongly skewed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Random eviction</h2>
+<ul><li>When the cache is full, pick an entry at random and remove it.</li><li>It requires almost no access tracking: no recency list and no frequency counter.</li><li>That lowers implementation overhead and memory cost per entry.</li><li>Under some workloads the hit-rate difference from sophisticated policies is smaller than expected.</li><li>The obvious risk is evicting a very hot entry purely by chance.</li><li>It is therefore used when simplicity and low overhead matter more than maximizing hit ratio.</li><li>It is also a useful baseline: if LRU beats random only slightly on your workload, the bookkeeping may not be worth it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Most Recently Used (MRU)</h2>
+<ul><li>MRU evicts the entry that was used most recently — the opposite of LRU.</li><li>That sounds backwards because most workloads want to keep recently used data.</li><li>It fits narrow cases where the most recent item is least likely to be needed again.</li><li>The classic example is a job that loops over the same large set of records in order.</li><li>For normal web traffic, recently used data is exactly what should stay cached, so MRU is a poor default.</li><li>Knowing it is useful mainly to recognize when a non-standard access pattern might justify it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>TTL-based expiration</h2>
+<p class="lede">Caches can also remove entries because their time-to-live has elapsed.</p>
+<ul><li>Every object might expire ten minutes after being cached, after which it becomes eligible for removal.</li><li>Expired entries are no longer useful, so removing them improves freshness as well as freeing memory.</li><li>Removal can happen in a background cleanup process or lazily when someone next reads the key.</li><li>TTL alone does not solve memory pressure: if the cache fills after two minutes, no entry has reached its ten-minute TTL.</li><li>So TTL is usually combined with an eviction policy that handles the still-valid entries.</li><li>A synchronized TTL is a trap: many keys cached together expire together, and the database receives all their misses at once.</li><li>Adding random jitter spreads expirations into a steadier stream of refreshes the database can absorb.</li></ul>
+
+
+<pre class="code"><code>ttl = base_ttl + random(0, jitter)
+# spreads a synchronized expiry wave
+# into a steady refresh stream</code></pre>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Evicting only entries with TTLs</h2>
+<p class="lede">Some systems let eviction target only keys that already have an expiration time.</p>
+<ul><li>This is useful when one cache holds different categories of data, some temporary and some persistent.</li><li>When memory tightens, only temporary entries are evicted and persistent application state is left untouched.</li><li>It gives more control over which data is allowed to disappear, but introduces risk.</li><li>If too much non-evictable data fills the cache, there may eventually be no safe entry left to remove and new writes fail.</li><li>Redis exposes this through <code>maxmemory-policy</code>: <code>allkeys-*</code> policies may evict any key, while <code>volatile-*</code> policies only evict keys with a TTL.</li><li>With any <code>volatile-*</code> policy, if no key has a TTL left, Redis behaves like <code>noeviction</code> and rejects writes that need more memory.</li><li>The eviction policy therefore has to match how the cache is actually used, not just how it is configured.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Policy</th><th>Keys eligible</th><th>How it picks</th></tr></thead><tbody><tr><td>allkeys-lru</td><td>Any key</td><td>Least recently used</td></tr>
+<tr><td>allkeys-lfu</td><td>Any key</td><td>Least frequently used</td></tr>
+<tr><td>allkeys-random</td><td>Any key</td><td>Random</td></tr>
+<tr><td>volatile-lru</td><td>Only keys with a TTL</td><td>Least recently used</td></tr>
+<tr><td>volatile-lfu</td><td>Only keys with a TTL</td><td>Least frequently used</td></tr>
+<tr><td>volatile-random</td><td>Only keys with a TTL</td><td>Random</td></tr>
+<tr><td>volatile-ttl</td><td>Only keys with a TTL</td><td>Shortest remaining TTL</td></tr>
+<tr><td>noeviction</td><td>None</td><td>Writes fail when memory is full</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Object size also matters</h2>
+<ul><li>Frequency is not the only measure of value; the memory an entry occupies matters too.</li><li>Evicting one 100 MB object may free enough room for thousands of small entries.</li><li>A standard LRU or LFU policy treats both as a single key, ignoring the size difference.</li><li>A large object may be popular enough to keep, or may consume huge memory for very little benefit.</li><li>Some advanced caches weigh both object size and reuse when deciding what to keep.</li><li>Limit the cache by memory, not by item count: a cache capped at 10,000 items can still exhaust memory if a few are huge.</li><li>Watch oversized values; compressing, splitting, or simply not caching them is often the cheapest fix.</li></ul>
+
+
+<div class="note">A byte-bounded cache with size-aware accounting avoids the surprise of an item-count limit that still runs out of memory.</div>
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Cache pollution, admission control, and measuring the policy</h2>
+<ul><li><strong>Cache pollution</strong> is low-value data pushing useful data out, caused by scans or floods of unique requests.</li><li>Thousands of slightly different search queries can each be cached once and never requested again, lowering the hit ratio.</li><li><strong>Admission control</strong> separates two decisions: should this object enter the cache, and which existing object should leave?</li><li>Simple admission skips caching known one-time work such as report exports, backfills, migrations, and full table scans.</li><li>TinyLFU admits a new entry only if its estimated frequency is higher than that of the entry it would replace.</li><li>Measure the policy on the real workload: hit ratio per key pattern, eviction rate, memory usage, backend request rate, latency, and expired entries.</li><li>Alert when the eviction rate spikes, the hit ratio drops on a critical pattern, memory stays pinned, or backend load rises after evictions.</li><li>Sometimes the policy is not the problem: the cache may be undersized, the TTL too long, or the application caching too much low-value data.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Metric</th><th>What it tells you</th></tr></thead><tbody><tr><td>Hit ratio, per key pattern or route</td><td>Whether the paths that matter benefit from the cache</td></tr>
+<tr><td>Eviction rate</td><td>Whether memory pressure is active</td></tr>
+<tr><td>Memory usage</td><td>How close the cache is to its limit</td></tr>
+<tr><td>Backend request rate</td><td>How much load the cache is letting through</td></tr>
+<tr><td>Latency</td><td>Whether evictions are reaching users</td></tr>
+<tr><td>Expired entries</td><td>Whether TTLs remove data faster than it is reused</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Measure hit ratio</span><span class="flow-arrow">→</span><span class="flow-step">Check eviction rate</span><span class="flow-arrow">→</span><span class="flow-step">Inspect memory and sizes</span><span class="flow-arrow">→</span><span class="flow-step">Check backend load</span><span class="flow-arrow">→</span><span class="flow-step">Change one setting</span><span class="flow-arrow">→</span><span class="flow-step">Re-measure</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>LRU</strong> adapts quickly to changing popularity and is a strong default, but one-time scans can flush the working set.</li><li><strong>LFU</strong> protects stable hot keys from scans, but stale popularity lingers unless counters decay.</li><li><strong>FIFO</strong> needs little metadata and is easy to implement, but evicts heavily used entries just because they are old.</li><li><strong>Random eviction</strong> is cheapest to track and a useful baseline, but can discard a hot entry by chance.</li><li><strong>MRU</strong> suits looping scans over a large set, but is wrong for normal web workloads where recent data is reused.</li><li><strong>TTL</strong> improves freshness automatically, but does not handle memory pressure and can create synchronized expiry waves.</li><li><strong>Volatile-only eviction</strong> protects persistent keys, but can leave no evictable entry and cause writes to fail.</li><li><strong>Size-aware eviction</strong> frees memory efficiently, but adds accounting overhead and can evict a popular large object.</li><li><strong>Admission control</strong> keeps low-value data out, but rejects new entries that might have become hot.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why do caches need an eviction policy?</summary><div class="answer"><p>Cache memory is finite. Once full, a new object cannot be stored without removing something or rejecting the write. The policy decides which existing entry is least valuable to keep, directly affecting hit ratio, latency, and database load.</p></div></details>
+<details><summary>2. Eviction vs expiration — what is the difference?</summary><div class="answer"><p>Expiration removes an entry because its TTL ended and it is no longer valid; it is about freshness. Eviction removes a still-valid entry because memory is needed; it is about memory management. Caches normally use both, since TTLs alone cannot handle a cache that fills before entries expire.</p></div></details>
+<details><summary>3. How does LRU work?</summary><div class="answer"><p>It evicts the entry that has gone longest without being accessed, on the assumption that recently used data will be reused soon. A classic implementation uses a hash map for lookup plus a doubly linked list for recency, giving O(1) access and eviction. Production systems often approximate it by sampling a few keys rather than maintaining an exact list.</p></div></details>
+<details><summary>4. What is LRU's main weakness?</summary><div class="answer"><p>It ignores frequency, so a large one-time scan can make every scanned record look recently used and push out genuinely hot data. This is cache pollution. Scan-resistant variants require a second access before treating a new entry as hot, and LFU or frequency-based admission can also protect the working set.</p></div></details>
+<details><summary>5. How does LFU differ from LRU?</summary><div class="answer"><p>LRU uses time since last access; LFU uses the number of accesses. LFU protects a stable set of hot keys and resists scans, but adapts slowly when popularity changes, so an item that was briefly viral can stay cached too long. Implementations add aging or decay, and often break ties by recency.</p></div></details>
+<details><summary>6. When would you choose FIFO?</summary><div class="answer"><p>When simplicity and low metadata matter and insertion order is a reasonable proxy for usefulness. FIFO needs no recency list or frequency counters, so it is cheap. The cost is that a frequently used entry can be evicted simply because it is old, which is usually a poor fit for general web traffic.</p></div></details>
+<details><summary>7. Why would anyone use random eviction?</summary><div class="answer"><p>It requires almost no tracking, which reduces overhead and memory per entry. On some workloads its hit rate is close enough to LRU or LFU that the extra bookkeeping is not justified. It is also a good baseline for benchmarking: if a smarter policy barely beats random, it may not be worth the complexity.</p></div></details>
+<details><summary>8. When is MRU appropriate?</summary><div class="answer"><p>Only when the most recently used item is the least likely to be needed again, such as a job that loops over the same large set of records in order. For normal web workloads, recently used data is exactly what should remain cached, so MRU is a poor default.</p></div></details>
+<details><summary>9. Does TTL replace an eviction policy?</summary><div class="answer"><p>No. TTL handles freshness by removing entries after a fixed time, but if the cache fills before those TTLs expire, it still needs a policy to choose a valid victim. Most systems combine expiration with LRU, LFU, or another policy. TTLs also need jitter so many keys do not expire simultaneously and stampede the database.</p></div></details>
+<details><summary>10. What does volatile-lru mean in Redis?</summary><div class="answer"><p>It evicts the least recently used key, but only among keys that have a TTL set. Persistent keys without a TTL are never evicted. If memory is full and no volatile key remains, Redis behaves like <code>noeviction</code> and rejects writes that need more memory, so the policy must match how the cache is used.</p></div></details>
+<details><summary>11. Why does object size matter for eviction?</summary><div class="answer"><p>Evicting one large object may free as much memory as evicting thousands of small ones, but LRU and LFU count both as a single entry. A cache limited by item count can still run out of memory because of a few huge values. Limit by bytes, monitor item sizes, and consider compressing, splitting, or not caching oversized objects.</p></div></details>
+<details><summary>12. What is cache pollution, and how do you prevent it?</summary><div class="answer"><p>It is low-value data displacing useful data — for example, a full table scan or thousands of unique search queries filling the cache. Prevent it with admission control, which decides whether a new object should enter at all, plus scan-resistant policies or frequency-based admission such as TinyLFU. Skipping cache writes for known one-time jobs is the simplest defense.</p></div></details>
+<details><summary>13. How do you measure whether an eviction policy is working?</summary><div class="answer"><p>Track hit ratio per key pattern or route, eviction rate, memory usage, backend request rate, latency, and expired entries. A high aggregate hit ratio can hide a critical route that always misses. If evictions spike and backend load rises, the cache may be undersized or holding too much low-value data rather than using the wrong algorithm.</p></div></details>
+<details><summary>14. Which eviction policy should you start with?</summary><div class="answer"><p>LRU or an LRU-like policy is a reasonable default when recently accessed data tends to be reused. If a stable set of keys stays hot, LFU can do better; for very low tracking budgets, FIFO or random; for strict freshness, TTL combined with LRU or LFU. Measure on your own workload rather than choosing by reputation.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating TTL as a complete eviction policy and ignoring what happens when the cache fills before entries expire.</li><li>Using pure LRU behind a periodic full scan and letting the scan flush the working set.</li><li>Using pure LFU without decay, so a briefly viral key stays cached long after it stops being requested.</li><li>Capping the cache by item count while storing a few very large objects.</li><li>Configuring volatile-* eviction while most keys have no TTL, then being surprised when writes fail.</li><li>Adding the same TTL to a large batch of keys and creating a synchronized expiry stampede.</li><li>Choosing a policy by reputation without measuring hit ratio and eviction rate on the real access pattern.</li><li>Blaming the eviction algorithm when the cache is simply undersized or is caching low-value data.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="caching-strategies.html"><span>← Previous</span><strong>Caching Strategies</strong></a><a class="next" href="content-delivery-network-cdn.html"><span>Next →</span><strong>Content Delivery Network (CDN)</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/cache-eviction-policies">AlgoMaster — Cache Eviction Policies</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

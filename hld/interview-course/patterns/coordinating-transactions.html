@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coordinating Transactions Across Services — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 12 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Coordinating Transactions Across Services</h1>
+    <p class="dek">Interview Patterns · Keeping Data Correct</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/distributed-transactions">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Why local ACID stops at the service boundary</a>
+<a href="#s3">Two-phase commit</a>
+<a href="#s4">The saga pattern</a>
+<a href="#s5">Orchestration versus choreography</a>
+<a href="#s6">Designing compensations</a>
+<a href="#s7">Isolation anomalies in sagas</a>
+<a href="#s8">The transactional outbox</a>
+<a href="#s9">Idempotent consumers and message guarantees</a>
+<a href="#s10">Reservations and try-confirm-cancel</a>
+<a href="#s11">Stuck sagas and recovery</a>
+<a href="#s12">Choosing an approach</a>
+<a href="#s13">What to monitor</a>
+<a href="#s14">Interview walkthrough</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>When one business operation spans several services, you cannot get a single ACID transaction; you choose between <strong>two-phase commit</strong> for short, tightly coupled writes and <strong>sagas</strong> for long-running work with compensations.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Distributed transaction</dt><dd>A unit of work that must commit or abort atomically across multiple services or databases.</dd></div><div class="term"><dt>Two-phase commit (2PC)</dt><dd>A coordinator asks every participant to prepare, then commits or aborts only if all prepared.</dd></div><div class="term"><dt>Saga</dt><dd>A sequence of local transactions where each step has a compensating action that undoes it if a later step fails.</dd></div><div class="term"><dt>Compensating transaction</dt><dd>A business-level undo for a completed step, such as refunding a charge or releasing a reservation.</dd></div><div class="term"><dt>Orchestration</dt><dd>A central coordinator explicitly drives each saga step and decides what to do on failure.</dd></div><div class="term"><dt>Choreography</dt><dd>Services react to each other's events with no central controller, which is simpler to add to but harder to trace.</dd></div><div class="term"><dt>Semantic lock</dt><dd>A flag or pending state that marks work in progress so other transactions do not act on intermediate data.</dd></div><div class="term"><dt>Transactional outbox</dt><dd>Persisting the event in the same local transaction as the state change, then publishing it reliably from the outbox.</dd></div><div class="term"><dt>Try-confirm-cancel (TCC)</dt><dd>A reservation protocol: try reserves resources, confirm commits, cancel releases the reservation.</dd></div><div class="term"><dt>Idempotent consumer</dt><dd>A consumer that can safely process the same message twice, which sagas and retries depend on.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">Placing an order can involve creating the order, charging the customer, and reserving inventory. Each step may live in a different service with its own database.</p>
+<ul><li>If the order is created and the charge succeeds but inventory fails, the system is left in a state no business rule intended.</li><li>A local transaction cannot span services, so there is no single commit that makes all three changes at once.</li><li>Retrying the failed step may help, but it may also duplicate a charge or double-reserve stock.</li><li>The failure is usually partial and temporary, which is the worst case: some data is correct and some is not.</li><li>Users and support staff see the inconsistency as a stuck order, a charge with no shipment, or inventory that never frees up.</li><li>The design must state how each intermediate state is detected, repaired, and prevented from being acted on.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why local ACID stops at the service boundary</h2>
+<ul><li><strong>Atomicity</strong> and <strong>isolation</strong> are enforced by one database's transaction manager; two databases cannot share that guarantee.</li><li>A service boundary usually means a separate schema, connection, and failure domain, so commits happen at different times.</li><li>Holding locks across a network call keeps rows locked for the duration of a remote request, which destroys throughput.</li><li>Services also call external systems — payment providers, carriers — that offer no prepare phase at all.</li><li>The CAP trade-off applies: during a partition you must choose consistency or availability for the affected operation.</li><li>The practical answer is to relax atomicity into a business process with explicit intermediate states and recovery.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Property</th><th>Single database</th><th>Across services</th></tr></thead><tbody><tr><td>Atomicity</td><td>Native commit or rollback</td><td>Must be simulated with 2PC or compensation</td></tr>
+<tr><td>Isolation</td><td>Locking or MVCC</td><td>Partial; intermediate states are visible</td></tr>
+<tr><td>Duration</td><td>Milliseconds</td><td>Seconds to days</td></tr>
+<tr><td>Failure handling</td><td>Rollback</td><td>Retry, compensate, or reconcile manually</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Two-phase commit</h2>
+<p class="lede">2PC uses a coordinator and a prepare phase to make all participants commit or abort together.</p>
+<ul><li>Phase one: the coordinator asks every participant to <strong>prepare</strong>, which locks resources and promises it can commit.</li><li>Phase two: if all participants vote yes, the coordinator sends <strong>commit</strong>; otherwise it sends abort everywhere.</li><li>It provides atomicity across databases but not partition tolerance, so it is unsuitable for long or cross-region work.</li><li>Participants hold locks between phases, so throughput falls and a slow participant stalls the whole transaction.</li><li>If the coordinator dies after prepare, participants stay blocked until it recovers, which is the classic 2PC blocking problem.</li><li>It fits short, internal, tightly coupled operations such as moving funds between two databases in one data center.</li><li>A common variant, <strong>3PC</strong>, adds a pre-commit phase to reduce blocking but still assumes bounded delays and is rarely used in practice.</li></ul>
+
+<div class="flow"><span class="flow-step">Coordinator begins</span><span class="flow-arrow">→</span><span class="flow-step">Prepare to all participants</span><span class="flow-arrow">→</span><span class="flow-step">All vote yes?</span><span class="flow-arrow">→</span><span class="flow-step">Commit to all</span><span class="flow-arrow">→</span><span class="flow-step">Participants acknowledge</span></div>
+<div class="note">2PC is a protocol for strong atomicity, not a general-purpose integration pattern. Use it when the transaction is short and all participants are under your control.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The saga pattern</h2>
+<p class="lede">A saga splits the business operation into local transactions, each publishing an event or triggering the next step. If a step fails, previously completed steps are undone with compensations.</p>
+<ul><li>Each step is a real local transaction in one service, so no distributed locks are held.</li><li>A saga is <strong>eventually consistent</strong>: between steps, the system is in an intermediate state that other readers can see.</li><li>On failure, the saga runs compensating actions in reverse order for the steps that already completed.</li><li>Compensations are business operations, not rollbacks: a refund, a cancellation, a released hold.</li><li>Sagas are a good fit for long-running workflows such as orders, travel booking, and onboarding.</li><li>They trade atomicity for availability and progress, which is why the intermediate states must be designed explicitly.</li><li>Every step and compensation must be <strong>idempotent</strong>, because retries and duplicate messages are guaranteed.</li></ul>
+
+<div class="flow"><span class="flow-step">Create order</span><span class="flow-arrow">→</span><span class="flow-step">Reserve inventory</span><span class="flow-arrow">→</span><span class="flow-step">Charge payment</span><span class="flow-arrow">→</span><span class="flow-step">Arrange shipment</span><span class="flow-arrow">→</span><span class="flow-step">Confirm order</span></div>
+<pre class="code"><code>saga = [
+  (create_order,   cancel_order),
+  (reserve_stock,  release_stock),
+  (charge_card,    refund_card),
+  (book_shipment,  cancel_shipment),
+]
+completed = []
+for step, compensate in saga:
+    try:
+        step()
+        completed.append(compensate)
+    except Retryable as e:
+        retry_with_backoff(step)
+    except Permanent as e:
+        for undo in reversed(completed):
+            undo()          # must itself be idempotent
+        raise SagaFailed(e)</code></pre>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Orchestration versus choreography</h2>
+<ul><li><strong>Orchestration</strong> puts the sequence and failure logic in one coordinator, which is easy to read, test, and monitor.</li><li>The orchestrator becomes a central dependency and can accumulate business logic that belongs in the services.</li><li><strong>Choreography</strong> lets each service react to events, which decouples teams and avoids a central bottleneck.</li><li>Choreography makes the end-to-end flow implicit; no single place shows the whole saga, which complicates debugging and changes.</li><li>Use orchestration for complex flows with many steps, timeouts, and compensations; use choreography for simple, loosely coupled reactions.</li><li>Hybrids are common: an orchestrator per bounded context, with events between contexts.</li><li>Whichever you choose, persist saga state so a crash does not lose track of where the workflow stopped.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Orchestration</th><th>Choreography</th></tr></thead><tbody><tr><td>Control</td><td>Central coordinator</td><td>Distributed via events</td></tr>
+<tr><td>Visibility</td><td>One place shows the flow</td><td>Emerges from event chains</td></tr>
+<tr><td>Coupling</td><td>Coordinator knows services</td><td>Services know events</td></tr>
+<tr><td>Failure logic</td><td>Explicit and testable</td><td>Spread across consumers</td></tr>
+<tr><td>Best for</td><td>Complex multi-step workflows</td><td>Simple, decoupled reactions</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Designing compensations</h2>
+<ul><li>A compensation reverses the <strong>business effect</strong>, not the database row; it may be a refund, a release, or a cancellation notice.</li><li>Not every action is reversible: an email sent or a package shipped cannot be unsent, so design those steps to happen last.</li><li>Order steps so the least reversible actions come after all fallible checks have passed.</li><li>Compensations must be <strong>idempotent</strong>, because a failed compensation is retried just like a failed step.</li><li>Some compensations are only possible within a window; a refund after settlement may need a different process.</li><li>Record why a compensation ran so support can explain the outcome to the customer.</li><li>If a compensation cannot complete, the saga ends in a state that needs manual reconciliation rather than silent inconsistency.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Isolation anomalies in sagas</h2>
+<p class="lede">Without global isolation, other transactions can observe or act on intermediate saga state. These anomalies have names worth using in an interview.</p>
+<ul><li><strong>Dirty read:</strong> another transaction reads data written by a saga step that may still be compensated.</li><li><strong>Lost update:</strong> two sagas update the same record and one overwrites the other's change.</li><li><strong>Fuzzy read:</strong> a transaction reads a value, the saga changes it, and a later read in the same transaction sees a different value.</li><li><strong>Semantic lock:</strong> mark the record as pending or reserved so other operations wait or reject until the saga resolves.</li><li><strong>Version checks</strong> and compare-and-set prevent lost updates without holding long locks.</li><li>Prefer designs where the intermediate state is not visible to other users, such as a separate pending table or a status field.</li><li>The goal is not full serializability; it is making the anomalies that matter impossible for the business rules you have.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>The transactional outbox</h2>
+<ul><li>Writing the database change and publishing the event are two systems, so one can succeed while the other fails.</li><li>The <strong>outbox</strong> writes the event into a table in the same local transaction as the state change.</li><li>A relay process, or change data capture on the outbox table, publishes events and marks them sent.</li><li>If publishing fails, the event remains in the outbox and is retried; if the transaction fails, the event never exists.</li><li>Consumers may still see duplicates, so they must be idempotent — the outbox guarantees at-least-once, not once.</li><li>Change data capture avoids polling but adds a pipeline component with its own lag and failure modes.</li><li>Keep the outbox small and purge sent rows; an unbounded outbox becomes a performance problem.</li></ul>
+
+<div class="flow"><span class="flow-step">Begin local transaction</span><span class="flow-arrow">→</span><span class="flow-step">Update business table</span><span class="flow-arrow">→</span><span class="flow-step">Insert event into outbox</span><span class="flow-arrow">→</span><span class="flow-step">Commit</span><span class="flow-arrow">→</span><span class="flow-step">Relay publishes event</span><span class="flow-arrow">→</span><span class="flow-step">Mark sent</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Idempotent consumers and message guarantees</h2>
+<ul><li>Sagas rely on retries, so every handler must tolerate the same message arriving twice.</li><li>Give each command or event a stable ID and record processed IDs in the same transaction as the effect.</li><li>Acknowledge a message only after the local transaction commits; otherwise a crash loses work.</li><li>Consumers should be able to resume from a checkpoint without re-applying side effects twice.</li><li>Ordering matters for some steps; partition by the entity key so one consumer sees that entity's events in order.</li><li>If a step is not naturally idempotent, wrap it in a dedupe key or a conditional state transition.</li><li>Duplicate protection is a prerequisite for compensation logic; otherwise a retry can refund twice.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Reservations and try-confirm-cancel</h2>
+<ul><li><strong>Try</strong> reserves the resource — hold inventory, authorize a payment — without committing it.</li><li>The saga then does its other work while the reservation is held.</li><li><strong>Confirm</strong> turns the reservation into a permanent change once all steps are likely to succeed.</li><li><strong>Cancel</strong> releases the reservation if any step fails.</li><li>Reservations reduce the chance of a late failure but require a timeout so abandoned holds do not block inventory forever.</li><li>This is effectively 2PC at the business level, with explicit reservation states instead of database locks.</li><li>It fits high-contention resources such as seats, rooms, and limited stock, where a late failure is expensive.</li></ul>
+
+<div class="flow"><span class="flow-step">Try: hold stock</span><span class="flow-arrow">→</span><span class="flow-step">Try: authorize payment</span><span class="flow-arrow">→</span><span class="flow-step">Confirm both</span><span class="flow-arrow">→</span><span class="flow-step">On failure: cancel holds</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Stuck sagas and recovery</h2>
+<ul><li>Every step needs a timeout; a saga waiting forever on a silent service is an outage with no error.</li><li>Retry transient failures with backoff, and cap attempts so one bad step cannot loop indefinitely.</li><li>Persist the saga state and current step, so recovery can resume rather than restart from the beginning.</li><li>Route unrecoverable sagas to a dead-letter queue or a manual review queue with enough context to act.</li><li>Compensations can fail too; retry them and escalate if the system cannot reach a consistent state.</li><li>Reconciliation jobs compare service state and repair mismatches, especially for money and inventory.</li><li>Alert on sagas that exceed a normal duration, not just on errors, because stuck is the common failure.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Choosing an approach</h2>
+<ul><li>Use a <strong>single local transaction</strong> if the data can live in one service; that is always simpler.</li><li>Use <strong>2PC</strong> only for short, internal operations with a small number of participants and a strong atomicity requirement.</li><li>Use a <strong>saga</strong> for long-running, multi-service workflows, especially when an external provider is involved.</li><li>Use <strong>TCC or reservations</strong> when a resource is scarce and a late failure would be costly.</li><li>Use an <strong>outbox</strong> whenever a state change must reliably produce an event.</li><li>Whatever you choose, define the intermediate states and who may observe them.</li><li>State the consistency guarantee you are giving: atomic, eventually consistent, or consistent within a bounded window.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Guarantee</th><th>Latency</th><th>Best fit</th></tr></thead><tbody><tr><td>Local transaction</td><td>Atomic</td><td>Low</td><td>Data in one service</td></tr>
+<tr><td>2PC</td><td>Atomic across participants</td><td>High, locks held</td><td>Short internal writes</td></tr>
+<tr><td>Saga</td><td>Eventually consistent</td><td>Seconds to days</td><td>Long business workflows</td></tr>
+<tr><td>TCC / reservation</td><td>Reserved then confirmed</td><td>Medium</td><td>Scarce resources</td></tr>
+<tr><td>Outbox + events</td><td>At-least-once delivery</td><td>Low</td><td>Reliable event publication</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>What to monitor</h2>
+<ul><li>Track saga completion rate, duration percentiles, and the number stuck beyond a threshold.</li><li>Alert on compensation rate; a spike means a downstream step is failing consistently.</li><li>Monitor outbox lag, publish failures, and dead-letter depth.</li><li>Track duplicate and idempotency rejections, which reveal retry storms or replay issues.</li><li>Log the correlation ID for the whole business operation so one trace shows every step.</li><li>Dashboard the difference between orders created, charged, and fulfilled; the gap is your inconsistency surface.</li><li>Review manual reconciliations regularly; recurring ones point to a design fix, not an operational one.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Interview walkthrough</h2>
+<ul><li>Name the business operation and the services it touches, then ask whether the data could be co-located.</li><li>If not, list each step, its local transaction, and its compensation or reservation.</li><li>Choose 2PC or a saga and justify it with duration, participant count, and failure tolerance.</li><li>Explain the intermediate states and how other readers are prevented from acting on them.</li><li>Explain how events are published reliably, usually with an outbox, and how consumers stay idempotent.</li><li>Describe failure handling: timeouts, retries, dead-letter queues, and manual reconciliation.</li><li>Finish with the consistency guarantee and the metrics that would show a stuck or failing saga.</li></ul>
+
+<div class="flow"><span class="flow-step">Identify steps</span><span class="flow-arrow">→</span><span class="flow-step">Pick 2PC or saga</span><span class="flow-arrow">→</span><span class="flow-step">Define compensations</span><span class="flow-arrow">→</span><span class="flow-step">Protect intermediate state</span><span class="flow-arrow">→</span><span class="flow-step">Publish reliably</span><span class="flow-arrow">→</span><span class="flow-step">Handle stuck sagas</span><span class="flow-arrow">→</span><span class="flow-step">Monitor</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Two-phase commit</strong> gives atomicity but holds locks across the network and blocks if the coordinator fails.</li><li><strong>Sagas</strong> keep services available and independent but expose intermediate states and require compensations.</li><li><strong>Orchestration</strong> makes complex flows visible and testable but centralizes control and becomes a dependency.</li><li><strong>Choreography</strong> decouples teams but makes the end-to-end flow implicit and hard to debug.</li><li><strong>Reservations (TCC)</strong> reduce late failures but hold scarce resources and need expiry handling.</li><li><strong>Semantic locks</strong> prevent dirty reads but reduce concurrency and add states every reader must understand.</li><li><strong>Compensations</strong> restore consistency but are extra code paths that must be idempotent and tested.</li><li><strong>Transactional outbox</strong> guarantees event publication but adds a table, a relay, and cleanup work.</li><li><strong>Change data capture</strong> avoids application polling but introduces pipeline lag and a new failure domain.</li><li><strong>Manual reconciliation</strong> handles the irreducible cases but costs support time and hides design problems if overused.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why can't you just use a database transaction across services?</summary><div class="answer"><p>Atomicity and isolation are enforced by one database's transaction manager. Separate services have separate databases and failure domains, and holding locks across network calls would destroy throughput. External providers cannot participate at all.</p></div></details>
+<details><summary>2. What is a distributed transaction?</summary><div class="answer"><p>A unit of work that must commit or abort atomically across multiple services or data stores. It requires either a coordination protocol such as 2PC or a compensating workflow such as a saga.</p></div></details>
+<details><summary>3. How does two-phase commit work?</summary><div class="answer"><p>A coordinator asks all participants to prepare, which locks resources and records a yes or no vote. If everyone votes yes it sends commit; otherwise abort. Participants hold locks between phases, so it is slow and can block if the coordinator fails.</p></div></details>
+<details><summary>4. When would you use 2PC?</summary><div class="answer"><p>For short, internal operations with a few participants and a hard atomicity requirement, such as moving funds between two databases in the same data center. Avoid it for long workflows, external systems, or cross-region writes.</p></div></details>
+<details><summary>5. What is a saga?</summary><div class="answer"><p>A sequence of local transactions where each step has a compensating action. If a step fails, the completed steps are undone in reverse order. The system is eventually consistent and intermediate states are visible.</p></div></details>
+<details><summary>6. Orchestration or choreography?</summary><div class="answer"><p>Orchestration centralizes the sequence and failure logic, which is easier to reason about and monitor. Choreography reacts through events, which decouples teams but hides the overall flow. Complex sagas usually favor orchestration.</p></div></details>
+<details><summary>7. What makes a good compensating transaction?</summary><div class="answer"><p>It reverses the business effect, is idempotent, and can itself be retried. Some effects cannot be undone, so irreversible steps belong at the end of the saga, after all fallible checks.</p></div></details>
+<details><summary>8. What are saga isolation anomalies?</summary><div class="answer"><p>Dirty reads of uncommitted saga state, lost updates, and fuzzy reads where a value changes mid-transaction. Semantic locks, pending states, and version checks are the usual countermeasures.</p></div></details>
+<details><summary>9. What is a semantic lock?</summary><div class="answer"><p>A flag or pending status that marks a record as part of an in-flight saga so other operations wait, reject, or handle it specially. It prevents others from acting on data that may still be compensated.</p></div></details>
+<details><summary>10. Why do you need an outbox?</summary><div class="answer"><p>Because the database commit and the event publish are separate operations, and one can fail without the other. Writing the event in the same transaction as the state change makes publication reliable, at the cost of a relay and at-least-once delivery.</p></div></details>
+<details><summary>11. How do you handle a saga step that keeps failing?</summary><div class="answer"><p>Retry transient errors with backoff and a cap, then compensate the completed steps. If a compensation also fails, park the saga in a dead-letter or manual review queue with full context and alert on it.</p></div></details>
+<details><summary>12. What is try-confirm-cancel?</summary><div class="answer"><p>A reservation protocol: try holds the resource, confirm commits it, cancel releases it. It behaves like business-level 2PC and suits scarce resources where a late failure is expensive, but holds need timeouts.</p></div></details>
+<details><summary>13. How do you avoid double refunds during compensation?</summary><div class="answer"><p>Give each compensation a stable idempotency key and record it with the effect, or move the entity through a one-way state transition that can only happen once. Retries then replay rather than repeat.</p></div></details>
+<details><summary>14. What would you monitor?</summary><div class="answer"><p>Saga completion and duration, stuck sagas, compensation rate, outbox lag, dead-letter depth, and the gap between orders created, charged, and fulfilled. A rising gap is the earliest sign of inconsistency.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Proposing 2PC for a workflow that involves an external payment provider or spans regions.</li><li>Describing a saga as a rollback, when compensations are separate business operations.</li><li>Forgetting that saga steps are visible to other readers and can be read or modified mid-flight.</li><li>Assuming compensations always succeed, with no dead-letter or manual path.</li><li>Publishing events after the database commit without an outbox, then losing events on a crash.</li><li>Making a saga step non-idempotent so retries duplicate charges or reservations.</li><li>Leaving the irreversible step (ship, send, settle) early in the sequence.</li><li>Ignoring stuck sagas because there are no errors, only workflows that never finish.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="running-across-regions.html"><span>← Previous</span><strong>Running Across Multiple Regions</strong></a><a class="next" href="keeping-data-in-sync.html"><span>Next →</span><strong>Keeping Data in Sync</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/distributed-transactions">AlgoMaster — Coordinating Transactions Across Services</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

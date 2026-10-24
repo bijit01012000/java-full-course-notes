@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Serverless Architecture — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 27 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p2">P2 · Architecture</span></div>
+    <h1>Serverless Architecture</h1>
+    <p class="dek">It checks whether you can choose compute for a workload honestly: where per-use scaling and managed services win, and which operational problems cold starts, concurrency, retries, limits, cost, and lock-in remain yours.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>6</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Serverless is managed event-driven compute plus managed services: the provider handles provisioning and patching, while idempotency, concurrency limits, cold starts, peak-cost economics, and lock-in stay design problems.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Run handlers triggered by HTTP requests, queue or stream messages, object uploads, schedules, and database changes.</li><li>Scale automatically per event without manual capacity planning, and buffer bursts through a queue where needed.</li><li>Keep handlers stateless, with durable state in a managed database, cache, or object store.</li><li>Deliver asynchronous events at least once, with idempotent handlers, capped retries, and a dead-letter queue.</li><li>Use managed auth, storage, queues, and secrets, with least-privilege permissions per function.</li><li>Support versioned deployments and a rollback or canary path for handler code and configuration.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Interactive endpoints must meet a latency budget that includes cold starts; background work should stay asynchronous.</li><li>Scale-out must not overwhelm downstream databases or third-party APIs; cap concurrency and add backpressure.</li><li>Cost must be modelled at both average and peak load, not only at demo traffic.</li><li>One failed invocation or poison event must not block a stream or take down unrelated functions.</li><li>Secrets must come from a managed secret store, never from code, logs, or plaintext environment variables.</li><li>Business logic should stay portable behind thin handlers, even if the trigger wiring is provider-specific.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 5M invocations per day at 200 ms average and 512 MB: about 1M invocation-seconds per day, so duration and memory drive cost as much as request count.</li><li>That averages about 58 invocations/s; a 10x burst at 200 ms needs roughly 116 concurrent executions, so concurrency limits and downstream connections matter more than the average.</li><li>One function holding a database connection at 100 concurrency can exhaust a small pool, so cap concurrency or put a connection pooler in front.</li><li>Keep event payloads small, roughly tens of KB, and pass object keys for files instead of pushing multi-MB bodies through an invoke.</li><li>Set the function timeout below the caller or upstream deadline, for example a 10s handler behind a 15s API deadline, and split longer work into chunks.</li><li>Keep a 7-day replay window for queue or stream events and 14 days of dead-letter retention so incidents can be investigated and replayed.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Function</span><span class="fields">function_id, runtime, memory_mb, timeout_s, handler, concurrency_limit, version</span></div><div class="entity"><span class="name">Trigger</span><span class="fields">trigger_id, function_id, type, source, batch_size, retry_policy, dlq_id</span></div><div class="entity"><span class="name">Invocation</span><span class="fields">request_id, function_id, started_at, duration_ms, cold_start, status, error_type</span></div><div class="entity"><span class="name">EventRecord</span><span class="fields">event_id, source, payload_ref, idempotency_key, attempt, status</span></div><div class="entity"><span class="name">Deployment</span><span class="fields">version, code_hash, environment, iam_role, traffic_percent</span></div><div class="entity"><span class="name">ManagedResource</span><span class="fields">resource_id, type, connection_limit, retention, owner</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/functions/{name}/invoke</code></td><td>Invoke a function synchronously for internal calls and tests, or asynchronously for fire-and-forget work.</td></tr><tr><td><code>POST</code></td><td><code>/v1/functions</code></td><td>Deploy or update a function with its runtime, memory, timeout, and concurrency limit.</td></tr><tr><td><code>POST</code></td><td><code>/v1/triggers</code></td><td>Attach an HTTP, queue, schedule, or object-storage trigger with batch and retry settings.</td></tr><tr><td><code>GET</code></td><td><code>/v1/invocations</code></td><td>Inspect invocation outcomes, durations, cold starts, and errors for a function and time range.</td></tr><tr><td><code>GET</code></td><td><code>/v1/functions/{name}/metrics</code></td><td>Read concurrency, throttles, error rate, duration percentiles, and cold-start counts.</td></tr><tr><td><code>POST</code></td><td><code>/v1/dlq/{dlq_id}/replay</code></td><td>Replay a failed event after the bug or configuration issue is fixed.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Function versioning</td><td>Immutable code-plus-config versions, with an alias that shifts traffic between them</td><td>Rollback and canary need a known artifact; mutating a live function makes both impossible.</td></tr><tr><td>Handler state</td><td>Externalize all durable state to a database, cache, or object store; memory is only a best-effort warm cache</td><td>Concurrent environments are isolated and can be destroyed at any time, so in-memory state is neither shared nor durable.</td></tr><tr><td>Idempotency</td><td>A conditional write keyed by event_id or a natural business key, with a bounded TTL</td><td>Asynchronous triggers retry, and a crash after the side effect but before the acknowledgement causes redelivery.</td></tr><tr><td>Large payloads</td><td>Store files in object storage and pass a key or pre-signed URL in the event</td><td>Invocation payloads and local disk are limited, and moving bytes through a function adds cost and latency.</td></tr><tr><td>Buffering and failures</td><td>A managed queue in front of bursty work plus a dead-letter queue with retention</td><td>The queue absorbs spikes and lets consumers retry without losing events, while the DLQ isolates poison messages.</td></tr><tr><td>Invocation telemetry</td><td>Structured logs and spans keyed by request_id and trace_id, stored outside the function</td><td>Execution environments are ephemeral, so host files and local metrics disappear with them.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  U[📱 Client] --> G[🌐 API Gateway]
+  G --> F[⚡ Function]
+  Q[📬 Queue] --> F
+  O[🪣 Object Store] --> F
+  S[⏰ Scheduler] --> F
+  F --> D[🗄️ Managed DB]
+  F --> K[⚡ Cache]
+  F --> X[☠️ Dead-letter Queue]
+  F --> T[📊 Logs and Traces]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef svc fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef store fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef bad fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class U client;
+  class G,Q,O,S,F svc;
+  class D,K,T store;
+  class X bad;</div><div class="diagram-caption">HTTP, queue, object, and schedule triggers invoke stateless functions that use managed data services and emit telemetry, with exhausted retries isolated in a dead-letter queue.</div></div>
+        <ul><li>Functions are glue; the real architecture is the set of managed services around them, and each one brings its own limits and failure modes.</li><li>Initialize SDK clients and configuration outside the handler and lazy-load heavy dependencies, so warm invocations skip most of the cold-start cost.</li><li>Put a queue between a burst and the downstream system, then cap function concurrency so auto-scaling cannot exhaust database connections.</li><li>Treat every asynchronous trigger as at-least-once: assign the event ID before the first attempt and make the side effect idempotent.</li><li>Use provisioned concurrency only on latency-critical paths; asynchronous work can usually tolerate a cold start.</li><li>Keep the handler thin and the business logic in a portable module so the provider-specific trigger and SDK code stays at the edge.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Scale to zero</td><td>No idle cost and automatic capacity for spiky workloads</td><td>Cold starts on scale-out and a latency tail that interactive users notice</td></tr><tr><td>Per-use pricing</td><td>Cheap for low average and unpredictable traffic</td><td>At sustained high throughput, reserved containers or servers can be substantially cheaper</td></tr><tr><td>Managed services</td><td>No patching, backups, or cluster operations</td><td>Per-service quotas, connection limits, and a bill that is hard to attribute</td></tr><tr><td>Fine-grained functions</td><td>Small permissions and failure domains that scale independently</td><td>More invocations, more network hops, and harder end-to-end tracing</td></tr><tr><td>Stateless handlers</td><td>Any environment can serve any event, so scaling is trivial</td><td>Every piece of state becomes another network call and another managed dependency</td></tr><tr><td>Automatic scale-out</td><td>Absorbs a burst without a capacity plan</td><td>Can overwhelm the database or a third-party API faster than they can react</td></tr><tr><td>Provisioned concurrency</td><td>Removes cold starts from the interactive path</td><td>Reintroduces paying for idle capacity and needs capacity planning after all</td></tr><tr><td>Deep provider integration</td><td>Fastest path to triggers, identity, and managed glue</td><td>Higher lock-in and a larger migration cost for core business logic</td></tr></tbody></table></div>
+        <ul><li>Shrink the deployment package, avoid heavy module-level work, and choose a fast-starting runtime to reduce cold-start time.</li><li>Right-size memory, because CPU usually scales with it; measure cost per invocation instead of assuming the smallest size is cheapest.</li><li>Batch queue records where the work allows it, but handle per-record failures so one bad record does not fail the batch.</li><li>Reuse connections and clients within a warm environment, and use a pooler in front of the database for high concurrency.</li><li>Serve large files directly from object storage with pre-signed URLs rather than proxying bytes through a function.</li><li>Cache hot reads in a managed cache instead of calling the primary database on every invocation.</li><li>Emit structured logs and tail-sampled traces, and track throttles and cold starts as first-class metrics.</li><li>Alert on queue age, DLQ depth, and concurrency saturation rather than only on function error rate.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>What does serverless mean if servers still exist?</strong> It means the provider owns provisioning, patching, scaling, and availability, while you deploy code and managed services and pay per use.</div><div class="followup"><strong>What is the difference between FaaS and BaaS?</strong> FaaS runs event-triggered code per invocation, while BaaS is the managed backing set such as databases, storage, queues, and auth; real systems combine both.</div><div class="followup"><strong>What causes cold starts?</strong> A new execution environment must be scheduled, have code or an image pulled, start its runtime, and run module initialization, so package size and startup work dominate.</div><div class="followup"><strong>How do you reduce cold starts?</strong> Use a smaller package, lazy-load dependencies, initialize clients outside the handler, pick a fast runtime, and reserve provisioned concurrency where latency matters.</div><div class="followup"><strong>Why must handlers be stateless?</strong> Concurrent invocations run in isolated environments, so memory is neither shared nor durable; warm reuse is best-effort and state belongs in an external store.</div><div class="followup"><strong>How do you handle duplicate events?</strong> Assume at-least-once delivery and make handlers idempotent with an event ID or natural key plus a conditional write, then cap retries and dead-letter the rest.</div><div class="followup"><strong>How does automatic scaling become a problem?</strong> The platform opens concurrency as fast as events arrive, so a burst can exhaust database connections or third-party rate limits unless you queue, cap concurrency, and add backpressure.</div><div class="followup"><strong>When is serverless more expensive than servers?</strong> At sustained high utilization, because per-invocation and per-duration charges plus managed-service fees can exceed reserved capacity.</div><div class="followup"><strong>What are the main platform limits?</strong> Maximum duration, memory, payload size, temporary disk, and concurrency quotas; they force long jobs into chunks, large files into object storage, and bursts into queues.</div><div class="followup"><strong>How do you observe a serverless system?</strong> Use structured logs with trace IDs, distributed tracing across gateway, function, queue, and database, and metrics for invocations, errors, duration, throttles, cold starts, and concurrency.</div><div class="followup"><strong>How do you reduce lock-in?</strong> Keep handlers thin, put business logic behind interfaces, prefer standard protocols, and accept deliberate coupling only for commodity glue.</div><div class="followup"><strong>When would you choose containers instead?</strong> For steady high throughput, long-running work, custom runtimes or networking, and predictable latency where reserved capacity beats per-request pricing.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming function instances are reused, so an in-memory cache appears to work in testing and then silently misses in production.</li><li>Writing non-idempotent handlers on an at-least-once queue or stream trigger.</li><li>Ignoring concurrency limits until scale-out exhausts the database connection pool.</li><li>Doing work in the request path that exceeds the execution timeout instead of moving it to a queue or a long-running compute service.</li><li>Passing large files or multi-MB payloads through function arguments instead of object-storage references.</li><li>Estimating cost only at low traffic and being surprised by retries, polling, and peak concurrency.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="circuit-breaker.html"><span>← Previous</span><strong>Circuit Breaker and Bulkhead</strong></a><a class="next" href="event-driven-architecture.html"><span>Next →</span><strong>Event-Driven Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

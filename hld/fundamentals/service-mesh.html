@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Service Mesh — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 34 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Service Mesh</h1>
+    <p class="dek">Microservices · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/service-mesh">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: every call needs the same features</a>
+<a href="#s2">The library approach and its limits</a>
+<a href="#s3">What a service mesh is</a>
+<a href="#s4">The data plane</a>
+<a href="#s5">The control plane</a>
+<a href="#s6">mTLS and workload identity</a>
+<a href="#s7">Traffic management and resilience</a>
+<a href="#s8">Traffic splitting and progressive delivery</a>
+<a href="#s9">Observability</a>
+<a href="#s10">North-south versus east-west</a>
+<a href="#s11">Cost and complexity</a>
+<a href="#s12">When to adopt a mesh</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A service mesh moves timeouts, retries, encryption, routing, and telemetry out of application code and into a fleet of proxies that the platform configures centrally.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Service mesh</dt><dd>An infrastructure layer that handles service-to-service communication through proxies, configured by a central control plane.</dd></div><div class="term"><dt>Data plane</dt><dd>The proxies that carry request traffic and enforce timeouts, retries, routing, mTLS, and telemetry.</dd></div><div class="term"><dt>Control plane</dt><dd>The component that stores configuration, issues identities and certificates, and pushes policy to every proxy in the data plane.</dd></div><div class="term"><dt>Sidecar proxy</dt><dd>A proxy container running beside each application instance, intercepting inbound and outbound traffic.</dd></div><div class="term"><dt>mTLS</dt><dd>Mutual TLS: both client and server present certificates, so each side authenticates the other and traffic is encrypted in transit.</dd></div><div class="term"><dt>Workload identity</dt><dd>A verifiable identity bound to a service account or workload, typically encoded in a certificate rather than inferred from an IP address.</dd></div><div class="term"><dt>Traffic splitting</dt><dd>Routing a percentage or subset of requests to a different service version, used for canaries and blue-green releases.</dd></div><div class="term"><dt>Outlier detection</dt><dd>Ejecting an unhealthy endpoint from the load-balancing pool after consecutive errors, then reintroducing it later.</dd></div><div class="term"><dt>Ingress gateway</dt><dd>The mesh component that handles traffic entering from outside, applying routing and policy at the boundary.</dd></div><div class="term"><dt>Ambient mesh</dt><dd>A deployment model that uses a shared per-node proxy instead of a per-pod sidecar for most traffic, reducing overhead.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: every call needs the same features</h2>
+<p class="lede">In a system with many services, the network between them becomes a product of its own. Every call needs the same reliability and security behavior, and none of it is business logic.</p>
+<ul><li>A request from order to payment, and payment to fraud, and fraud to user, all need timeouts and bounded retries.</li><li>Each call needs load balancing across the target's healthy instances.</li><li>Internal traffic should be encrypted and mutually authenticated, not trusted because it is inside the network.</li><li>Teams need consistent metrics and traces to see which hop is slow or failing.</li><li>These behaviors must be consistent; a single service with a different retry policy can distort the whole system.</li><li>Implementing them separately in every codebase produces duplication and drift.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The library approach and its limits</h2>
+<ul><li>The traditional approach is a networking library in each service that provides retries, timeouts, circuit breakers, TLS, and metrics.</li><li>It works well when every service uses the same language and the same library version.</li><li>In a polyglot system, each language needs its own implementation, with different features and bugs.</li><li>Upgrading the library means rebuilding and redeploying every service that depends on it.</li><li>Legacy and third-party services cannot adopt the library at all, so they remain outside the standard.</li><li>Configuration is scattered across repositories, so there is no single place to enforce policy.</li><li>Library-level behavior is also hard to change during an incident without a deploy.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What a service mesh is</h2>
+<ul><li>A service mesh moves networking concerns out of application code and into infrastructure that sits beside it.</li><li>Applications still make ordinary network calls; the mesh intercepts them and applies policy.</li><li>It consists of two parts: a <strong>data plane</strong> that handles traffic and a <strong>control plane</strong> that configures it.</li><li>The mesh is language-agnostic because the proxy is a separate process, not a library linked into the app.</li><li>It centralizes policy: the same retry, TLS, and routing rules apply to every service.</li><li>It is most valuable when there are many services, multiple languages, and a platform team to operate it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Responsibility</th><th>Examples of concerns</th></tr></thead><tbody><tr><td>Data plane</td><td>Carry and enforce traffic</td><td>Timeouts, retries, mTLS, load balancing, metrics</td></tr>
+<tr><td>Control plane</td><td>Configure and secure the data plane</td><td>Routing config, certificates, policy, service discovery</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The data plane</h2>
+<ul><li>The data plane is a proxy beside each workload, commonly a sidecar container in the same pod.</li><li>It intercepts outbound calls and inbound connections, usually through iptables or eBPF redirection.</li><li>For each request it applies the configured timeout, retry policy, load-balancing choice, and authorization rules.</li><li>It originates and terminates mTLS, so encryption is uniform and invisible to the application.</li><li>It emits per-request metrics, access logs, and trace spans for every hop.</li><li>Newer models use a per-node proxy for most traffic and a per-pod proxy only when needed, reducing sidecar overhead.</li><li>The data plane is on the request path, so its latency and resource use are part of the system's cost.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The control plane</h2>
+<ul><li>The control plane is the source of truth for routing, policy, and identity.</li><li>It watches service discovery and Kubernetes resources, then computes configuration for every proxy.</li><li>It issues workload certificates and rotates them, which is what makes mTLS practical at scale.</li><li>It validates policy and distributes it; a bad push can affect the whole fleet, so rollouts need care.</li><li>It is not on the request path for normal traffic, but it is critical for configuration and certificate refresh.</li><li>Control plane outages should leave existing proxies running with their last known good configuration.</li><li>Examples include Istio, Linkerd, and Consul; the data plane is often Envoy or a purpose-built Rust proxy.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>mTLS and workload identity</h2>
+<ul><li>Plain TLS encrypts traffic but does not prove who the client is; mTLS requires certificates on both sides.</li><li>Each workload gets a cryptographic identity tied to its service account, not to an IP address that can be reused.</li><li>The control plane issues short-lived certificates and rotates them automatically.</li><li>Authorization policy can then say which identities may call which endpoints, rather than relying on network location.</li><li>This limits lateral movement: a compromised pod cannot impersonate another service just by being inside the cluster.</li><li>Certificate issuance and rotation must be highly available; expired certificates look like a total outage.</li><li>mTLS protects traffic in transit; it does not authorize business actions or protect data at rest.</li></ul>
+
+
+<div class="note">Identity based on IP is weak in Kubernetes because pod IPs are reused. Workload identity must come from the certificate, not the address.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Traffic management and resilience</h2>
+<ul><li>The mesh applies timeouts and retries per route, so behavior is consistent across languages.</li><li>It can perform L7 load balancing with awareness of request latency and outstanding requests, not just round-robin.</li><li><strong>Outlier detection</strong> ejects endpoints that return consecutive errors and probes them back later.</li><li>Circuit breaking at the proxy limits concurrent connections or pending requests to a service.</li><li>Fault injection can add delays or errors in staging to test resilience without changing code.</li><li>Retry policies must be bounded and owned by one layer; mesh retries plus app retries can multiply load.</li><li>Mirroring sends a copy of live traffic to a new version without affecting the response.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Traffic splitting and progressive delivery</h2>
+<ul><li>Routes can send a percentage of traffic to a new version, enabling canary releases.</li><li>Header- or user-based routing allows internal testers to hit the new version before general traffic.</li><li>Blue-green deployment switches all traffic at once after the new environment is verified.</li><li>Traffic mirroring duplicates requests to a shadow version for comparison without serving its responses.</li><li>Splitting is enforced at the proxy, so it works identically for every language and framework.</li><li>Observe error rate and latency per version during the split; shifting traffic is only safe if you can attribute results.</li><li>Routing rules should be declarative and versioned like code, not changed ad hoc during an incident.</li></ul>
+
+<div class="flow"><span class="flow-step">Deploy new version</span><span class="flow-arrow">→</span><span class="flow-step">Route a small percentage</span><span class="flow-arrow">→</span><span class="flow-step">Compare error rate and latency</span><span class="flow-arrow">→</span><span class="flow-step">Increase gradually</span><span class="flow-arrow">→</span><span class="flow-step">Roll back by shifting traffic</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Observability</h2>
+<ul><li>Every proxy can emit uniform request counts, latency histograms, response codes, and retry counts.</li><li>Because the proxy sees both sides of a call, it can produce consistent client and server metrics.</li><li>Distributed traces get spans at each hop without application instrumentation for the network layer.</li><li>Access logs can record source identity, destination, status, and latency for audit and debugging.</li><li>Uniform telemetry makes it possible to compare services and spot a single misbehaving dependency.</li><li>The mesh sees network behavior, not business outcomes; application-level metrics are still required.</li><li>Cardinality and cost grow quickly, so sampling and retention policies matter.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>North-south versus east-west</h2>
+<ul><li>East-west traffic is service-to-service inside the system; that is the mesh's main focus.</li><li>North-south traffic enters from clients or the internet through an ingress gateway.</li><li>An ingress gateway applies TLS termination, routing, and policy at the boundary; it is not a substitute for internal mTLS.</li><li>An egress gateway can control and audit outbound calls to external services.</li><li>An API gateway often handles client-facing concerns such as authentication and rate limiting; the mesh handles internal calls.</li><li>Confusing the two leads to gaps: a secure internal mesh with an unprotected ingress, or the reverse.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Cost and complexity</h2>
+<ul><li>Every proxy adds memory, CPU, and a network hop; the cost scales with the number of pods, not services.</li><li>Operating the control plane, certificate authority, and upgrade process is a platform responsibility.</li><li>Debugging crosses application and infrastructure: a failure may be the app, the proxy, the policy, or the network.</li><li>Configuration is powerful and easy to get wrong; a broad policy can break every route at once.</li><li>Version skew during upgrades can create inconsistent behavior across the fleet.</li><li>Teams need new skills in traffic policy, identity, and proxy diagnostics.</li><li>The mesh does not fix a bad service design; it makes communication policy consistent, not correct.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When to adopt a mesh</h2>
+<ul><li>Adopt a mesh when consistent cross-language behavior, central policy, or mTLS is a real requirement.</li><li>Start with one capability — mTLS, observability, or traffic splitting — rather than every feature at once.</li><li>Prefer a managed control plane if the team cannot staff certificate and upgrade operations.</li><li>Measure the added latency and resource cost before expanding the mesh to all services.</li><li>Keep a clear boundary: the mesh owns network policy; services own business policy.</li><li>Revisit the decision as the estate changes; a mesh adopted for compliance may not need every advanced feature.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Situation</th><th>Reasonable choice</th></tr></thead><tbody><tr><td>A few services, one language</td><td>Library or framework support</td></tr>
+<tr><td>Many services, multiple languages</td><td>Service mesh</td></tr>
+<tr><td>Only client-to-system traffic</td><td>API gateway</td></tr>
+<tr><td>Legacy services that cannot change</td><td>Mesh or ingress proxy</td></tr>
+<tr><td>Small team without platform capacity</td><td>Managed mesh or postpone</td></tr>
+<tr><td>Strict internal encryption policy</td><td>Mesh with mTLS</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Centralized policy</strong> gives consistent behavior across languages but concentrates power in a control plane that can affect the whole fleet.</li><li><strong>Language independence</strong> removes library lock-in but adds a proxy process and a network hop to every call.</li><li><strong>mTLS everywhere</strong> greatly improves internal security but adds certificate lifecycle and debugging complexity.</li><li><strong>Mesh-level retries</strong> are uniform and configurable but can duplicate application retries and amplify load.</li><li><strong>Traffic splitting</strong> makes progressive delivery easy but requires per-version observability to use safely.</li><li><strong>Uniform telemetry</strong> improves visibility but increases metric cardinality, storage, and cost.</li><li><strong>Per-pod sidecars</strong> give strong isolation but multiply resource use; per-node proxies reduce cost but share fate.</li><li><strong>Platform ownership</strong> creates leverage and consistency but adds a critical team, upgrade path, and on-call surface.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a service mesh?</summary><div class="answer"><p>An infrastructure layer that handles service-to-service communication through proxies. Applications make normal network calls; the mesh applies timeouts, retries, load balancing, mTLS, routing, and telemetry consistently.</p></div></details>
+<details><summary>2. What are the data plane and control plane?</summary><div class="answer"><p>The data plane is the set of proxies that carry and enforce traffic policy. The control plane stores configuration, issues certificates, and pushes policy to those proxies. The data plane is on the request path; the control plane configures it.</p></div></details>
+<details><summary>3. Why not just use a networking library?</summary><div class="answer"><p>Libraries work in a single-language estate but must be reimplemented per language, upgraded per service, and cannot cover legacy or third-party workloads. A mesh provides one behavior for every service without code changes.</p></div></details>
+<details><summary>4. How does mTLS work in a mesh?</summary><div class="answer"><p>Each workload receives a short-lived certificate tied to its identity. Proxies present certificates on both sides of a connection, encrypt traffic, and verify the peer. Authorization policy then allows or denies calls by identity rather than by IP.</p></div></details>
+<details><summary>5. Why is workload identity better than IP-based trust?</summary><div class="answer"><p>Pod IPs are reused and easy to spoof within a cluster. A certificate bound to a service account proves which workload is calling, so policy survives rescheduling and prevents impersonation.</p></div></details>
+<details><summary>6. How does a mesh do traffic splitting?</summary><div class="answer"><p>The proxy routes a configured percentage or matching subset of requests to a different version. That enables canaries, blue-green releases, header-based testing, and mirroring without changing application code.</p></div></details>
+<details><summary>7. What is outlier detection?</summary><div class="answer"><p>The proxy ejects an endpoint after repeated errors or timeouts and periodically probes it to see if it has recovered. It complements load balancing by removing unhealthy instances quickly.</p></div></details>
+<details><summary>8. What observability does a mesh provide?</summary><div class="answer"><p>Uniform request metrics, latency histograms, response codes, retry counts, access logs, and trace spans at every hop. It sees network behavior, not business outcomes, so application metrics are still needed.</p></div></details>
+<details><summary>9. What does a mesh not solve?</summary><div class="answer"><p>It does not fix bad domain boundaries, slow queries, or incorrect business logic. It standardizes communication policy; it does not make an unreliable service reliable by itself.</p></div></details>
+<details><summary>10. What are the main costs of a mesh?</summary><div class="answer"><p>Per-proxy CPU and memory, an extra network hop, control plane and certificate operations, harder debugging, configuration risk, and the skills required to run it. Cost scales with pods and traffic, not just service count.</p></div></details>
+<details><summary>11. How is a mesh different from an API gateway?</summary><div class="answer"><p>An API gateway handles north-south traffic from clients into the system. A mesh handles east-west traffic between services. They are complementary, and confusing them leaves one direction unprotected.</p></div></details>
+<details><summary>12. What happens if the control plane goes down?</summary><div class="answer"><p>Existing proxies should continue with their last known configuration and certificates. New configuration, new pods, and certificate rotation may fail, so the control plane must be highly available and its outage treated seriously.</p></div></details>
+<details><summary>13. When should a team adopt a service mesh?</summary><div class="answer"><p>When there are many services, multiple languages, a need for consistent policy or mTLS, and a platform team to operate it. Start with one capability and measure cost before rolling it out everywhere.</p></div></details>
+<details><summary>14. What is an ambient mesh?</summary><div class="answer"><p>A deployment model that uses a shared per-node proxy for most traffic instead of a sidecar in every pod. It reduces per-pod resource overhead and operational churn, at the cost of weaker per-pod isolation.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Adopting a mesh for a handful of single-language services where a library would be simpler.</li><li>Assuming the mesh secures the system while the ingress or egress path remains unprotected.</li><li>Enabling retries in both the mesh and the application, multiplying attempts during an outage.</li><li>Treating the control plane as non-critical and discovering certificate rotation failures during an incident.</li><li>Rolling out a broad routing or authorization policy to the whole fleet at once.</li><li>Ignoring the per-pod memory and CPU cost, then being surprised by the fleet-wide bill.</li><li>Believing mesh telemetry replaces application-level business metrics.</li><li>Using IP addresses for policy instead of workload identity.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="saga-pattern.html"><span>← Previous</span><strong>SAGA Pattern</strong></a><a class="next" href="batch-vs-stream-processing.html"><span>Next →</span><strong>Batch vs Stream Processing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/service-mesh">AlgoMaster — Service Mesh</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

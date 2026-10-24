@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Microservices Architecture — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 41 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Microservices Architecture</h1>
+    <p class="dek">Architectural Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/microservices-architecture">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem microservices solve</a>
+<a href="#s2">What microservices architecture is</a>
+<a href="#s3">Drawing service boundaries</a>
+<a href="#s4">Own your data</a>
+<a href="#s5">Communication: synchronous APIs</a>
+<a href="#s6">Communication: asynchronous events and messages</a>
+<a href="#s7">Independent deployment</a>
+<a href="#s8">Independent scaling</a>
+<a href="#s9">Failure isolation and resilience</a>
+<a href="#s10">Operational prerequisites</a>
+<a href="#s11">Data consistency across services</a>
+<a href="#s12">Benefits and costs</a>
+<a href="#s13">Monolith, modular monolith, microservices</a>
+<a href="#s14">Deciding and migrating</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Microservices split a system into small, independently deployable services, each owning its data and exposing a contract — trading in-process simplicity for network boundaries, distributed data, and serious operational machinery.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Service</dt><dd>A small, independently deployable unit aligned to a business capability, with its own process, pipeline, and data store.</dd></div><div class="term"><dt>Bounded context</dt><dd>A domain-driven design boundary inside which one model and its vocabulary are consistent; different contexts translate at the edge.</dd></div><div class="term"><dt>Database per service</dt><dd>The rule that only the owning service touches its schema directly; everyone else goes through an API or subscribed events.</dd></div><div class="term"><dt>API contract</dt><dd>The versioned shape of a service's requests and responses (or published events) that consumers depend on.</dd></div><div class="term"><dt>Service discovery</dt><dd>A registry or DNS mechanism that lets callers find healthy instances as they scale, move, and restart.</dd></div><div class="term"><dt>Saga</dt><dd>A sequence of local transactions across services where each step has a compensating action if a later step fails.</dd></div><div class="term"><dt>Transactional outbox</dt><dd>Writing the state change and its outgoing event in one local transaction, then relaying the event, to avoid dual-write inconsistency.</dd></div><div class="term"><dt>API gateway</dt><dd>The edge component that handles routing, authentication, rate limiting, and request IDs for clients.</dd></div><div class="term"><dt>Distributed tracing</dt><dd>Propagating a trace context across service calls so one request can be reconstructed end to end.</dd></div><div class="term"><dt>Modular monolith</dt><dd>A single deployable with enforced internal module boundaries — most of the code discipline of microservices without the network.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem microservices solve</h2>
+<p class="lede">As an application and its team grow, one large codebase starts to slow everyone down. The pain is organizational as much as technical.</p>
+<ul><li>A small change touches shared code, so every release carries risk for features nobody intended to change.</li><li>Deployments become all-or-nothing: one team's unfinished work blocks another team's urgent fix.</li><li>Scaling is coarse — the whole application is replicated even when only one feature is hot.</li><li>Technology choices are frozen for the entire codebase, including parts with very different needs.</li><li>Failures are process-wide: a memory leak or crash in one module takes down everything in that process.</li><li>Coordination cost grows with headcount: more teams means more merge conflicts and more release meetings.</li><li>These are symptoms of coupling, not proof that the answer is many services.</li></ul>
+
+
+<div class="note">The real question is not monolith or microservices — it is which boundaries would let teams change and ship independently.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What microservices architecture is</h2>
+<ul><li>The system is decomposed into <strong>small services aligned to business capabilities</strong>, not to technical layers.</li><li>Each service runs in its own process and is <strong>deployed independently</strong> on its own schedule.</li><li>Services communicate over the network using synchronous APIs (HTTP/REST, gRPC) or asynchronous messages and events.</li><li>Each service <strong>owns its data store</strong>; there is no shared schema and no direct cross-service table access.</li><li>Services may use different languages or databases where that genuinely helps, at the cost of more operational surface.</li><li>A team owns its service end to end: build, deploy, run, and on-call.</li><li>Small means a clear boundary and a small enough surface for one team to hold in their heads — not a line-count target.</li><li>The architecture is a <strong>sociotechnical choice</strong>: it works when team structure and ownership match service boundaries.</li></ul>
+
+<div class="flow"><span class="flow-step">Client</span><span class="flow-arrow">→</span><span class="flow-step">API gateway</span><span class="flow-arrow">→</span><span class="flow-step">Order service</span><span class="flow-arrow">→</span><span class="flow-step">Order database</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Drawing service boundaries</h2>
+<p class="lede">Boundary choice is the single most important decision. Bad boundaries produce the worst of both worlds: network calls plus tight coupling.</p>
+<ul><li>Decompose by <strong>business capability</strong> — orders, payments, inventory, shipping, notifications — not by controller, service, and repository layers.</li><li>Use <strong>bounded contexts</strong>: a model is internally consistent inside the boundary and translated at the edge, so the same word can mean different things in different services.</li><li>Things that must change together should live together; if two services always ship in lockstep, they are one service with extra latency.</li><li>Avoid <strong>entity services</strong> (one service per table); they turn every read into a chatty CRUD call and every query into a distributed join.</li><li>Look for transaction boundaries: an operation that must be atomic usually belongs inside one service.</li><li>Start from existing seams — modules, team ownership, and natural data partitions — rather than a full rewrite.</li><li>Treat boundaries as hypotheses and expect to merge or split them once real usage appears.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Signal</th><th>Healthy boundary</th><th>Warning sign</th></tr></thead><tbody><tr><td>Change cadence</td><td>Changes ship with the service alone</td><td>Two services always deploy together</td></tr>
+<tr><td>Data ownership</td><td>One writer, private schema</td><td>Shared tables or cross-service joins</td></tr>
+<tr><td>Call pattern</td><td>Few coarse operations</td><td>Many fine-grained calls per page</td></tr>
+<tr><td>Team fit</td><td>One team owns it end to end</td><td>Three teams must approve a change</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Own your data</h2>
+<ul><li><strong>Database per service</strong> is the defining rule: only the owning service reads or writes its schema directly.</li><li>Consumers get data through an API or by subscribing to events, never by querying another service's tables.</li><li>A private schema lets a service change indexes, columns, or even the database engine without coordinating with consumers.</li><li>A <strong>shared database</strong> is the most common way microservices quietly decay into a distributed monolith.</li><li>Cross-service reads become API composition or read models (projections) built from events.</li><li>Some duplication is expected and healthy: each service keeps a copy shaped for its own access pattern.</li><li>Reporting and analytics should read from a warehouse or a change-data-capture stream, not from live service databases.</li><li>Polyglot persistence is allowed, but each added datastore adds backup, upgrade, and on-call burden.</li></ul>
+
+
+<div class="note">If two services must read and write the same table, you probably have one service, not two.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Communication: synchronous APIs</h2>
+<ul><li>Request/response over REST, gRPC, or GraphQL: the caller sends a request and waits for a result.</li><li>Easy to reason about, and the caller learns immediately whether the operation succeeded.</li><li>Creates <strong>runtime coupling</strong>: if the callee is slow or down, the caller is affected.</li><li>Requires timeouts, bounded retries with backoff and jitter, circuit breakers, and per-dependency connection pools.</li><li>Chains of synchronous calls multiply latency and multiply the chance that at least one hop fails.</li><li>Best for queries and user-facing reads where an answer is needed now.</li><li>Contracts must be versioned and backward compatible because consumers deploy on their own schedule.</li><li>Prefer coarse-grained calls: one meaningful operation beats ten chatty lookups.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Communication: asynchronous events and messages</h2>
+<ul><li>A producer publishes a message or event to a broker; consumers process it later, independently.</li><li>This <strong>decouples in time</strong>: the producer does not wait, and a consumer can be down and catch up afterwards.</li><li>Queues distribute work across competing consumers; topics/logs fan out to many independent consumer groups and allow replay.</li><li>The price is eventual consistency, duplicate delivery, ordering ambiguity, and another stateful system to operate.</li><li>Use asynchronous flows for side effects: emails, notifications, search indexing, analytics, and propagation to other services.</li><li>Message schemas are contracts too; a schema registry or versioned event types keeps producers and consumers compatible.</li><li>Consumers must be <strong>idempotent</strong>, because at-least-once delivery is the normal guarantee.</li><li>Keep the payload focused on facts plus identifiers rather than dumping an entire internal model.</li></ul>
+
+<div class="flow"><span class="flow-step">Producer commits state and event</span><span class="flow-arrow">→</span><span class="flow-step">Broker stores the event</span><span class="flow-arrow">→</span><span class="flow-step">Consumers process independently</span><span class="flow-arrow">→</span><span class="flow-step">Retry, then dead-letter on repeated failure</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Independent deployment</h2>
+<ul><li>Each service has its own pipeline, artifact, and release cadence — this is the main payoff of the architecture.</li><li>It only works if APIs and events stay <strong>backward compatible</strong>, so old and new versions can run side by side during a rollout.</li><li>Database changes use <strong>expand and contract</strong>: add the new column, dual-write and backfill, switch reads, then drop the old column in a later release.</li><li>Deploy and release are separate: feature flags let code ship dark and be enabled later.</li><li>Rollback must be safe; once downstream services consume a new event, rolling back the producer may not undo the effect.</li><li>Version and label every instance so logs and metrics show which build produced an anomaly.</li><li>If services can only be released together, you have a distributed monolith and pay the network cost for nothing.</li></ul>
+
+<div class="flow"><span class="flow-step">Build</span><span class="flow-arrow">→</span><span class="flow-step">Contract tests</span><span class="flow-arrow">→</span><span class="flow-step">Deploy canary</span><span class="flow-arrow">→</span><span class="flow-step">Observe</span><span class="flow-arrow">→</span><span class="flow-step">Full rollout or rollback</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Independent scaling</h2>
+<ul><li>Scale only the service that is hot instead of replicating the entire application.</li><li>Each service has its own resource profile — CPU-heavy encoding, memory-heavy caching, IO-heavy queries — and can be sized separately.</li><li>Autoscaling requires stateless instances, fast startup, and a load balancer that can add and remove targets.</li><li>Shared bottlenecks still cap the system: one primary database, one broker partition, or one gateway can undo per-service scaling.</li><li>More instances mean more coordination, more connections to downstream systems, and more telemetry.</li><li>Set SLOs and capacity targets per service rather than one global average.</li><li>Connection pooling and concurrency limits protect downstream systems from a scaled-out caller.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Failure isolation and resilience</h2>
+<ul><li>Design for <strong>partial failure</strong>: a request that touches five services has five chances to fail or stall.</li><li><strong>Timeouts</strong> bound how long a caller waits; without them, threads and connections pile up.</li><li>Retries must be bounded, jittered, and applied only to idempotent operations — otherwise they amplify an outage.</li><li><strong>Circuit breakers</strong> fail fast while a dependency is unhealthy and probe for recovery instead of hammering it.</li><li><strong>Bulkheads</strong> give each dependency its own pool, so one slow dependency cannot starve all request handling.</li><li>Idempotency keys make retried writes safe and are essential for payments and order creation.</li><li>Graceful degradation — cached or partial content, queued writes — beats failing the whole page.</li><li>Health checks and readiness gates keep traffic away from instances that cannot serve it.</li></ul>
+
+<div class="flow"><span class="flow-step">Call dependency</span><span class="flow-arrow">→</span><span class="flow-step">Timeout or breaker opens</span><span class="flow-arrow">→</span><span class="flow-step">Fallback, queue, or error</span><span class="flow-arrow">→</span><span class="flow-step">Probe and close breaker</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Operational prerequisites</h2>
+<p class="lede">Microservices move complexity from code into operations. Without the platform, the architecture fails for reasons unrelated to design.</p>
+<ul><li><strong>Containers and orchestration</strong> (or an equivalent platform) to schedule, restart, and place many small deployments.</li><li><strong>Service discovery and load balancing</strong>, because instances appear and disappear constantly.</li><li>An <strong>API gateway</strong> at the edge for authentication, routing, rate limits, and request IDs.</li><li><strong>Centralized logs, metrics, and distributed tracing</strong> with a correlation ID propagated across every hop.</li><li>Externalized configuration and secret management instead of baked-in environment values.</li><li>Per-service SLOs, alerting, and a clear on-call owner; anonymous services become nobody's problem.</li><li>CI/CD with contract tests, canaries, and automated rollback.</li><li>Cost visibility per service, because many small workloads can cost more than one large one.</li></ul>
+
+
+<div class="note">A useful test: could you deploy this service on a Friday afternoon without a meeting? If not, the platform or the boundaries are not ready.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Data consistency across services</h2>
+<ul><li>ACID transactions stop at the service boundary; there is no cheap distributed transaction across independent databases.</li><li>A <strong>saga</strong> is a sequence of local transactions with compensating actions when a later step fails.</li><li>Compensations are business actions (refund, release reservation), not a rollback — some effects may be visible briefly.</li><li><strong>Orchestration</strong> uses a central coordinator that knows the steps; <strong>choreography</strong> lets each service react to events.</li><li>The <strong>transactional outbox</strong> solves the dual-write problem: write state and the outgoing event in one local transaction, then relay the event.</li><li>Consumers must deduplicate or be idempotent, since events can be delivered more than once.</li><li>Eventual consistency must reach the UX: show pending or processing states instead of pretending the write already propagated.</li><li>Reconciliation jobs catch drift when compensations or retries fail in ways the saga did not anticipate.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Orchestration</th><th>Choreography</th></tr></thead><tbody><tr><td>Control</td><td>Central coordinator decides next step</td><td>Each service reacts to events</td></tr>
+<tr><td>Coupling</td><td>Coordinator knows all participants</td><td>Participants only know events</td></tr>
+<tr><td>Visibility</td><td>Easy to see the whole flow</td><td>Flow is emergent and harder to trace</td></tr>
+<tr><td>Risk</td><td>Coordinator becomes a bottleneck</td><td>Cycles and hidden dependencies</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Benefits and costs</h2>
+<ul><li><strong>Benefits:</strong> team autonomy, independent deploys, targeted scaling, fault isolation, and freedom to choose tools per service.</li><li><strong>Costs:</strong> network latency, partial failure, distributed data, duplicated infrastructure, and much harder debugging.</li><li>A remote call is orders of magnitude slower and less reliable than an in-process call; design coarse boundaries to keep the count low.</li><li>Testing shifts: unit tests stay easy, but integration and contract tests are required to catch breakage between independently deployed services.</li><li>Every engineer needs baseline distributed-systems literacy: retries, idempotency, consistency, and observability.</li><li>Organizational fit matters: teams must be able to own a service end to end, or the autonomy is fictional.</li><li>Microservices are primarily a scaling tool for organizations and change rate, not a default for good code.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Monolith, modular monolith, microservices</h2>
+<ul><li>A <strong>monolith</strong> is one deployable with shared memory and one database; simplest to build, test, and operate.</li><li>A <strong>modular monolith</strong> keeps one deployable but enforces internal module boundaries and private data per module.</li><li>A well-modularized monolith can be split later; a tangled one usually has to be rewritten first.</li><li>Choose microservices when independent deploy cadence, team autonomy, or per-component scaling is the real constraint.</li><li>Fewer services is usually better — each one adds a network boundary, a pipeline, and an on-call rotation.</li><li>Serverless functions, containers, and services are orthogonal choices; a system can mix all three.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Monolith</th><th>Modular monolith</th><th>Microservices</th></tr></thead><tbody><tr><td>Deployment</td><td>One unit</td><td>One unit</td><td>Many independent units</td></tr>
+<tr><td>Boundaries</td><td>Informal, easy to erode</td><td>Enforced in code</td><td>Network and contracts</td></tr>
+<tr><td>Data</td><td>One database</td><td>One database, private schemas</td><td>Database per service</td></tr>
+<tr><td>Scaling</td><td>Whole app</td><td>Whole app</td><td>Per service</td></tr>
+<tr><td>Failure</td><td>Process-wide</td><td>Process-wide</td><td>Isolated but partial</td></tr>
+<tr><td>Best for</td><td>Small teams, early product</td><td>Growing domain, one team</td><td>Many teams, high change rate</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Deciding and migrating</h2>
+<ul><li>Do multiple teams genuinely block each other on releases? If not, microservices buy little.</li><li>Can you fund the platform, observability, and on-call work? If not, the architecture will fail operationally.</li><li>Is the domain understood well enough to draw stable boundaries? If not, start with a modular monolith.</li><li>Can the key flows tolerate eventual consistency? If not, keep those flows inside one service.</li><li>Do you have a plan for cross-service reporting and historical data before you split the schema?</li><li>Migrate with the <strong>strangler fig</strong> pattern: put a facade in front of the capability, extract it, route traffic over, then delete the old path.</li><li>Extract the least entangled, highest-pain capability first to prove the platform and the team model.</li></ul>
+
+<div class="flow"><span class="flow-step">Pick a capability</span><span class="flow-arrow">→</span><span class="flow-step">Put a facade in front</span><span class="flow-arrow">→</span><span class="flow-step">Extract the service</span><span class="flow-arrow">→</span><span class="flow-step">Shift traffic</span><span class="flow-arrow">→</span><span class="flow-step">Delete the old path</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Independent deployment</strong> speeds up teams but turns every interface into a versioned contract that must stay backward compatible.</li><li><strong>Database per service</strong> enables autonomous change but makes joins, transactions, and reporting into distributed problems.</li><li><strong>Synchronous APIs</strong> give immediate answers but create runtime coupling and cascading failure across hops.</li><li><strong>Asynchronous events</strong> decouple services in time but introduce eventual consistency, duplicates, and ordering questions.</li><li><strong>Targeted scaling</strong> saves capacity but shared bottlenecks and per-service overhead can erase the gain.</li><li><strong>Fault isolation</strong> contains failures to one service but forces every caller to handle partial failure and fallbacks.</li><li><strong>Technology heterogeneity</strong> lets each team pick the right tool but multiplies operational and hiring surface.</li><li><strong>Fine-grained services</strong> maximize isolation and reuse but multiply network calls, latency, and coordination cost.</li><li><strong>Team autonomy</strong> increases throughput but requires a real platform team and end-to-end ownership.</li><li><strong>Starting with a monolith</strong> is faster and simpler but can delay the organizational scaling the business needs.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is microservices architecture?</summary><div class="answer"><p>A style where the system is split into small services aligned to business capabilities, each independently deployable, owning its own data, and communicating over the network through APIs or events. The goal is independent change and scaling per team, at the cost of distributed-systems complexity.</p></div></details>
+<details><summary>2. How do you decide where service boundaries go?</summary><div class="answer"><p>Start from business capabilities and bounded contexts, then test the boundary against change cadence: do changes ship with one service, is there a single writer of the data, and does one team own it end to end? Avoid one-service-per-table designs and split only where atomicity is not required across the seam.</p></div></details>
+<details><summary>3. Why does each service need its own database?</summary><div class="answer"><p>Private schema is what makes independent evolution real: the service can change storage without coordinating with consumers. A shared database recreates compile-time-style coupling over the network, so schema changes require cross-team releases and services silently depend on each other's internals.</p></div></details>
+<details><summary>4. When would you use synchronous calls instead of events?</summary><div class="answer"><p>Use synchronous calls for queries and user-facing reads where the caller needs an answer now. Use events for side effects and propagation where the caller does not need to wait. Synchronous chains are acceptable when short and bounded; long chains of blocking calls multiply latency and failure probability.</p></div></details>
+<details><summary>5. How do you handle a transaction that spans services?</summary><div class="answer"><p>You cannot use a single ACID transaction. Use a saga: a sequence of local transactions, each with a compensating action if a later step fails. Pair writes with a transactional outbox so state and events commit together, and make consumers idempotent because delivery is at least once.</p></div></details>
+<details><summary>6. What is a distributed monolith and how do you spot one?</summary><div class="answer"><p>It is a system split into services that still must be deployed, versioned, or changed together, so you pay network and operational costs without gaining autonomy. Signals: shared databases, lockstep releases, chatty synchronous chains, and services that cannot be tested alone.</p></div></details>
+<details><summary>7. How do you deploy independently without breaking consumers?</summary><div class="answer"><p>Keep APIs and events backward compatible, version contracts, and use expand-and-contract for schema changes: add the new field, dual-write and backfill, migrate readers, then remove the old field later. Contract tests and canary releases catch breakage before full rollout.</p></div></details>
+<details><summary>8. How do you prevent one slow service from taking down the system?</summary><div class="answer"><p>Use timeouts, bounded jittered retries only for idempotent calls, circuit breakers to fail fast, and bulkheads so each dependency has its own pool. Add graceful degradation such as cached or partial responses, and monitor error rates and saturation per dependency.</p></div></details>
+<details><summary>9. What operational capabilities are required before adopting microservices?</summary><div class="answer"><p>Automated per-service CI/CD, container orchestration, service discovery and load balancing, an API gateway, centralized logs and metrics, distributed tracing, secret management, and per-service SLOs with on-call ownership. Without them, the team spends its time firefighting infrastructure instead of shipping.</p></div></details>
+<details><summary>10. How do you debug a request that crosses many services?</summary><div class="answer"><p>Propagate a correlation or trace ID from the edge through every call and message, and include it in every log line. Centralized logs plus distributed tracing reconstruct the request path, timings, and errors. Without a shared identifier, cross-service debugging is guesswork.</p></div></details>
+<details><summary>11. When would you not use microservices?</summary><div class="answer"><p>When the domain is poorly understood, the team is small, release coordination is not actually a bottleneck, or there is no platform and observability investment. A modular monolith gives most of the code-level discipline with far less operational cost, and can be split later.</p></div></details>
+<details><summary>12. How do you migrate a monolith to services?</summary><div class="answer"><p>Use the strangler fig approach: pick a capability with clear boundaries, put a facade in front of it, extract the implementation into a service, shift traffic gradually, and delete the old code path. Extract the least entangled high-pain capability first to validate the platform and team model.</p></div></details>
+<details><summary>13. How do you test microservices?</summary><div class="answer"><p>Unit-test business logic inside each service, contract-test the interfaces consumers depend on, and run a small number of end-to-end tests for critical flows. Test failure paths deliberately: timeouts, retries, duplicate events, and dependency outages. Heavy end-to-end suites become slow and flaky as service count grows.</p></div></details>
+<details><summary>14. How do you handle reporting when data is spread across services?</summary><div class="answer"><p>Do not query live service databases. Stream changes into a warehouse or data lake using CDC or events, and build read models there. This keeps service schemas private and gives analytics a stable, queryable copy without adding load to transactional systems.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Splitting by technical layer (UI service, logic service, data service) instead of business capability.</li><li>Keeping a shared database and calling the result microservices.</li><li>Creating one service per entity, which turns every screen into a chain of chatty CRUD calls.</li><li>Using distributed transactions or two-phase commit across service databases instead of sagas.</li><li>Shipping services that can only be released together — a distributed monolith.</li><li>Adding unbounded retries without idempotency, turning a small outage into a retry storm.</li><li>Adopting microservices before observability, CI/CD, and on-call ownership exist.</li><li>Measuring success by service count rather than by deploy frequency, lead time, and reliability.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="client-server-architecture.html"><span>← Previous</span><strong>Client-Server Architecture</strong></a><a class="next" href="serverless-architecture.html"><span>Next →</span><strong>Serverless Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/microservices-architecture">AlgoMaster — Microservices Architecture</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

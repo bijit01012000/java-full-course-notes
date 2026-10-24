@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caching Strategies — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 25 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Caching Strategies</h1>
+    <p class="dek">Caching · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/caching-strategies">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why one strategy is not enough</a>
+<a href="#s2">Cache-aside: the read path</a>
+<a href="#s3">Cache-aside: writes and invalidation</a>
+<a href="#s4">Read-through</a>
+<a href="#s5">Cache-aside versus read-through</a>
+<a href="#s6">Write-through</a>
+<a href="#s7">Write-behind</a>
+<a href="#s8">Write-behind: durability and ordering risks</a>
+<a href="#s9">Write-around</a>
+<a href="#s10">Combining read and write strategies</a>
+<a href="#s11">Choosing the right strategy</a>
+<a href="#s12">Failure modes and operating rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Caching strategies answer one question: who moves data between cache and database, and when — with cache-aside as the default read pattern and write-through, write-behind, or write-around chosen to fit the write path.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Cache-aside (lazy loading)</dt><dd>The application checks the cache itself, loads from the database on a miss, and populates the cache.</dd></div><div class="term"><dt>Read-through</dt><dd>The cache layer loads missing data from the database, so the application only talks to the cache.</dd></div><div class="term"><dt>Write-through</dt><dd>Every write goes through the cache, which writes to the database before acknowledging success.</dd></div><div class="term"><dt>Write-behind (write-back)</dt><dd>The cache acknowledges the write immediately and persists it to the database asynchronously later.</dd></div><div class="term"><dt>Write-around</dt><dd>Writes go directly to the database and bypass the cache, which is populated only when data is later read.</dd></div><div class="term"><dt>Cache invalidation</dt><dd>Removing or updating a cached entry when the underlying data changes so stale values are not served.</dd></div><div class="term"><dt>Loader function</dt><dd>The function registered with a read-through cache that knows how to fetch a missing value from the source.</dd></div><div class="term"><dt>Durability</dt><dd>The guarantee that an acknowledged write survives a crash; write-behind weakens this until the flush completes.</dd></div><div class="term"><dt>Cache pollution</dt><dd>Filling the cache with entries that are written but rarely read, displacing more useful data.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why one strategy is not enough</h2>
+<p class="lede">A cache sits between the application and the source of truth. There are several ways requests can move through those components.</p>
+<ul><li>For reads, either the application checks the cache itself or the cache automatically fetches missing data.</li><li>For writes, the system can update the database first, update cache and database together, or write the cache and persist later.</li><li>Each arrangement produces a different strategy with different latency, consistency, and durability.</li><li>The right choice depends on what matters most: read performance, write performance, consistency, simplicity, or durability.</li><li>Read strategies and write strategies are separate decisions and are often combined.</li><li>Naming the data flow explicitly prevents accidental mixes that quietly break consistency.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Decision</th><th>Options</th></tr></thead><tbody><tr><td>Read miss</td><td>Application loads from database, or cache loads from database</td></tr>
+<tr><td>Write</td><td>Database first, cache and database together, cache first, or database only</td></tr>
+<tr><td>Success returned</td><td>After database commit, after cache write, or after both</td></tr>
+<tr><td>Consistency</td><td>Immediate, eventually fresh, or lagging by design</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Cache-aside: the read path</h2>
+<p class="lede">Cache-aside, also called lazy loading, is the most common strategy. The application manages the cache explicitly.</p>
+<ul><li>The application checks the cache first and returns the value immediately on a hit.</li><li>On a miss, the application queries the database, stores the result in the cache, then returns it.</li><li>The cache never talks to the database on its own; the application owns both the lookup and the population.</li><li>It is called <em>lazy</em> because data enters the cache only when somebody actually requests it.</li><li>Only requested data is cached, so memory is not wasted on rows nobody reads.</li><li>The first request for a key is slower because it must reach the database.</li><li>The application must handle hits, misses, database reads, and invalidation — more code than a transparent cache.</li></ul>
+
+
+<pre class="code"><code>value = cache.get(key)
+if value is None:
+    value = db.query(key)
+    cache.set(key, value, ttl)
+return value</code></pre>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Cache-aside: writes and invalidation</h2>
+<ul><li>If a value is cached and the database changes, updating only the database leaves the cache stale.</li><li>The common pattern is to <strong>update the database, then delete the cache entry</strong>.</li><li>The next read then misses, fetches the latest value, and repopulates the cache.</li><li>You could update both database and cache, but keeping two copies synchronized is harder.</li><li>Two concurrent writers can reach the database and the cache in different orders, leaving the cache with the older value.</li><li>Deleting rather than updating avoids that ordering race in most cases, which is why it is the usual choice.</li><li>A delete can still fail or race with a concurrent read that repopulates an old value, so TTLs act as a backstop.</li></ul>
+
+<div class="flow"><span class="flow-step">Write database</span><span class="flow-arrow">→</span><span class="flow-step">Delete cache entry</span><span class="flow-arrow">→</span><span class="flow-step">Next read misses</span><span class="flow-arrow">→</span><span class="flow-step">Load fresh value</span><span class="flow-arrow">→</span><span class="flow-step">Repopulate cache</span><span class="flow-arrow">→</span><span class="flow-step">Serve fresh value</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Read-through</h2>
+<p class="lede">Read-through looks similar to cache-aside from outside, but the cache owns the miss handling.</p>
+<ul><li>The application asks the cache for the data as if the cache were the main data access layer.</li><li>On a hit, the cache returns the value directly.</li><li>On a miss, the cache itself retrieves the value from the database, stores it, and returns it.</li><li>The loading logic lives in the cache layer, usually as a loader function registered once.</li><li>Application code becomes cleaner because it does not implement cache-miss logic.</li><li>It requires a cache or library that knows how to load from the source; a plain key-value store is not enough.</li><li>If the loader breaks or is misconfigured, reads through the cache fail too.</li></ul>
+
+
+<pre class="code"><code>cache = LoadingCache(loader = key -&gt; db.query(key), ttl = 300)
+value = cache.get(key)   # cache loads on miss</code></pre>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Cache-aside versus read-through</h2>
+<ul><li>Both end up caching frequently accessed data, and both may send the first request to the database.</li><li>The difference is <strong>who handles the miss</strong>: the application or the cache layer.</li><li>Cache-aside needs only a general-purpose key-value store such as Redis or Memcached.</li><li>Read-through needs a cache or library that supports a loader, such as a local caching library with refresh semantics.</li><li>Read-through centralizes loading, which helps when many services share the same read pattern.</li><li>Cache-aside keeps loading logic visible in application code, which some teams prefer for flexibility and debugging.</li><li>Cache-aside is the easier default with Redis; read-through is attractive when the cache abstraction is already strong.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Cache-Aside</th><th>Read-Through</th></tr></thead><tbody><tr><td>Who handles a miss</td><td>Application</td><td>Cache layer</td></tr>
+<tr><td>Application code</td><td>Cache and database calls</td><td>One call to the cache</td></tr>
+<tr><td>Cache requirements</td><td>Any key-value store</td><td>A cache or library that can load from the source</td></tr>
+<tr><td>If the loader breaks</td><td>Not applicable</td><td>Reads through the cache fail too</td></tr>
+<tr><td>Typical use</td><td>Redis or Memcached with app logic</td><td>Local caching library with a loader</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Write-through</h2>
+<p class="lede">With write-through, every write goes through the cache, and the cache writes to the database before the operation is acknowledged.</p>
+<ul><li>The application writes the new value to the cache.</li><li>The cache writes that value to the database as part of the same operation.</li><li>The write is successful only after the database has also been updated.</li><li>Cache and database stay closely synchronized, so an immediate read sees the latest value.</li><li>It does not normally make writes faster: every write still reaches the database, plus cache overhead.</li><li>Its main benefit is keeping frequently accessed data warm and consistent after writes.</li><li>All writers must use the same cache path; a service writing directly to the database bypasses the cache and leaves it stale.</li></ul>
+
+<div class="flow"><span class="flow-step">Application writes cache</span><span class="flow-arrow">→</span><span class="flow-step">Cache writes database</span><span class="flow-arrow">→</span><span class="flow-step">Database commit succeeds</span><span class="flow-arrow">→</span><span class="flow-step">Acknowledge write</span><span class="flow-arrow">→</span><span class="flow-step">Cache and DB agree</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Write-behind</h2>
+<p class="lede">Write-behind, or write-back, acknowledges the cache write immediately and persists to the database asynchronously.</p>
+<ul><li>The application writes to the cache, and the cache returns success quickly.</li><li>The database update happens later, often batched with other changes.</li><li>Writes become much faster because the request no longer waits for the database.</li><li>Batching reduces database load: many rapid updates can collapse into fewer database writes.</li><li>A page-view counter updated constantly might become a single periodic database write.</li><li>The cache temporarily holds data that has not reached the durable source of truth.</li><li>Readers of the cache see the newest value while anything reading the database directly sees an older one until the flush.</li></ul>
+
+
+<div class="note">Write-behind is usually reserved for a narrow, high-volume, low-risk path rather than used across the whole system.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Write-behind: durability and ordering risks</h2>
+<ul><li>If the cache acknowledges a write and then fails before flushing, data held only in volatile memory can be lost.</li><li>Replication, persistent logs, or durable queues narrow that window but do not close it for free.</li><li>Redis AOF depends on fsync frequency: the common <code>everysec</code> setting can still lose about a second of writes.</li><li>With <code>always</code>, writes are safer but much slower, removing much of the reason to use write-behind.</li><li>The background writer must handle ordering, retries, and duplicate writes.</li><li>A retried batch must not apply the same update twice, and an old value must not overwrite a newer one.</li><li>Anything reading the database directly — reports, analytics, other services — sees stale data until the flush completes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Write-around</h2>
+<p class="lede">Write-around takes almost the opposite approach from write-through: writes go straight to the database and skip the cache.</p>
+<ul><li>A new product is written directly to the database and is not immediately placed in the cache.</li><li>If someone later requests it, the first read misses, loads from the database, and caches the result.</li><li>That read path is usually cache-aside.</li><li>The cache only holds values that somebody actually read, so it is not filled by writes alone.</li><li>This suits write-heavy workloads where much written data may never be read again: bulk imports, event ingestion, append-only logs.</li><li>The downside is that recently written data is not immediately cached, so read-after-write pays a database round trip.</li><li>If the key was already cached before the write, the cached copy is stale, so write-around is usually paired with deleting the entry on write.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Combining read and write strategies</h2>
+<ul><li>Read strategies decide what happens on a miss; write strategies decide what happens when data changes.</li><li>A system usually picks one of each rather than adopting a single named pattern everywhere.</li><li>The most common combination is cache-aside reads with database update plus cache delete on writes.</li><li>Read-through plus write-through makes the cache the main interface for both reads and writes.</li><li>Write-behind can reduce database pressure for a high-volume path while normal paths stay strictly consistent.</li><li>Write-around plus cache-aside fits write-heavy data that is rarely read back.</li><li>Mixing strategies across different data types is normal, as long as each key family has one clear owner.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Read miss handling</th><th>Write path</th><th>Success returned</th><th>Freshness</th><th>When to use</th></tr></thead><tbody><tr><td>Cache-Aside</td><td>Application loads from DB</td><td>App writes DB, then deletes cache entry</td><td>After DB write and cache delete</td><td>Eventually fresh through TTL or delete</td><td>Read-heavy, simple default</td></tr>
+<tr><td>Read-Through</td><td>Cache layer loads from DB</td><td>Not a write strategy</td><td>Not applicable</td><td>Eventually fresh</td><td>Cache hides database access from the app</td></tr>
+<tr><td>Write-Through</td><td>Cache layer loads if paired with read-through</td><td>App writes through cache; cache writes DB</td><td>After DB write succeeds</td><td>Fresh if all writers use the cache path</td><td>Recent writes are read again soon</td></tr>
+<tr><td>Write-Behind</td><td>Application or cache loads from DB</td><td>App writes cache; DB write happens later</td><td>After cache write</td><td>Database lags; acknowledged writes can be lost</td><td>High write throughput, some delay acceptable</td></tr>
+<tr><td>Write-Around</td><td>Application loads from DB</td><td>App writes DB directly; cache is skipped</td><td>After DB write succeeds</td><td>First read after a write misses</td><td>Write-heavy, written data rarely read</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Choosing the right strategy</h2>
+<p class="lede">Start with the access pattern, then check consistency, durability, and failure behaviour.</p>
+<ul><li><strong>Mostly reads, want simplicity:</strong> cache-aside.</li><li><strong>Cache should hide database access from the application:</strong> read-through.</li><li><strong>Recently written values are read immediately and freshness matters:</strong> write-through.</li><li><strong>Write latency and throughput are the main concern:</strong> write-behind, with a durable buffer for pending writes.</li><li><strong>Lots of written data may never be read:</strong> write-around, to avoid cache pollution.</li><li>Ask what the read pattern is, what the write pattern is, how much staleness is tolerable, how important write latency is, and what happens if the cache fails.</li><li>If losing an acknowledged write is unacceptable — payments, orders, audit logs — do not use write-behind for that path.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Workload shape</th><th>Strategy to consider</th></tr></thead><tbody><tr><td>Mostly reads and you want something simple</td><td>Cache-Aside</td></tr>
+<tr><td>The cache layer should hide database access</td><td>Read-Through</td></tr>
+<tr><td>Recently written values are likely read immediately</td><td>Write-Through</td></tr>
+<tr><td>Write latency and throughput are the main concern</td><td>Write-Behind, with a durable buffer</td></tr>
+<tr><td>Lots of written data may never be read</td><td>Write-Around</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Identify read pattern</span><span class="flow-arrow">→</span><span class="flow-step">Identify write pattern</span><span class="flow-arrow">→</span><span class="flow-step">Set staleness budget</span><span class="flow-arrow">→</span><span class="flow-step">Check durability needs</span><span class="flow-arrow">→</span><span class="flow-step">Choose read + write strategy</span><span class="flow-arrow">→</span><span class="flow-step">Test cache failure</span></div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Failure modes and operating rules</h2>
+<ul><li>Define one write path per key family; a second path that bypasses the cache silently invalidates the strategy.</li><li>Prefer deleting a cache entry over updating it in place to avoid write-order races.</li><li>Always keep a TTL as a backstop, even when explicit invalidation exists.</li><li>Make cache failures non-fatal: fall back to the database with timeouts and load protection.</li><li>For write-behind, log pending writes durably and make replay idempotent.</li><li>Monitor hit ratio, cache latency, eviction rate, and the backend request rate that slips through.</li><li>Load-test the full-miss path, because that is what runs when the cache is cold or down.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Cache-aside</strong> is simple and caches only what is read, but every miss and every invalidation lives in application code.</li><li><strong>Read-through</strong> centralizes loading and simplifies callers, but depends on a loader-capable cache and fails reads if the loader fails.</li><li><strong>Write-through</strong> keeps cache and database consistent after writes, but does not speed writes up and can pollute the cache with rarely read data.</li><li><strong>Write-behind</strong> delivers the fastest writes and absorbs bursts, but acknowledged writes can be lost and the database lags.</li><li><strong>Write-around</strong> avoids filling the cache with unread writes, but read-after-write always pays a database miss.</li><li><strong>Deleting on write</strong> avoids cache/database ordering races, but leaves the next read to repopulate and may briefly serve a miss.</li><li><strong>Updating the cache on write</strong> keeps hot data warm, but concurrent writers can finish in the opposite order and leave stale data.</li><li><strong>One shared cache path</strong> makes consistency tractable, but couples every writer to the cache layer's availability and latency.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is cache-aside, and why is it so common?</summary><div class="answer"><p>The application checks the cache, loads from the database on a miss, and populates the cache itself. It is common because it needs only a general-purpose key-value store, caches only data that is actually read, and degrades to direct database reads if the cache is unavailable. It suits read-heavy workloads such as product catalogs and user profiles.</p></div></details>
+<details><summary>2. How do you handle writes with cache-aside?</summary><div class="answer"><p>Update the database first, then delete the cache entry. The next read misses and repopulates with fresh data. Deleting rather than updating avoids the race where two concurrent writers update cache and database in opposite orders. A TTL is still kept as a backstop for failed deletes.</p></div></details>
+<details><summary>3. Cache-aside vs read-through?</summary><div class="answer"><p>Both cache data lazily, but cache-aside puts miss handling in the application while read-through puts it in the cache layer via a loader. Read-through gives cleaner application code and one shared loading path; cache-aside works with any key-value store and keeps the logic visible. Redis is typically used with cache-aside; a local caching library supports read-through.</p></div></details>
+<details><summary>4. How does write-through work?</summary><div class="answer"><p>The application writes to the cache, the cache writes to the database, and success is returned only after the database write succeeds. The cache and database stay synchronized, so a subsequent read sees the new value immediately. It does not make writes faster, since every write still reaches the database.</p></div></details>
+<details><summary>5. What is the main risk of write-through?</summary><div class="answer"><p>The cache can fill with data that is written once and never read, wasting memory and evicting more useful entries. It also requires every writer to go through the cache; a service that writes directly to the database leaves the cache stale. It is most useful when recently written data is likely to be read again soon.</p></div></details>
+<details><summary>6. How does write-behind improve write performance?</summary><div class="answer"><p>The cache acknowledges the write immediately and persists to the database asynchronously, often batching many updates into fewer database writes. The application no longer waits for the database on every request, which raises throughput and reduces database load. The cost is durability and consistency lag.</p></div></details>
+<details><summary>7. What can go wrong with write-behind?</summary><div class="answer"><p>An acknowledged write can be lost if the cache fails before flushing, so the cache temporarily owns data that has not reached durable storage. Background writes must handle ordering, retries, and duplicates so an old value does not overwrite a newer one. Anything reading the database directly sees stale data until the flush. It is unsuitable for payments, orders, or audit logs.</p></div></details>
+<details><summary>8. When would you use write-around?</summary><div class="answer"><p>When most written data is unlikely to be read soon, such as bulk imports, event ingestion, or append-only logs. Writing directly to the database avoids filling the cache with values nobody requests. The cost is that read-after-write always misses and pays a database round trip, so it is a poor fit for read-your-writes workflows.</p></div></details>
+<details><summary>9. Why delete the cache entry instead of updating it on write?</summary><div class="answer"><p>Two concurrent writers can update the database and the cache in different orders, leaving the cache holding an older value. Deleting makes the next read fetch the authoritative value, sidestepping that race in most cases. Updating in place can keep hot data warmer, but only with careful ordering or versioning.</p></div></details>
+<details><summary>10. Can you combine caching strategies?</summary><div class="answer"><p>Yes, and most systems do. Read and write strategies answer different questions, so a common combination is cache-aside reads with database-update-plus-cache-delete writes. Another is read-through with write-through when the cache is the main data interface. Write-behind is usually limited to a specific high-volume path rather than applied system-wide.</p></div></details>
+<details><summary>11. How do you choose a caching strategy?</summary><div class="answer"><p>Start from the access pattern: read-heavy and simple points to cache-aside; hide-the-database abstraction points to read-through; read-after-write freshness points to write-through; write throughput with tolerable delay points to write-behind; writes rarely read back point to write-around. Then check staleness tolerance, durability requirements, and what happens if the cache fails.</p></div></details>
+<details><summary>12. What happens if the cache is unavailable in each strategy?</summary><div class="answer"><p>With cache-aside, the application can usually fall back to the database, so reads still succeed more slowly. With read-through, reads through the cache can fail if the cache is the only path to the loader. With write-through, writes may fail because the write must pass through the cache. With write-behind, pending writes must survive in a durable buffer or they are lost.</p></div></details>
+<details><summary>13. Which strategies are safe for payments?</summary><div class="answer"><p>Payments need durable, ordered writes and strong consistency, so write-behind is inappropriate because an acknowledged write can be lost. A database-first write with cache invalidation, or write-through with a reliable database commit, is safer. Many systems skip caching the authoritative balance entirely and cache only derived, non-critical views.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Using write-behind for payments, orders, or audit logs where an acknowledged write must never be lost.</li><li>Updating the cache and database separately and assuming the two copies will stay in the same order.</li><li>Letting one service write directly to the database while others use write-through, leaving the cache stale.</li><li>Assuming write-through makes writes faster when every write still waits for the database.</li><li>Using write-around and then expecting the first read after a write to be fast.</li><li>Forgetting to invalidate an existing cache entry when using write-around for an update.</li><li>Treating write-behind as durable because the cache is replicated, without checking fsync and replay guarantees.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="what-is-caching.html"><span>← Previous</span><strong>What is Caching?</strong></a><a class="next" href="cache-eviction-policies.html"><span>Next →</span><strong>Cache Eviction Policies</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/caching-strategies">AlgoMaster — Caching Strategies</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

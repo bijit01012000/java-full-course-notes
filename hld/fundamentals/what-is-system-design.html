@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What is System Design? — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 01 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>What is System Design?</h1>
+    <p class="dek">Introduction · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/what-is-system-design">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">What system design means</a>
+<a href="#s3">Starting with requirements</a>
+<a href="#s4">The building blocks</a>
+<a href="#s5">Following an upload through the system</a>
+<a href="#s6">Following a feed read through the system</a>
+<a href="#s7">What we design for</a>
+<a href="#s8">Every choice is a trade-off</a>
+<a href="#s9">Designs evolve</a>
+<a href="#s10">Why learn system design</a>
+<a href="#s11">System design in interviews</a>
+<a href="#s12">A repeatable way to reason</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>System design is the process of deciding which components a system needs, what each one owns, how they communicate, and how data flows between them — so the system meets its functional and non-functional requirements at a level above writing code.</div>
+      <p class="deep-link"><a href="../01-what-is-system-design.html">Open the extended deep-dive note for this topic →</a></p>
+      <dl class="key-terms"><div class="term"><dt>System design</dt><dd>The process of choosing components, assigning responsibilities, defining communication, and shaping data flow to satisfy requirements.</dd></div><div class="term"><dt>Functional requirement</dt><dd>A statement of what the system must do, such as upload a photo, follow a user, or show a feed.</dd></div><div class="term"><dt>Non-functional requirement</dt><dd>A statement of how well the system must do something: latency, availability, durability, consistency, or cost.</dd></div><div class="term"><dt>Building block</dt><dd>A reusable infrastructural component — load balancer, cache, queue, database, object store, CDN — with a known role and cost.</dd></div><div class="term"><dt>Data flow</dt><dd>The ordered path a request or event takes through clients, services, storage, and asynchronous workers.</dd></div><div class="term"><dt>Bottleneck</dt><dd>The component or resource whose capacity limits the end-to-end system, and therefore the next thing to fix.</dd></div><div class="term"><dt>Trade-off</dt><dd>A gain in one quality that is paid for by a loss in another, such as lower read latency at the cost of stale data.</dd></div><div class="term"><dt>Back-of-the-envelope estimate</dt><dd>A rough calculation of users, requests per second, storage, and bandwidth used to locate pressure points before designing.</dd></div><div class="term"><dt>Evolutionary design</dt><dd>Adding components only when a measured problem justifies them, rather than building the final architecture on day one.</dd></div><div class="term"><dt>Pre-signed URL</dt><dd>A time-limited URL that lets a client upload or download directly from object storage without routing bytes through the app server.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">A photo-sharing app on a single server is a perfectly good design for its first few thousand users. Growth does not change the upload code; it changes the set of problems the architecture must answer.</p>
+<ul><li><strong>Storage:</strong> hundreds of terabytes of photos do not belong in the same database rows as user profiles and captions.</li><li><strong>Failure:</strong> when one server holds the app, the database, and the files, a single crash removes all three at once.</li><li><strong>Distance:</strong> a feed request from India to a server in the United States pays a round-trip penalty on every call.</li><li><strong>Spikes:</strong> a popular account posting a photo can send a million readers at the same object at the same moment.</li><li>These problems cannot be solved inside one function; they are decided by how the parts are separated and connected.</li><li>The same feature set can require radically different designs at a thousand users and at ten million.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Growth pressure</th><th>Design response</th></tr></thead><tbody><tr><td>Photo volume</td><td>Object storage plus a CDN</td></tr>
+<tr><td>Server crash</td><td>Redundant app servers and failover</td></tr>
+<tr><td>Global users</td><td>Edge caching and regional deployment</td></tr>
+<tr><td>Traffic spike</td><td>Cache, queue, autoscaling, rate limits</td></tr>
+<tr><td>Data growth</td><td>Replication, partitioning, sharding</td></tr></tbody></table></div>
+
+<div class="note">A single server is not a mistake at small scale. The mistake is assuming it remains sufficient without measuring.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What system design means</h2>
+<p class="lede">System design sits one level above code. Code asks whether an algorithm is correct and efficient; design asks whether the components can carry the load and what happens when one of them fails.</p>
+<ul><li>It decides <strong>which components exist</strong> and where the boundaries between them are drawn.</li><li>It assigns each component a <strong>responsibility</strong>, including which data it owns and which data it only reads.</li><li>It chooses <strong>communication style</strong>: synchronous HTTP calls, asynchronous messages, or shared storage.</li><li>It defines <strong>data flow</strong>, including where data is cached, replicated, and transformed.</li><li>It must describe <strong>failure behavior</strong>, not only the happy path.</li><li>The architecture diagram is an output of these decisions, not the design itself.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Writing code</th><th>Designing a system</th></tr></thead><tbody><tr><td>Primitives</td><td>Functions, classes, data structures</td><td>Servers, databases, caches, queues, storage</td></tr>
+<tr><td>Connections</td><td>Function calls and return values</td><td>Network requests, messages, replication</td></tr>
+<tr><td>Core question</td><td>Is this correct and efficient?</td><td>Can these components handle load, and what happens when one fails?</td></tr>
+<tr><td>Unit of change</td><td>A function or module</td><td>A component, contract, or deployment topology</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Starting with requirements</h2>
+<p class="lede">You cannot evaluate a design until you know what it must do. Requirements split into functional requirements, which define behavior, and non-functional requirements, which define quality.</p>
+<ul><li><strong>Functional requirements</strong> become features, and each feature maps to an API and a set of components.</li><li><strong>Non-functional requirements</strong> decide capacity, redundancy, storage class, and where the system runs.</li><li>A 200 ms feed target pushes the design toward caching; an availability target forces more than one server.</li><li>A durability target changes how and where photos are stored, not just how they are served.</li><li>Ambiguous requirements are a design risk: write down assumptions and confirm them before drawing components.</li><li>Start from forces, not products: <em>high write volume, spikes, and asynchronous processing</em> points to a queue, while <em>use Kafka</em> is a conclusion without a reason.</li></ul>
+<h3>Mapping features to components</h3>
+<ul><li><code>POST /photos</code> touches the app server, metadata database, and object storage.</li><li><code>POST /follows</code> and <code>POST /likes</code> mostly touch the app server and database, but likes may also fan out to feeds.</li><li><code>GET /feed</code> touches the app server, cache, database, and CDN for the images.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Feature</th><th>API</th><th>Components involved</th></tr></thead><tbody><tr><td>Upload a photo</td><td>POST /photos</td><td>App server, database, object storage, queue</td></tr>
+<tr><td>Follow a user</td><td>POST /follows</td><td>App server, database</td></tr>
+<tr><td>Like a post</td><td>POST /likes</td><td>App server, database, cache</td></tr>
+<tr><td>View the feed</td><td>GET /feed</td><td>App server, cache, database, CDN</td></tr></tbody></table></div>
+
+<h3>Estimating scale</h3>
+<ul><li>Convert users into <strong>requests per second</strong> for reads and writes separately.</li><li>Multiply average size by volume to estimate storage and egress; photos dominate both.</li><li>Use the read/write ratio to decide whether caching or write partitioning matters first.</li><li>Treat estimates as order-of-magnitude inputs, not predictions, and state the assumptions aloud.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The building blocks</h2>
+<p class="lede">Large systems are assembled from a small vocabulary of components. Most of the design work is choosing which ones are needed and how they connect.</p>
+<ul><li><strong>Clients and DNS</strong> — browsers and mobile apps initiate requests, and DNS turns a domain into a reachable address.</li><li><strong>Load balancers</strong> spread requests across healthy application servers.</li><li><strong>Application servers</strong> run business logic and should stay stateless where possible.</li><li><strong>Databases</strong> store structured data such as users, follows, and photo metadata.</li><li><strong>Object storage</strong> holds large immutable files such as the photos themselves.</li><li><strong>Caches</strong> keep hot reads in memory to avoid repeated database work.</li><li><strong>CDNs</strong> keep copies of static content near users.</li><li><strong>Message queues</strong> move work that does not need to finish during the request into background workers.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Following an upload through the system</h2>
+<p class="lede">The upload path shows why components are separated. The expensive bytes bypass the application server entirely, and slow post-processing is moved out of the request.</p>
+<ul><li>The client sends the upload request through the load balancer to an application server.</li><li>The server writes metadata — owner, caption, timestamp — to the database.</li><li>The server returns a <strong>pre-signed URL</strong> so the client can upload the image directly to object storage.</li><li>Routing image bytes around the app server prevents large uploads from consuming its memory and connection pool.</li><li>After the upload, the server enqueues a processing job instead of generating thumbnails inline.</li><li>Workers generate thumbnails and update followers' feeds asynchronously.</li><li>The user gets a fast acknowledgement while the slow work continues in the background.</li></ul>
+
+<div class="flow"><span class="flow-step">Client requests an upload</span><span class="flow-arrow">→</span><span class="flow-step">Load balancer forwards to an app server</span><span class="flow-arrow">→</span><span class="flow-step">App server saves metadata</span><span class="flow-arrow">→</span><span class="flow-step">App server returns a pre-signed URL</span><span class="flow-arrow">→</span><span class="flow-step">Client uploads the image to object storage</span><span class="flow-arrow">→</span><span class="flow-step">App server enqueues a processing job</span><span class="flow-arrow">→</span><span class="flow-step">Worker generates thumbnails and updates feeds</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Following a feed read through the system</h2>
+<p class="lede">Reads take a different path from writes. The goal is to avoid touching the database and the origin image store for every request.</p>
+<ul><li>The app server checks the cache for the list of post IDs and metadata.</li><li>On a <strong>cache hit</strong>, it returns the cached list immediately.</li><li>On a <strong>cache miss</strong>, it reads from the database and stores the result in the cache for later requests.</li><li>Images are served from a CDN, so users download them from a nearby edge node rather than the origin.</li><li>Each layer exists for a specific reason: CDN for distance, cache for repeated reads, object storage for scale, queue for slow work.</li><li>A feed read that hits cache and CDN may never touch the database or origin storage at all.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Component</th><th>Why it is there</th></tr></thead><tbody><tr><td>CDN</td><td>Reduces latency for image downloads</td></tr>
+<tr><td>Message queue</td><td>Keeps slow work out of the request path</td></tr>
+<tr><td>Cache</td><td>Reduces database load for repeated reads</td></tr>
+<tr><td>Object storage</td><td>Provides a scalable place for large files</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Client opens the feed</span><span class="flow-arrow">→</span><span class="flow-step">App server checks the cache</span><span class="flow-arrow">→</span><span class="flow-step">Hit: return cached posts</span><span class="flow-arrow">→</span><span class="flow-step">Miss: read database and populate cache</span><span class="flow-arrow">→</span><span class="flow-step">Client loads images from the CDN</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>What we design for</h2>
+<p class="lede">A design is judged against a small set of qualities. They interact, and improving one usually puts pressure on another.</p>
+<ul><li><strong>Scalability:</strong> handling more users, traffic, and data as demand grows.</li><li><strong>Availability:</strong> keeping the service reachable when components fail.</li><li><strong>Reliability:</strong> continuing to behave correctly without losing, duplicating, or corrupting data.</li><li><strong>Performance:</strong> latency per request and throughput across the system.</li><li><strong>Consistency:</strong> whether users and services see the same up-to-date view.</li><li><strong>Maintainability:</strong> how easily the system can be operated, debugged, and extended.</li><li><strong>Cost:</strong> meeting requirements without excess servers, storage, bandwidth, or engineering effort.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Quality</th><th>Question it answers</th><th>Photo app example</th></tr></thead><tbody><tr><td>Scalability</td><td>Can it absorb growth?</td><td>A few thousand to ten million users</td></tr>
+<tr><td>Availability</td><td>Is it reachable when something fails?</td><td>The app stays up when one server crashes</td></tr>
+<tr><td>Reliability</td><td>Is the behavior correct over time?</td><td>A photo is never lost or saved twice</td></tr>
+<tr><td>Performance</td><td>How fast and how much?</td><td>The feed loads in under 200 ms</td></tr>
+<tr><td>Consistency</td><td>Do all readers see the same truth?</td><td>Everyone sees the same like count</td></tr>
+<tr><td>Maintainability</td><td>Can we change it safely?</td><td>Add a feature without breaking uploads</td></tr>
+<tr><td>Cost</td><td>Is the spend justified?</td><td>Two servers instead of ten</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Every choice is a trade-off</h2>
+<p class="lede">There is rarely a design that is best at everything. Mature design work is choosing which qualities matter most and explaining the cost of that choice.</p>
+<ul><li>A cache lowers database load and read latency but introduces staleness and invalidation work.</li><li>Replication and redundancy improve availability and read capacity but add cost and operational complexity.</li><li>A queue improves response time and absorbs spikes but makes completion asynchronous and adds duplicates to handle.</li><li>Sharding improves write scale and storage capacity but makes joins and transactions expensive.</li><li>Strong consistency simplifies reasoning but usually costs latency or availability.</li><li>The right question is not <em>which option is best</em>, but <em>which cost is acceptable for these requirements</em>.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Choice</th><th>What improves</th><th>What it costs</th></tr></thead><tbody><tr><td>Add a cache</td><td>Read latency and database load</td><td>Staleness, invalidation, another tier</td></tr>
+<tr><td>Add replicas</td><td>Read throughput and failover</td><td>Replication lag and routing complexity</td></tr>
+<tr><td>Add a queue</td><td>Response time and burst absorption</td><td>Eventual completion and duplicate handling</td></tr>
+<tr><td>Shard the database</td><td>Write scale and data size</td><td>Cross-shard queries, resharding, operations</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Designs evolve</h2>
+<p class="lede">Real systems are not built in their final form. They start simple and gain components when a measured bottleneck appears.</p>
+<ul><li>Start with the simplest topology that meets today's requirements and leaves room to grow.</li><li>Add a cache when repeated reads overload the database, not because caching is expected.</li><li>Add a CDN when image delivery distance is the visible problem.</li><li>Add a queue when background work starts delaying user requests.</li><li>Adding all of these too early creates more complexity, more debugging surface, and higher cost without proven value.</li><li>Each new component also adds a failure mode, so it must earn its place.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Symptom</th><th>Targeted fix</th></tr></thead><tbody><tr><td>Database overloaded</td><td>Cache or read replicas</td></tr>
+<tr><td>Images load slowly</td><td>CDN</td></tr>
+<tr><td>Background work delays requests</td><td>Message queue</td></tr>
+<tr><td>One server cannot hold traffic</td><td>Load balancer and more app servers</td></tr>
+<tr><td>One database cannot hold writes</td><td>Partitioning or sharding</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Observe a bottleneck</span><span class="flow-arrow">→</span><span class="flow-step">Add one component</span><span class="flow-arrow">→</span><span class="flow-step">Measure again</span><span class="flow-arrow">→</span><span class="flow-step">Keep or remove it</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Why learn system design</h2>
+<p class="lede">Even small features contain design decisions. The Like button is a compact example of caching, synchronization, and spike handling.</p>
+<ul><li><strong>Cache the like count?</strong> Yes, because it is read far more often than it changes — at the cost of a briefly stale count.</li><li><strong>Update synchronously or asynchronously?</strong> A queue gives a fast reply but adds moving parts to run and monitor.</li><li><strong>What happens during a spike?</strong> Add capacity and spread load, which raises cost.</li><li>The value is not memorizing answers; it is recognizing the forces and explaining the trade-off.</li><li>These decisions appear in code review and incident response, not only in interviews.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Decision</th><th>Reasonable answer</th><th>Trade-off</th></tr></thead><tbody><tr><td>Cache the like count?</td><td>Yes, it is read-heavy</td><td>The count may be briefly stale</td></tr>
+<tr><td>Update in request or queue?</td><td>Queue for a fast reply</td><td>More infrastructure to monitor</td></tr>
+<tr><td>Handle a traffic spike?</td><td>Add servers and spread load</td><td>Higher cost</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>System design in interviews</h2>
+<p class="lede">The interview is open-ended and has no single correct answer. Interviewers are evaluating how you clarify, estimate, structure, and reason about trade-offs.</p>
+<ul><li><strong>Clarify requirements</strong> before drawing: agree on core features and non-functional targets.</li><li><strong>Estimate scale</strong> with rough users, requests per second, and storage to show where pressure will be.</li><li><strong>Sketch a high-level design</strong> with the main building blocks and the request path.</li><li><strong>Go deeper</strong> into a few important areas such as the database, caching, data flow, or failure handling.</li><li>Narrate decisions and their trade-offs as you go; a silent diagram communicates very little.</li><li>The round often influences the level and compensation of the offer, so structure matters as much as breadth.</li><li>You do not need to memorize known designs if you can reason from building blocks and constraints.</li></ul>
+
+<div class="flow"><span class="flow-step">Clarify requirements</span><span class="flow-arrow">→</span><span class="flow-step">Estimate scale</span><span class="flow-arrow">→</span><span class="flow-step">Sketch the high-level design</span><span class="flow-arrow">→</span><span class="flow-step">Go deep on database, caching, data flow, and failures</span><span class="flow-arrow">→</span><span class="flow-step">Summarize trade-offs and open risks</span></div>
+<div class="note">A typical round runs about 45 to 60 minutes. Budget time for requirements and deep dives instead of spending it all on boxes.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>A repeatable way to reason</h2>
+<ul><li>State the problem in one sentence, then list the functional and non-functional requirements.</li><li>Estimate the dominant load — reads, writes, storage, or bandwidth — before choosing components.</li><li>Draw the minimum set of components that satisfies the requirements.</li><li>Trace one write and one read end to end, naming what each component owns.</li><li>Ask what happens when each component is slow, overloaded, or unavailable.</li><li>Name the trade-off behind every non-obvious choice.</li><li>Leave the design evolvable: record what you would add when a specific bottleneck appears.</li><li>A good design meets today's requirements without spending tomorrow's complexity budget in advance.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Caching</strong> improves read latency and database load but accepts staleness and adds invalidation work.</li><li><strong>Redundancy</strong> improves availability but increases cost and the number of components to operate.</li><li><strong>Asynchronous processing</strong> improves response time and absorbs spikes but gives up immediate completion and introduces duplicate handling.</li><li><strong>Object storage with pre-signed URLs</strong> keeps large files off app servers but adds a second data store and a URL lifecycle to manage.</li><li><strong>Denormalization and precomputation</strong> speed up reads but increase write cost and the risk of inconsistent copies.</li><li><strong>Strong consistency</strong> makes reasoning simple but usually costs latency or availability during failures.</li><li><strong>Adding components early</strong> can future-proof the design but creates complexity before there is evidence it is needed.</li><li><strong>Optimizing cost</strong> can reduce over-provisioning but leaves less headroom for spikes and failover.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is system design?</summary><div class="answer"><p>It is the process of deciding which components a system needs, what each owns, how they communicate, and how data flows between them so the system meets its requirements. It operates at the level of servers, databases, caches, queues, and networks rather than individual functions.</p></div></details>
+<details><summary>2. How is system design different from writing code?</summary><div class="answer"><p>Code concerns correctness and efficiency inside a program. Design concerns capacity, failure behavior, and coordination across components. A system can have correct code and still fail because the database is a single point of failure or a dependency is slow.</p></div></details>
+<details><summary>3. What is the difference between functional and non-functional requirements?</summary><div class="answer"><p>Functional requirements say what the system does — upload a photo, follow a user, show a feed. Non-functional requirements say how well it does it — latency, availability, durability, consistency, and cost. Features determine the components; quality targets determine how those components are built and deployed.</p></div></details>
+<details><summary>4. Why start with requirements instead of choosing technologies?</summary><div class="answer"><p>Technology choices are conclusions, not inputs. Requirements reveal the forces — write volume, spikes, read/write ratio, latency targets — that make one option appropriate. Starting with a tool list produces complexity that may not address the actual bottleneck.</p></div></details>
+<details><summary>5. Which building blocks appear in most large systems?</summary><div class="answer"><p>Clients, DNS, load balancers, stateless application servers, databases, caches, object storage, CDNs, and message queues. Most designs are a specific arrangement of these, with the interesting decisions in what each component owns and how failure is handled.</p></div></details>
+<details><summary>6. Walk me through a photo upload.</summary><div class="answer"><p>The client sends the request through the load balancer to an app server. The server stores metadata in the database and returns a pre-signed URL; the client uploads the image directly to object storage. The server then enqueues a job so workers can generate thumbnails and update feeds outside the request path.</p></div></details>
+<details><summary>7. Why upload directly to object storage instead of through the app server?</summary><div class="answer"><p>Image bytes are large and would consume the app server's memory, bandwidth, and connection slots. A pre-signed URL lets the client write to durable storage directly, keeping the app tier free to handle requests. The trade-off is a more involved upload protocol and URL expiry to manage.</p></div></details>
+<details><summary>8. Why cache the feed, and what breaks?</summary><div class="answer"><p>The feed is read far more often than it changes, so caching avoids repeated database work and reduces latency. The cost is staleness: a new post may not appear immediately, and invalidation or a short TTL is required. The design must decide how much delay is acceptable.</p></div></details>
+<details><summary>9. What qualities do we evaluate a design against?</summary><div class="answer"><p>Scalability, availability, reliability, performance (latency and throughput), consistency, maintainability, and cost. They interact: redundancy improves availability but raises cost, and caching improves performance but weakens freshness.</p></div></details>
+<details><summary>10. Give an example of a system design trade-off.</summary><div class="answer"><p>Adding read replicas increases read throughput and provides failover capacity, but replication is usually asynchronous, so some reads may be stale and read-after-write may need to go to the primary. The benefit is real, but it is not free.</p></div></details>
+<details><summary>11. Why not add caches, queues, and a CDN on day one?</summary><div class="answer"><p>Each component adds a failure mode, an operational burden, and cost. Without a measured bottleneck, you cannot tell whether the complexity helped. A better approach is to add the component that addresses the current problem and re-measure.</p></div></details>
+<details><summary>12. How do you estimate scale in an interview?</summary><div class="answer"><p>Start with daily active users and actions per user, convert to average and peak requests per second, separate reads from writes, and estimate storage from item size and retention. State assumptions explicitly and use the numbers to identify which tier feels the most pressure.</p></div></details>
+<details><summary>13. What is the interviewer actually evaluating?</summary><div class="answer"><p>How you clarify ambiguity, make reasonable estimates, structure a coherent design, trace data flow, and justify trade-offs. They are not looking for a memorized diagram or compilable code; they want to see how you think when requirements change or a component fails.</p></div></details>
+<details><summary>14. How would you approach a system you have never designed before?</summary><div class="answer"><p>Reduce it to requirements, dominant load, and standard building blocks. Trace the main write and read paths, then examine failure and growth points. Most unfamiliar systems are recombinations of the same primitives, so reasoning from constraints is more reliable than recalling a specific architecture.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Opening with a technology list such as Kafka, Redis, and Kubernetes before stating requirements.</li><li>Treating non-functional requirements as optional, then discovering that latency or durability targets invalidate the design.</li><li>Drawing boxes without assigning responsibilities or tracing which component owns which data.</li><li>Designing for ten million users on day one and burying the actual requirement in unnecessary complexity.</li><li>Describing only the happy path and never asking what happens when a dependency is slow or a node dies.</li><li>Reporting a single availability number for the whole product when checkout is the operation that matters.</li><li>Mistaking the architecture diagram for the design; the diagram is only a summary of decisions.</li><li>Ignoring cost and operability, then presenting a design the team could not run or afford.</li></ul></div>
+      </section>
+      <nav class="page-nav"><span></span><a class="next" href="top-30-system-design-concepts.html"><span>Next →</span><strong>Top 30 System Design Concepts</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/what-is-system-design">AlgoMaster — What is System Design?</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Checksums — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 13 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Checksums</h1>
+    <p class="dek">Networking · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/checksums">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">How data gets corrupted</a>
+<a href="#s2">What a checksum is</a>
+<a href="#s3">Detection, not repair</a>
+<a href="#s4">The simplest checksum: adding bytes</a>
+<a href="#s5">The Internet checksum</a>
+<a href="#s6">Cyclic redundancy checks (CRC)</a>
+<a href="#s7">Why network checksums are not enough</a>
+<a href="#s8">Cryptographic hashes</a>
+<a href="#s9">Authenticity: HMACs and signatures</a>
+<a href="#s10">Choosing the right checksum</a>
+<a href="#s11">Coverage: one checksum or many?</a>
+<a href="#s12">Checksums in storage systems</a>
+<a href="#s13">Checksums in system design</a>
+<a href="#s14">What to remember</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A checksum is a small value computed from data so a later reader can detect that the bytes changed; it detects corruption, but recovery still comes from a retry, a replica, or a backup.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Checksum</dt><dd>A small, fixed-size value computed from a piece of data and compared later to detect changes.</dd></div><div class="term"><dt>Collision</dt><dd>When two different inputs produce the same checksum value, which is unavoidable for any fixed-size check.</dd></div><div class="term"><dt>Parity bit</dt><dd>A single bit recording whether a group has an even or odd number of 1s; it catches one flipped bit but not two.</dd></div><div class="term"><dt>Internet checksum</dt><dd>The 16-bit one's-complement add-and-flip checksum used by IPv4, TCP, and UDP.</dd></div><div class="term"><dt>CRC</dt><dd>Cyclic Redundancy Check: a checksum computed by binary polynomial division, sensitive to bit positions and fast in hardware.</dd></div><div class="term"><dt>Burst error</dt><dd>A short run of consecutive damaged bits, the error pattern a CRC is especially good at detecting.</dd></div><div class="term"><dt>Cryptographic hash</dt><dd>A hash function designed so finding two inputs with the same digest is computationally infeasible, such as SHA-256.</dd></div><div class="term"><dt>HMAC</dt><dd>A keyed message authentication code combining data with a shared secret, so only a key holder can produce a valid tag.</dd></div><div class="term"><dt>Digital signature</dt><dd>A private-key signature that anyone with the public key can verify, proving who produced the data.</dd></div><div class="term"><dt>Merkle tree</dt><dd>A tree of hashes where each parent summarizes its children, letting two replicas compare large data sets by comparing roots.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>How data gets corrupted</h2>
+<p class="lede">Data can change between being written and being read, and the change is often silent.</p>
+<ul><li><strong>Electrical noise</strong> can flip a bit while a packet travels over a cable or radio link.</li><li><strong>Faulty memory</strong> in a router or server can alter data while it waits in a buffer.</li><li><strong>Bit rot</strong>: a storage device can lose or alter bits over months or years.</li><li><strong>Misdirected writes</strong>: a driver or storage bug can write valid data to the wrong location.</li><li><strong>Firmware bugs</strong> can return a block that is internally consistent but not the block that was requested.</li><li>The dangerous part is silence: the program does not crash, it simply reads the wrong bytes and continues.</li><li>One changed bit can turn a financial value into a different number or make a compressed file unreadable.</li></ul>
+
+
+<div class="note">This is why the question is not whether corruption happens, but whether the system would notice if it did.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a checksum is</h2>
+<ul><li>A checksum is a <strong>small, fixed-size value</strong> computed from a piece of data by an algorithm.</li><li>The sender or writer computes it and stores or transmits it alongside the data.</li><li>The receiver runs the <strong>same algorithm</strong> over what it got and compares the two values.</li><li>If they differ, the data changed: the system can reject it, retry, or read another replica.</li><li>If they match, the data is <strong>likely</strong> intact — not certainly intact.</li><li>The checksum is far smaller than the data, so many inputs map to the same value; some collisions are inevitable.</li><li>A good algorithm makes collisions rare for the error patterns it was designed to catch, not for all possible inputs.</li></ul>
+
+<div class="flow"><span class="flow-step">Compute the checksum over the data</span><span class="flow-arrow">→</span><span class="flow-step">Store or send the checksum with the data</span><span class="flow-arrow">→</span><span class="flow-step">Recompute the checksum on read or receipt</span><span class="flow-arrow">→</span><span class="flow-step">Compare the two values</span><span class="flow-arrow">→</span><span class="flow-step">On mismatch: reject, retry, or read another replica</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Detection, not repair</h2>
+<ul><li>A checksum <strong>detects</strong> corruption; it does not say which bits changed.</li><li>It does not repair anything by itself; it only produces evidence that something is wrong.</li><li><strong>Error-correcting codes</strong> take a different approach: they add enough redundancy to recover certain errors.</li><li>ECC memory and the error correction inside SSDs are everyday examples.</li><li>In distributed systems, detecting a bad copy and fetching a good one is usually enough.</li><li>Recovery comes from elsewhere: a retransmission, another replica, or a backup.</li><li>How reliable the detection is depends entirely on the algorithm and how much data each checksum covers.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The simplest checksum: adding bytes</h2>
+<p class="lede">Adding the byte values is the cheapest possible check, and it shows exactly why stronger algorithms exist.</p>
+<ul><li>Sum the bytes and send the total: bytes 10, 20, 30 produce 60.</li><li>If one byte changes to 21, the receiver computes 61 and detects the mismatch.</li><li>But reordering the same bytes to 30, 20, 10 still sums to 60, so reordering goes undetected.</li><li>If one byte increases by one and another decreases by one, the changes cancel out.</li><li>A simple sum is fast but blind to position and to compensating errors.</li><li><strong>Parity</strong> is even weaker: one bit records whether a group has an even or odd number of 1s.</li><li>Parity catches any single flipped bit but misses two flips in the same group, so it suits memory and serial links, not files.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Bytes received</th><th>Sum</th><th>Detected?</th></tr></thead><tbody><tr><td>10, 20, 30 (original)</td><td>60</td><td>n/a</td></tr>
+<tr><td>10, 21, 30</td><td>61</td><td>Yes</td></tr>
+<tr><td>30, 20, 10 (reordered)</td><td>60</td><td>No</td></tr>
+<tr><td>11, 19, 30 (+1 and -1)</td><td>60</td><td>No</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The Internet checksum</h2>
+<ul><li>The Internet checksum is used by <strong>IPv4, TCP, and UDP</strong> and produces a 16-bit value.</li><li>It splits the input into <strong>16-bit words</strong>, adds them with one's-complement addition, and flips the final bits.</li><li>In IPv4, the header checksum covers only the <strong>IP header</strong>, not the payload.</li><li>Routers decrement the TTL on every hop, so they must recompute that header checksum each time.</li><li>TCP and UDP have separate checksums covering their headers and payloads, plus IP-layer fields such as source and destination addresses.</li><li>Covering the addresses is what makes it an <strong>end-to-end</strong> check rather than a single-link check.</li><li>It was designed for cheap computation on older hardware, which is why it is only 16 bits and not very strong.</li><li>Because it is additive, swapping two 16-bit words leaves it unchanged — the same weakness as the byte sum.</li></ul>
+
+
+<div class="note">IPv6 removed the IP header checksum to save work at every router, leaving error detection to the link layer and to transport checksums.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Cyclic redundancy checks (CRC)</h2>
+<ul><li>A CRC treats the data as a sequence of bits and performs binary polynomial division, keeping the remainder as the checksum.</li><li>Because the result depends on both bit values and <strong>bit positions</strong>, reordering is far more likely to be caught than with a sum.</li><li>With a suitable polynomial, a 32-bit CRC detects every single-bit error and every burst error up to 32 bits long.</li><li>For random errors, CRC-32 leaves roughly a one-in-four-billion chance of an undetected mismatch.</li><li>CRCs are extremely fast: network hardware computes them directly, and CPUs have instructions for CRC-32C.</li><li>Common uses: Ethernet and Wi-Fi frame check sequences, ZIP and PNG, Kafka records, and many storage engines.</li><li>A CRC is <strong>not cryptographic</strong>: anyone who changes the data deliberately can compute a new CRC to match.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Where</th><th>Which CRC</th></tr></thead><tbody><tr><td>Ethernet and Wi-Fi frames</td><td>32-bit frame check sequence</td></tr>
+<tr><td>ZIP and PNG files</td><td>CRC-32</td></tr>
+<tr><td>Kafka records and many storage engines</td><td>CRC-32C</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Why network checksums are not enough</h2>
+<ul><li>An Ethernet CRC protects a frame across a <strong>single link</strong>, not end to end.</li><li>A forwarding device validates the incoming frame, then generates a <strong>new</strong> check value for the next link.</li><li>If corruption happens inside a router's memory after the incoming check and before the outgoing frame, the router computes a valid CRC over the corrupted data.</li><li>The next device sees a perfectly valid frame and has no idea what happened earlier.</li><li>TCP adds an end-to-end check that can catch errors introduced between sender and receiver.</li><li>But its 16-bit checksum is weak enough that some corrupted packets have passed it in real traffic.</li><li>This is the <strong>end-to-end principle</strong>: lower-layer checks help, but only the final consumer can confirm what it received.</li><li>If correctness is critical, the application needs its own integrity check.</li></ul>
+
+
+<div class="note">Modern TLS protects records with an authenticated encryption tag: if verification fails, the record is rejected and the connection is usually terminated.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Cryptographic hashes</h2>
+<ul><li>A cryptographic hash such as <strong>SHA-256</strong> also produces a fixed-size value, here 256 bits versus 32 for a common CRC.</li><li>The difference is not just length: a cryptographic hash is designed so finding two inputs with the same digest is computationally infeasible.</li><li>That makes it a <strong>content fingerprint</strong>: same digest means same bytes, with overwhelming probability.</li><li>Software publishers ship SHA-256 digests so users can verify a download matches the expected content.</li><li>Git identifies objects by content hash, Docker images are addressed by digest, and content-addressed storage uses hashes as keys.</li><li>If two blobs share a digest, they can be stored once, which is the basis of deduplication.</li><li><strong>MD5 and SHA-1</strong> have known collision attacks and must not be used where collision resistance matters.</li><li>They still catch many accidental errors, but they are not appropriate for adversarial integrity checks.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Authenticity: HMACs and signatures</h2>
+<ul><li>A hash only proves the data matches the hash you compare it against.</li><li>If an attacker can replace both the data and the expected hash, the comparison still succeeds.</li><li>Authenticity needs a <strong>trusted</strong> expected value or a mechanism that proves who produced the data.</li><li>An <strong>HMAC</strong> combines the data with a shared secret, so only a key holder can produce a valid tag.</li><li>Webhook providers commonly use HMACs so receivers can confirm a call really came from them.</li><li>Because both sides hold the same key, either side could generate a valid tag — HMAC proves group membership, not unique origin.</li><li>A <strong>digital signature</strong> uses a key pair: the publisher signs with a private key and anyone verifies with the public key.</li><li>That is how package repositories, container registries, and software updates let many users verify one publisher.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Mechanism</th><th>Proves</th><th>Key model</th></tr></thead><tbody><tr><td>Plain hash</td><td>Data matches this digest</td><td>No key; the digest must come from a trusted source</td></tr>
+<tr><td>HMAC</td><td>The sender knows the shared secret</td><td>One shared key</td></tr>
+<tr><td>Digital signature</td><td>A specific private key signed it</td><td>Private key signs, public key verifies</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Choosing the right checksum</h2>
+<ul><li>For accidental corruption in frames, disk blocks, or log records, <strong>CRC-32C</strong> is a strong default: it catches common patterns and is cheap.</li><li><strong>Parity</strong> is only suitable for a very cheap single-bit check, not for files or messages.</li><li>For a longer fingerprint on large data without paying cryptographic cost, consider fast non-cryptographic hashes such as <strong>xxHash</strong> or a longer CRC.</li><li>For content identification or protection against deliberate tampering, use <strong>SHA-256</strong> or another modern cryptographic hash.</li><li>A cryptographic digest is only as trustworthy as the way you obtain the expected value.</li><li>For proof of origin between two trusted parties, use an <strong>HMAC</strong>.</li><li>For proof of origin that anyone can verify, use a <strong>digital signature</strong>.</li><li>For very high-throughput per-packet checks, a hardware-accelerated CRC is usually the only affordable option.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Need</th><th>Good choice</th><th>Not suitable for</th></tr></thead><tbody><tr><td>Very cheap single-bit check</td><td>Parity</td><td>Multi-bit errors, files</td></tr>
+<tr><td>Accidental corruption in frames, disk blocks, logs</td><td>CRC-32C</td><td>Deliberate tampering</td></tr>
+<tr><td>Longer fingerprint on large data without crypto cost</td><td>xxHash or a longer CRC</td><td>Deliberate tampering</td></tr>
+<tr><td>Content identification and download verification</td><td>SHA-256 with a trusted digest</td><td>Proving who produced it</td></tr>
+<tr><td>Proof of origin between two trusted parties</td><td>HMAC</td><td>Public verification</td></tr>
+<tr><td>Proof of origin anyone can verify</td><td>Digital signature</td><td>Very high-throughput per-packet checks</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Coverage: one checksum or many?</h2>
+<ul><li>How much data each checksum covers matters as much as which algorithm you pick.</li><li>One checksum over an entire large file tells you something is wrong but not <strong>where</strong>.</li><li>Repair then means transferring the whole object again.</li><li>Checksumming smaller chunks independently lets you identify the damaged chunk and replace only that part.</li><li>Smaller chunks make repair more precise but require more checksums to store and more work to verify.</li><li>This is a common pattern in storage systems and in replication protocols that compare ranges.</li><li>The granularity should follow the repair strategy: whatever you can replace independently should be verifiable independently.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Checksums in storage systems</h2>
+<ul><li>Storage devices have their own error detection, but bit rot, misdirected writes, and firmware bugs can still return wrong data.</li><li>That is why storage systems add checksums at a higher layer.</li><li><strong>HDFS</strong> traditionally keeps a checksum for each 512-byte chunk of a block; a failed check triggers a read from another replica and a repair report.</li><li><strong>ZFS</strong> stores a block's checksum in the metadata pointer that references it, so a valid but wrong block is still detected.</li><li>Storing the checksum next to the data would not catch a wrong block, because that block's own checksum would match.</li><li><strong>PostgreSQL</strong> checksums write-ahead log records so crash recovery can reject invalid or incomplete records, and can checksum data pages.</li><li><strong>Amazon S3</strong> accepts a client-provided checksum on upload and rejects the upload if the received data does not match.</li><li>Databases may refuse to start on known-corrupt data, deliberately, so the damage is not spread to replicas and backups.</li></ul>
+<h3>Scrubbing</h3>
+<ul><li>Rarely read data can corrupt silently for months, and you find out when you urgently need it.</li><li>Scrubbing periodically reads stored blocks, verifies checksums, and repairs from healthy redundancy while it still exists.</li><li>ZFS and many distributed storage systems schedule scrubs.</li><li>The same logic applies to backups: a backup that has never been test-restored is not verified.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Checksums in system design</h2>
+<ul><li><strong>Verify end to end</strong>: compute the check near where data originates and verify where it is ultimately used.</li><li>That covers the network, intermediate services, and storage, instead of trusting one layer.</li><li><strong>Decide the failure policy</strong>: retry the transfer, read another replica, or mark the object unavailable.</li><li>Never silently accept a mismatch; emit metrics and alerts, because repeated mismatches point at failing hardware or a bad path.</li><li><strong>Compare large data sets with Merkle trees</strong>: replicas exchange root hashes and descend only into ranges that differ.</li><li>Cassandra-style anti-entropy uses this to find divergent ranges without shipping every record.</li><li><strong>Detect changes with content hashes</strong>: backup and sync tools upload only changed chunks.</li><li>HTTP servers can derive an ETag from content so clients can check for changes without downloading the whole response.</li></ul>
+
+
+<div class="note">The three design questions are: where could corruption happen, how will we detect it, and what will we do when a check fails?</div>
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>What to remember</h2>
+<ul><li>A checksum detects accidental change; it does not repair it and cannot prove the data is correct.</li><li>Every fixed-size checksum can collide, so a match is evidence, not proof.</li><li>A byte sum misses reordering and compensating changes; parity catches only a single flipped bit.</li><li>The 16-bit Internet checksum is cheap but weak; IPv6 dropped the IP header version entirely.</li><li>CRC-32C is the practical default for accidental corruption: position-sensitive, burst-error aware, and fast.</li><li>Link-layer checks do not cover corruption inside intermediate devices, so critical data needs end-to-end verification.</li><li>SHA-256 is for content identity and tamper detection; HMACs and signatures are for proving who produced the data.</li><li>Storage systems add checksums at a higher layer and scrub rarely read data before redundancy is lost.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Stronger checksums</strong> catch more error patterns but cost more CPU per byte, which matters at high throughput.</li><li><strong>CRC-32C</strong> is fast and catches accidental corruption well but is trivial to forge, so it is useless against an attacker.</li><li><strong>SHA-256</strong> gives collision resistance and content identity but costs noticeably more than a CRC on large volumes.</li><li><strong>Fine-grained chunk checksums</strong> make repair precise but multiply the number of checksums to store and verify.</li><li><strong>One checksum per large object</strong> is cheap to store but can only tell you the whole object is bad, forcing a full retransfer.</li><li><strong>End-to-end verification</strong> catches corruption anywhere in the path but duplicates work already done by lower layers.</li><li><strong>Storing checksums beside the data</strong> is simple but cannot detect a valid block returned from the wrong location.</li><li><strong>Scrubbing</strong> finds latent corruption before it is needed but consumes I/O and can degrade foreground performance.</li><li><strong>HMACs</strong> prove a shared-secret holder produced the data, but any holder of the key could also forge it.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a checksum and how is it used?</summary><div class="answer"><p>A small fixed-size value computed from data. It is stored or sent with the data, then recomputed on read or receipt and compared. A mismatch means the data changed, so the system can reject it, retry, or read another replica.</p></div></details>
+<details><summary>2. Why can't a checksum guarantee the data is correct?</summary><div class="answer"><p>Because the checksum is much smaller than the data, many different inputs map to the same value. A collision means a match is strong evidence but never proof. The guarantee is probabilistic and depends on the algorithm and the error pattern.</p></div></details>
+<details><summary>3. Why is adding bytes a weak checksum?</summary><div class="answer"><p>It ignores position and cancels out compensating changes. Reordering the same bytes gives the same sum, and one byte increasing while another decreases also gives the same sum, so both corruptions pass.</p></div></details>
+<details><summary>4. What does parity catch and miss?</summary><div class="answer"><p>It catches any single flipped bit in the group, because that changes the parity. It misses two flips in the same group, since they restore the original parity. It is cheap enough for memory and serial links but too weak for files.</p></div></details>
+<details><summary>5. How does the Internet checksum work?</summary><div class="answer"><p>It splits the data into 16-bit words, adds them with one's-complement addition, and flips the result to produce a 16-bit checksum. IPv4 applies it to the header only; TCP and UDP apply theirs to header, payload, and IP address fields for an end-to-end check.</p></div></details>
+<details><summary>6. Why do routers recompute the IPv4 header checksum?</summary><div class="answer"><p>Because they decrement the TTL on every hop, which changes the header. The checksum must be updated to match. IPv6 removed the header checksum specifically to avoid that per-hop work.</p></div></details>
+<details><summary>7. How is a CRC different from a simple sum?</summary><div class="answer"><p>A CRC treats data as bits and computes a polynomial-division remainder, so the result depends on bit positions. Reordering or burst damage is much more likely to change it. It also detects every single-bit error and every burst up to the width of the CRC.</p></div></details>
+<details><summary>8. If Ethernet already checks every frame, why do we need TCP or application checks?</summary><div class="answer"><p>The Ethernet CRC covers one link. A router validates the incoming frame, then builds a new frame with a new CRC, so corruption inside the router can be blessed by a valid outgoing checksum. End-to-end checks catch errors introduced anywhere along the path.</p></div></details>
+<details><summary>9. When would you use SHA-256 instead of a CRC?</summary><div class="answer"><p>When you need content identity or protection against deliberate modification: download verification, container image digests, Git objects, or content-addressed storage. A CRC is for accidents only, because anyone can recompute one.</p></div></details>
+<details><summary>10. What is the difference between a hash, an HMAC, and a digital signature?</summary><div class="answer"><p>A hash only compares content with a digest you already trust. An HMAC uses a shared secret so only key holders can produce a valid tag. A digital signature uses a private key to sign and a public key to verify, so anyone can check it and only the publisher could have created it.</p></div></details>
+<details><summary>11. Why does where the checksum is stored matter?</summary><div class="answer"><p>If it is stored beside the data, a valid but wrong block still matches its own checksum. ZFS stores the checksum in the parent pointer, so returning the wrong block is detected. The check must cover the identity and location of the data, not just its bytes.</p></div></details>
+<details><summary>12. How do you decide the chunk size for checksums?</summary><div class="answer"><p>Match it to the repair granularity. Smaller chunks let you identify and replace only the damaged part, but they cost more space and verification work. One checksum for a huge object forces a full retransfer on any mismatch.</p></div></details>
+<details><summary>13. What is scrubbing and why does it matter?</summary><div class="answer"><p>Periodically reading stored data, verifying its checksums, and repairing from redundancy. It finds latent corruption in data that is rarely read before all healthy copies are damaged. Backups need the same treatment through test restores.</p></div></details>
+<details><summary>14. How would you design integrity checking for a file upload service?</summary><div class="answer"><p>Have the client send a checksum or hash with the upload, verify it on receipt, and store per-chunk checksums for later reads. On mismatch, reject the upload and ask for a retry. Use SHA-256 if you need content identity and a CRC if you only need cheap accidental-corruption detection. Alert on repeated failures from one client or path.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Claiming a matching checksum proves the data is correct, rather than making it likely.</li><li>Using a plain hash as proof of origin when an attacker could replace both the data and the digest.</li><li>Assuming a link-layer CRC protects data end to end, including inside routers and proxies.</li><li>Using CRC or MD5 for tamper detection against a deliberate attacker.</li><li>Storing a block checksum next to the block and expecting it to catch a valid block returned from the wrong location.</li><li>Checksumming an entire huge object and then having to retransfer all of it for one bad chunk.</li><li>Treating a checksum as a repair mechanism and forgetting that recovery needs a retry, replica, or backup.</li><li>Never verifying backups, so corruption is discovered only during a real restore.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="tcp-vs-udp.html"><span>← Previous</span><strong>TCP vs UDP</strong></a><a class="next" href="what-is-an-api.html"><span>Next →</span><strong>What is an API?</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/checksums">AlgoMaster — Checksums</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

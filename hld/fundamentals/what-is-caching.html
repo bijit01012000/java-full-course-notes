@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What is Caching? — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 24 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>What is Caching?</h1>
+    <p class="dek">Caching · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/what-is-caching">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What a cache is</a>
+<a href="#s2">How caching works: hits and misses</a>
+<a href="#s3">Why caching helps</a>
+<a href="#s4">Understanding the cache hit ratio</a>
+<a href="#s5">Caching layers in a system</a>
+<a href="#s6">Browser and CDN caching</a>
+<a href="#s7">Application, distributed, and database caches</a>
+<a href="#s8">Choosing what to cache</a>
+<a href="#s9">Designing cache keys</a>
+<a href="#s10">TTL: freshness versus performance</a>
+<a href="#s11">When to add a cache</a>
+<a href="#s12">What goes wrong in production</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A cache keeps a copy of frequently used data in a faster layer so repeat requests avoid the database — cutting latency, reducing load, and raising throughput at the cost of staleness and invalidation work.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Cache</dt><dd>A fast storage layer that holds copies of data so repeat requests can avoid a slower source of truth.</dd></div><div class="term"><dt>Cache hit</dt><dd>A request whose data is already in the cache, so it is served without contacting the backend.</dd></div><div class="term"><dt>Cache miss</dt><dd>A request whose data is absent, forcing a backend fetch and usually a cache write.</dd></div><div class="term"><dt>Hit ratio</dt><dd>The percentage of requests served from the cache; the key measure of how much work the cache saves.</dd></div><div class="term"><dt>TTL (Time To Live)</dt><dd>The duration an entry remains valid before it expires and must be refreshed.</dd></div><div class="term"><dt>Cache key</dt><dd>The identifier under which a value is stored; it decides which requests share a cached result.</dd></div><div class="term"><dt>Eviction</dt><dd>Removing a still-valid entry because the cache needs memory for new data.</dd></div><div class="term"><dt>Distributed cache</dt><dd>A shared cache such as Redis or Memcached that multiple application servers read over the network.</dd></div><div class="term"><dt>CDN cache</dt><dd>An edge cache that stores content close to users, usually for static or shared public responses.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What a cache is</h2>
+<p class="lede">Reading from a database or calling another service takes time. Under heavy traffic, that cost repeats on every request.</p>
+<ul><li>A cache is a fast storage layer holding copies of data that would otherwise be fetched from a slower system.</li><li>It usually sits in memory or at the edge, where access is far cheaper than a database query or a remote call.</li><li>The cache does not replace the source of truth; it holds a copy that can be discarded.</li><li>Caching works because real traffic repeats: many users request the same product, profile, or configuration.</li><li>The core trade is explicit: faster repeat reads in exchange for a copy that can be stale.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>How caching works: hits and misses</h2>
+<p class="lede">The basic flow is check the cache first, then fall back to the source of truth.</p>
+<ul><li>On a <strong>hit</strong>, the value is already cached and is returned immediately without touching the database.</li><li>On a <strong>miss</strong>, the application fetches from the database, stores the result in the cache, then returns it.</li><li>A miss costs slightly more than an uncached request because the cache check happens first.</li><li>The payoff comes from later requests: once the value is cached, every repeat request becomes a hit.</li><li>The first request for any key is therefore the slowest; steady-state performance depends on reuse.</li><li>Who performs the miss handling depends on the strategy — the application in cache-aside, the cache layer in read-through.</li></ul>
+
+<div class="flow"><span class="flow-step">Request arrives</span><span class="flow-arrow">→</span><span class="flow-step">Check cache</span><span class="flow-arrow">→</span><span class="flow-step">Hit: return value</span><span class="flow-arrow">→</span><span class="flow-step">Miss: read database</span><span class="flow-arrow">→</span><span class="flow-step">Store in cache</span><span class="flow-arrow">→</span><span class="flow-step">Return value</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Why caching helps</h2>
+<p class="lede">Caching improves three things at once, which is why it is one of the highest-leverage additions to a read-heavy system.</p>
+<ul><li><strong>Lower latency:</strong> reads come from memory or a nearby edge instead of a database or remote service.</li><li><strong>Reduced load:</strong> fewer requests reach the database or downstream service, freeing capacity for other work.</li><li><strong>Higher throughput:</strong> the same infrastructure handles more traffic when most requests are served cheaply.</li><li>It protects expensive components, so a traffic spike hits the cache rather than the database.</li><li>It can postpone or avoid more complex scaling work such as sharding.</li><li>It is not only about individual request speed; it changes how much traffic the whole system can absorb.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Benefit</th><th>What it means</th></tr></thead><tbody><tr><td>Lower latency</td><td>Reads come from fast storage, often memory, instead of a database or another service</td></tr>
+<tr><td>Reduced load</td><td>Fewer requests reach the database or downstream services</td></tr>
+<tr><td>Higher throughput</td><td>The same infrastructure can handle much more traffic</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Understanding the cache hit ratio</h2>
+<p class="lede">The hit ratio is the percentage of requests served from the cache. It is the primary measure of cache effectiveness.</p>
+<ul><li>Formula: <code>hit ratio = hits / (hits + misses)</code>.</li><li>If 900,000 of one million requests are served from cache, the hit ratio is 90 percent.</li><li>Higher is generally better because more requests avoid the backend.</li><li>Hit ratio must be read alongside total traffic, not in isolation.</li><li>At 10 million requests per second, a 95 percent hit ratio still sends 500,000 requests per second to the backend.</li><li>A small miss rate becomes a large absolute load at scale, so the miss path must still be sized properly.</li><li>When sizing the database behind a cache, size it for the misses, not for total traffic.</li></ul>
+
+
+<pre class="code"><code>hit_ratio = hits / (hits + misses)
+
+# 1,000,000 requests, 900,000 hits
+# hit_ratio = 0.90
+
+# 10,000,000 rps at 95% hits
+# misses = 500,000 rps to the backend</code></pre>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Caching layers in a system</h2>
+<p class="lede">A request can pass through several caches before reaching the database. Each layer has a different job and a different scope.</p>
+<ul><li><strong>Browser cache:</strong> stores images, JavaScript, CSS, and sometimes API responses; the closest cache to the user.</li><li><strong>CDN cache:</strong> stores content at edge locations near users, best for static content, media, and shared public pages.</li><li><strong>Application cache:</strong> in-process memory on each server; fastest, but per-instance and duplicated.</li><li><strong>Distributed cache:</strong> a shared Redis or Memcached tier; slower than local memory but consistent across servers and much larger.</li><li><strong>Database cache:</strong> the database's internal buffer pool for pages and query data, managed automatically.</li><li>Layers are complementary: a CDN hit may avoid the request entirely, while an application hit avoids only the database call.</li><li>Where you cache determines both the latency saved and who is responsible for invalidation.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Scope</th><th>Typical content</th><th>Main trade-off</th></tr></thead><tbody><tr><td>Browser</td><td>One user, one device</td><td>Images, CSS, JS, some API responses</td><td>Controlled by HTTP headers; hard to invalidate</td></tr>
+<tr><td>CDN</td><td>Many users, geographically distributed</td><td>Static assets, media, public pages</td><td>Best for shared content; purge is coarse</td></tr>
+<tr><td>Application</td><td>One server process</td><td>Hot objects, computed results</td><td>Per-instance copies; duplicated memory</td></tr>
+<tr><td>Distributed</td><td>All application servers</td><td>Sessions, hot records, shared results</td><td>Network hop; another service to operate</td></tr>
+<tr><td>Database</td><td>One database server</td><td>Pages and query data</td><td>Automatic; limited by database memory</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Browser and CDN caching</h2>
+<ul><li>The browser can serve a valid copy without any network request, which is the cheapest possible hit.</li><li>Its behaviour is controlled by HTTP headers such as <code>Cache-Control</code> and validators such as <code>ETag</code>.</li><li>A CDN caches content at edge locations, so users download from nearby rather than from origin servers.</li><li>CDNs work best for static content, media files, public pages, and anything many users can share.</li><li>User-specific or highly dynamic responses are poor CDN candidates unless varied correctly by headers or keys.</li><li>Invalidation at the edge is usually coarse, so versioned URLs or short TTLs are common.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Application, distributed, and database caches</h2>
+<ul><li>An application cache lives inside the running process, so lookups are extremely fast and require no network hop.</li><li>The cost is that each instance has its own copy: memory is duplicated and values can differ between instances.</li><li>A distributed cache gives every server the same view and can hold far more data, at the cost of a network round trip.</li><li>Distributed caches also centralize invalidation, which is simpler than telling every app instance to drop a key.</li><li>Databases maintain their own internal caches for frequently accessed pages; application code usually cannot see or control them.</li><li>Choosing between local and distributed is a choice between speed and shared consistency.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Choosing what to cache</h2>
+<p class="lede">Caching works best when the same data is requested repeatedly and is expensive to fetch or compute.</p>
+<ul><li>Good fits: frequently viewed product details, expensive queries, API responses, configuration, sessions, and complex computations.</li><li>The more often a value is reused, the more useful caching it becomes.</li><li><strong>Poor fit — changes constantly:</strong> the cached copy is stale almost immediately.</li><li><strong>Poor fit — must be fresh:</strong> serving an outdated value is unacceptable, such as an account balance.</li><li><strong>Poor fit — huge and rarely read:</strong> a large object requested once every few hours wastes memory.</li><li>Before caching, ask how expensive the data is to retrieve, how often it is requested, how often it changes, and how much staleness is tolerable.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Poor fit</th><th>Why</th></tr></thead><tbody><tr><td>Changes constantly</td><td>The cached copy may become stale almost immediately</td></tr>
+<tr><td>Must be fresh</td><td>Serving an outdated value may be unacceptable, such as an account balance</td></tr>
+<tr><td>Huge and rarely read</td><td>A large object requested once every few hours wastes memory without much benefit</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Designing cache keys</h2>
+<p class="lede">A cache key identifies a cached value. It decides which requests are allowed to share a result.</p>
+<ul><li>A cache is usually a key-value store: the application supplies a key and receives the value stored under it.</li><li>Examples: <code>product:123</code>, <code>user:456</code>, <code>search:shoes:page:2</code>.</li><li><strong>Too broad:</strong> different requests collide and return the wrong data — two users' carts both stored under <code>cart</code>.</li><li><strong>Too specific:</strong> keys like <code>product:123:&lt;timestamp&gt;</code> create duplicates and almost every lookup misses.</li><li>Include every parameter that changes the result, such as search term, sort order, filters, and page number.</li><li>Use namespaces such as <code>user</code>, <code>product</code>, or <code>session</code> to keep key spaces separate.</li><li>A version prefix such as <code>v2:</code> lets a format change invalidate a whole group at once by switching reads to new keys.</li></ul>
+
+
+<pre class="code"><code>product:123
+user:456
+search:shoes:page:2
+search:shoes:sort:price:page:2
+v2:product:123</code></pre>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>TTL: freshness versus performance</h2>
+<p class="lede">A TTL defines how long an entry stays valid before it expires.</p>
+<ul><li>During the TTL window, requests are served from the cache; after expiry, the next request refetches and repopulates.</li><li>A <strong>short TTL</strong> keeps data fresher but causes more misses and more backend traffic.</li><li>A <strong>long TTL</strong> improves the hit ratio and reduces backend load but increases the chance of stale data.</li><li>There is no universal best TTL; it depends on how fast the data changes and how much staleness the feature tolerates.</li><li>Static configuration can tolerate hours; product data might use minutes; highly dynamic data needs a very short TTL or a different invalidation strategy.</li><li>TTL alone does not guarantee freshness if the write path does not invalidate, and it does not solve memory pressure.</li><li>Add jitter to TTLs so many keys cached together do not all expire at the same moment.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Data type</th><th>Typical TTL</th></tr></thead><tbody><tr><td>Static configuration</td><td>Hours</td></tr>
+<tr><td>Product data</td><td>A few minutes</td></tr>
+<tr><td>Highly dynamic data</td><td>Very short, or a different invalidation strategy</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>When to add a cache</h2>
+<ul><li>First confirm there is a performance problem; if queries are fast and traffic is low, a cache adds little.</li><li>Look for three conditions: high read frequency, expensive reads or computation, and repeated access to the same data.</li><li>Check that the data can tolerate some staleness; if not, caching reads may not be appropriate.</li><li>Confirm the database or downstream service is actually the bottleneck the cache would relieve.</li><li>Weigh the new complexity: expiration, invalidation, stale reads, cache failures, and consistency.</li><li>A cache is justified when the read savings clearly exceed the operational and correctness cost.</li></ul>
+
+<div class="flow"><span class="flow-step">Measure latency and load</span><span class="flow-arrow">→</span><span class="flow-step">Find repeated expensive reads</span><span class="flow-arrow">→</span><span class="flow-step">Check staleness tolerance</span><span class="flow-arrow">→</span><span class="flow-step">Choose layer and key</span><span class="flow-arrow">→</span><span class="flow-step">Set TTL and invalidation</span><span class="flow-arrow">→</span><span class="flow-step">Measure hit ratio</span></div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>What goes wrong in production</h2>
+<ul><li><strong>Stale reads:</strong> invalidation is delayed or missing, so users see old values after a write.</li><li><strong>Stampede:</strong> a popular key expires and many concurrent requests all miss and hit the database at once.</li><li><strong>Hot key:</strong> one very popular key concentrates load on a single cache node or database shard.</li><li><strong>Cold start:</strong> a restarted or empty cache sends the full read load to the database until it warms up.</li><li><strong>Cache outage:</strong> losing the cache exposes the backend to traffic it was never sized to handle.</li><li>Mitigations include request coalescing, locking on miss, jittered TTLs, serving stale data during failure, and load shedding.</li><li>A cache is now part of the critical path, so its failure modes must be designed and tested.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Caching</strong> lowers latency and backend load but introduces a copy that can be stale.</li><li><strong>Longer TTLs</strong> raise the hit ratio and reduce database traffic but widen the staleness window.</li><li><strong>Shorter TTLs</strong> keep data fresh but increase misses and backend load.</li><li><strong>Application-local caches</strong> are fastest but duplicate memory and can diverge across instances.</li><li><strong>Distributed caches</strong> share one view across servers but add a network hop and another service to operate.</li><li><strong>Broad cache keys</strong> increase hit ratio but risk serving the wrong data to the wrong request.</li><li><strong>Adding a cache</strong> absorbs read traffic but can hide capacity problems until the cache fails.</li><li><strong>Aggressive invalidation</strong> improves freshness but reduces hit ratio and pushes more work to the database.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a cache?</summary><div class="answer"><p>A fast storage layer that keeps copies of data so repeat requests can be served without going to the slower source of truth. It does not replace the database; it holds a copy that can be discarded and rebuilt. The benefit is lower latency and less backend load, at the cost of possible staleness.</p></div></details>
+<details><summary>2. What happens on a cache hit versus a miss?</summary><div class="answer"><p>On a hit, the value is returned directly from the cache without touching the database. On a miss, the application fetches from the database, stores the result in the cache, and returns it. A miss is slightly more expensive than no cache at all because of the extra lookup, but subsequent requests become hits.</p></div></details>
+<details><summary>3. What is a good cache hit ratio?</summary><div class="answer"><p>There is no universal number; it depends on traffic volume and the cost of a miss. The ratio must be read in absolute terms: at 10 million requests per second, a 95 percent hit ratio still leaves 500,000 requests per second reaching the backend. Size the database for the miss rate, not the total traffic.</p></div></details>
+<details><summary>4. Where can caching happen in a system?</summary><div class="answer"><p>In the browser, at a CDN edge, inside the application process, in a shared distributed cache such as Redis or Memcached, and inside the database itself. Each layer saves a different amount of work and has a different invalidation model. Browser and CDN caches serve shared content closest to the user; application and distributed caches hold computed or queried data.</p></div></details>
+<details><summary>5. Application cache vs distributed cache?</summary><div class="answer"><p>An application cache is in-process, so it is the fastest option but each instance has its own copy, duplicating memory and allowing values to diverge. A distributed cache is shared over the network, giving every server the same view and much larger capacity, but each lookup costs a round trip. The choice is speed versus shared consistency.</p></div></details>
+<details><summary>6. What data should not be cached?</summary><div class="answer"><p>Data that changes constantly, data that must always be exact such as account balances, and large objects that are rarely read. Each case either makes the cached copy stale almost immediately or wastes memory without meaningful reuse. Caching also adds little when traffic is low and the underlying query is already fast.</p></div></details>
+<details><summary>7. How do you design a cache key?</summary><div class="answer"><p>Include every parameter that changes the result, so two different requests never share a value incorrectly. At the same time, avoid keys so specific that they create duplicate entries and always miss. Use namespaces for key groups and optional version prefixes so a format change can invalidate an entire generation of entries at once.</p></div></details>
+<details><summary>8. What does a TTL control?</summary><div class="answer"><p>How long an entry remains valid before it expires. A short TTL improves freshness but increases misses and backend load; a long TTL improves the hit ratio but widens the staleness window. The right value depends on how quickly the data changes and how much staleness the feature can tolerate.</p></div></details>
+<details><summary>9. When should you add a cache?</summary><div class="answer"><p>When reads are frequent, repeated, and expensive, and the data can tolerate some staleness. Confirm the database or downstream service is the actual bottleneck. If traffic is low and queries are already fast, a cache adds invalidation and consistency complexity for little gain.</p></div></details>
+<details><summary>10. What is a cache stampede, and how do you prevent it?</summary><div class="answer"><p>A popular key expires and many concurrent requests miss at once, all hitting the database for the same value. Prevent it with request coalescing or a per-key lock so only one request fetches while others wait, jittered TTLs to avoid synchronized expiry, or serving stale data briefly when a refresh is in progress.</p></div></details>
+<details><summary>11. What happens if the cache goes down?</summary><div class="answer"><p>All traffic that was being served from cache reaches the backend at once, which may exceed its capacity. A resilient design treats the cache as optional, applies timeouts and circuit breakers, rate-limits or sheds load, and may serve stale data. The database should be sized for a miss rate the system can survive, not only the steady-state rate.</p></div></details>
+<details><summary>12. How do you measure whether a cache is working?</summary><div class="answer"><p>Track the hit ratio overall and per key pattern, along with hit and miss latency, backend request rate, cache memory usage, eviction rate, and error rate. A high aggregate hit ratio can hide a bad path where a critical key always misses, so break the metric down by route or key family.</p></div></details>
+<details><summary>13. Caching vs denormalization?</summary><div class="answer"><p>Caching stores a transient copy that can be evicted or lost and rebuilt from the source. Denormalization changes the stored schema so duplicated data is durable and queryable. Caching is easier to add and remove; denormalization must be maintained on every write and is part of the data model.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Adding a cache without measuring whether the database is actually the bottleneck.</li><li>Judging a cache only by hit ratio without checking the absolute miss rate at peak traffic.</li><li>Using a cache key that omits a parameter that changes the response, so users see each other's data.</li><li>Using a key so specific that it effectively never hits.</li><li>Setting one long TTL for all data regardless of how quickly it changes.</li><li>Letting many keys expire at the same instant and creating a refresh wave against the database.</li><li>Assuming the cache will always be available and never testing the backend under full miss load.</li><li>Treating a cached value as authoritative and losing the ability to rebuild it from the source.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="denormalization.html"><span>← Previous</span><strong>Denormalization</strong></a><a class="next" href="caching-strategies.html"><span>Next →</span><strong>Caching Strategies</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/what-is-caching">AlgoMaster — What is Caching?</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

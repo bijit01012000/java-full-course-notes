@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TCP vs UDP — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 12 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>TCP vs UDP</h1>
+    <p class="dek">Networking · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/tcp-vs-udp">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Where TCP and UDP sit</a>
+<a href="#s2">TCP and the three-way handshake</a>
+<a href="#s3">Reliable delivery and retransmission</a>
+<a href="#s4">Ordered delivery and head-of-line blocking</a>
+<a href="#s5">Flow control</a>
+<a href="#s6">Congestion control</a>
+<a href="#s7">A byte stream, not messages</a>
+<a href="#s8">What TCP does not guarantee</a>
+<a href="#s9">UDP: connectionless datagrams</a>
+<a href="#s10">Application-level reliability over UDP</a>
+<a href="#s11">QUIC and HTTP/3</a>
+<a href="#s12">Choosing between TCP, UDP, and QUIC</a>
+<a href="#s13">Real-world examples</a>
+<a href="#s14">What to remember</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>TCP and UDP both carry data between ports on top of IP, but TCP buys reliable, ordered delivery with handshakes and retransmissions, while UDP stays fast and simple and leaves those guarantees to the application.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Transport layer</dt><dd>The layer above IP where TCP and UDP operate; it delivers data to the correct application process.</dd></div><div class="term"><dt>Port</dt><dd>A number identifying an application endpoint on a host, so one IP can serve many services.</dd></div><div class="term"><dt>Three-way handshake</dt><dd>The SYN, SYN-ACK, ACK exchange that establishes a TCP connection and initializes sequence numbers.</dd></div><div class="term"><dt>Sequence number</dt><dd>A byte-stream position marker that lets TCP detect loss, reorder data, and identify duplicates.</dd></div><div class="term"><dt>Receive window</dt><dd>The amount of buffer space a receiver advertises; it drives TCP flow control.</dd></div><div class="term"><dt>Congestion window</dt><dd>The sender-side limit TCP adjusts based on perceived network congestion.</dd></div><div class="term"><dt>Head-of-line blocking</dt><dd>When one missing or slow unit of data prevents later data from being delivered, even if that later data already arrived.</dd></div><div class="term"><dt>Datagram</dt><dd>A self-contained UDP message with boundaries preserved; one send maps to one datagram.</dd></div><div class="term"><dt>QUIC</dt><dd>A reliable, encrypted transport built on UDP with independent streams, congestion control, and connection migration.</dd></div><div class="term"><dt>Connection migration</dt><dd>A QUIC capability that keeps a connection alive across an IP or network change by identifying it with a connection ID.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Where TCP and UDP sit</h2>
+<p class="lede">Applications do not put bytes on the wire directly; they hand them to a transport protocol, which hands packets to IP.</p>
+<ul><li>At the top are <strong>application protocols</strong> such as HTTP, DNS, and database wire protocols.</li><li>Below them is the <strong>transport layer</strong>, where TCP and UDP live.</li><li>Below that is <strong>IP</strong>, which moves packets between machines across networks.</li><li>IP gets a packet to the right <strong>machine</strong>; TCP or UDP gets the data to the right <strong>application</strong> on that machine.</li><li>A <strong>port</strong> identifies the application: one host can run a web server on 443, a database on 5432, and other services alongside.</li><li>Both protocols use ports, so the real difference is not location in the stack but the <strong>guarantees</strong> each one provides.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Job</th><th>Examples</th></tr></thead><tbody><tr><td>Application</td><td>Message semantics</td><td>HTTP, DNS, PostgreSQL protocol</td></tr>
+<tr><td>Transport</td><td>Process-to-process delivery and guarantees</td><td>TCP, UDP, QUIC</td></tr>
+<tr><td>Network</td><td>Host-to-host packet delivery</td><td>IP</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>TCP and the three-way handshake</h2>
+<p class="lede">TCP is connection-oriented: both sides agree on a starting point before any application bytes flow.</p>
+<ul><li><strong>TCP</strong> (Transmission Control Protocol) provides reliable, ordered communication between two endpoints.</li><li>It is the right default when the application needs <strong>every byte, in order</strong>, and would rather wait than process stale or partial data.</li><li><strong>SYN</strong>: the client proposes a connection and carries its initial sequence number.</li><li><strong>SYN-ACK</strong>: the server acknowledges the client's sequence number and sends its own.</li><li><strong>ACK</strong>: the client acknowledges the server's sequence number, and the connection is established.</li><li>The handshake confirms both sides can communicate and initializes the sequence numbers used for tracking.</li><li>The cost is a full round trip before useful data can be sent, which matters on high-latency paths.</li><li>Systems reduce that cost with connection reuse, TLS 1.3, TCP Fast Open in limited settings, or QUIC.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends SYN with its initial sequence number</span><span class="flow-arrow">→</span><span class="flow-step">Server replies SYN-ACK with its own sequence number and an acknowledgment</span><span class="flow-arrow">→</span><span class="flow-step">Client sends ACK</span><span class="flow-arrow">→</span><span class="flow-step">Connection established; application data can flow</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Reliable delivery and retransmission</h2>
+<ul><li>TCP numbers <strong>bytes</strong>, not packets, so the receiver can tell exactly what it has and what is missing.</li><li>The receiver acknowledges the next byte it expects, not necessarily every segment it received.</li><li>If an acknowledgment does not arrive, or a gap appears in the sequence, the sender <strong>retransmits</strong> the missing data.</li><li>Duplicate segments are detected by sequence number and discarded or acknowledged again.</li><li>The receiver buffers out-of-order data and reconstructs the original stream once the gap is filled.</li><li>Applications therefore do not implement packet-loss recovery themselves; TCP handles it underneath.</li><li>Retransmission costs latency: the data is correct in the end, but the receiver waits for it.</li></ul>
+
+
+<div class="note">This is reliability at the byte-stream level. It says nothing about whether the server actually performed the business operation.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Ordered delivery and head-of-line blocking</h2>
+<ul><li>Packets can take different paths and arrive out of order; TCP uses sequence numbers to reassemble them.</li><li>The application always sees the bytes in the order they were sent, regardless of arrival order.</li><li>That is essential for file transfers, database results, and HTTP bodies, where the wrong order means wrong content.</li><li>The cost is <strong>waiting</strong>: if one segment is lost, later bytes may already sit in the buffer but cannot be delivered.</li><li>This is <strong>head-of-line blocking</strong> at the TCP stream level.</li><li>For a single logical stream, this behavior is usually exactly what you want — a partial file or half a SQL result is useless.</li><li>For many independent streams sharing one TCP connection, it means one loss stalls unrelated work.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Flow control</h2>
+<p class="lede">A fast sender must not overrun a slow receiver, even when the network itself has capacity.</p>
+<ul><li>The receiver advertises a <strong>receive window</strong>: how much more data its buffer can accept.</li><li>The sender limits unacknowledged data in flight to that window, so it cannot outrun the application reading it.</li><li>A fast consumer advertises a larger window and lets the sender send more.</li><li>A receiver falling behind advertises a smaller window, which slows the sender down.</li><li>If the window reaches zero, the sender stops and probes until the receiver opens space again.</li><li>Flow control protects the <strong>receiver</strong>; it says nothing about congestion in the network.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Congestion control</h2>
+<ul><li>Routers have finite queues; if everyone sends at full speed, queues fill and packets are dropped.</li><li>TCP maintains a <strong>congestion window</strong> that limits unacknowledged data in flight, independent of the receive window.</li><li>When the network looks healthy, TCP increases the window to probe for more capacity.</li><li>When it detects congestion — typically packet loss, or signals such as ECN — it reduces the sending rate.</li><li>The exact behavior depends on the algorithm: <strong>Reno</strong>, <strong>CUBIC</strong>, and <strong>BBR</strong> respond differently.</li><li>The goal is to adapt continuously rather than overwhelm the path.</li><li>Flow control protects the receiver and congestion control protects the network; TCP applies the smaller of the two limits.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Mechanism</th><th>Protects</th><th>Signal used</th></tr></thead><tbody><tr><td>Flow control</td><td>The receiver's buffer</td><td>Advertised receive window</td></tr>
+<tr><td>Congestion control</td><td>The network path</td><td>Loss, delay, or explicit congestion signals</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>A byte stream, not messages</h2>
+<ul><li>TCP delivers a <strong>stream of bytes</strong> and does not remember where one application write ended and the next began.</li><li>If an application writes three messages, the receiver may read one chunk, three chunks, or several partial chunks.</li><li>The order is preserved, but <strong>message boundaries are not</strong>.</li><li>The application protocol must define framing: a length prefix, a delimiter, or a self-describing format.</li><li>Getting this wrong produces bugs that appear only under load or when messages coalesce.</li><li>UDP preserves boundaries by contrast: one send is one datagram.</li></ul>
+
+
+<div class="note">A common bug is assuming one <code>recv()</code> equals one message. It equals whatever bytes happen to be available.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>What TCP does not guarantee</h2>
+<ul><li>TCP does not guarantee that a <strong>business operation</strong> succeeded; it only guarantees ordered bytes while the connection is healthy.</li><li>If the server commits a transaction but the connection breaks before the response arrives, the client still does not know the outcome.</li><li>That is why real systems still need timeouts, retries, idempotency keys, and duplicate handling.</li><li>A graceful close uses <strong>FIN</strong> packets: each side signals it has finished sending.</li><li>An abrupt close uses <strong>RST</strong>, which tears the connection down immediately and can discard buffered data.</li><li>Neither close tells you whether the operation committed — only that the transport conversation ended.</li><li>Applications need explicit success responses and safe state transitions to recover.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Close type</th><th>Mechanism</th><th>Meaning</th></tr></thead><tbody><tr><td>Graceful</td><td>FIN, then ACK from each side</td><td>This side has finished sending bytes</td></tr>
+<tr><td>Abrupt</td><td>RST</td><td>Connection torn down immediately; buffered data may be lost</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>UDP: connectionless datagrams</h2>
+<ul><li><strong>UDP</strong> (User Datagram Protocol) is connectionless: no handshake, no connection state, no setup round trip.</li><li>The sender creates a datagram and sends it to the destination IP and port immediately.</li><li>If a packet is lost, UDP does not retransmit; if packets arrive out of order, UDP does not reorder them.</li><li>If the receiver cannot keep up, UDP provides no flow control and will happily let datagrams be dropped.</li><li>What UDP does provide: <strong>ports</strong>, <strong>datagram boundaries</strong>, <strong>length</strong>, and a <strong>checksum</strong> for corruption detection.</li><li>The UDP checksum is mandatory in IPv6 and optional in IPv4, though commonly used.</li><li>The UDP header is <strong>8 bytes</strong>, while the base TCP header is <strong>20 bytes</strong> before options.</li><li>Each datagram is independent, which keeps the protocol small and the latency low.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Application-level reliability over UDP</h2>
+<ul><li>UDP does not make reliability impossible; it makes reliability the application's job.</li><li>Common building blocks: <strong>sequence numbers</strong> to detect loss and reordering, and <strong>timestamps</strong> to discard stale data.</li><li>Important messages may get <strong>application-level acknowledgments</strong> and selective retransmission.</li><li>Media streams often use <strong>forward error correction</strong> so a lost packet can be reconstructed without a round trip.</li><li><strong>Rate control</strong> prevents the sender from flooding a path that cannot carry the load.</li><li>Encryption is added separately through DTLS, SRTP, or QUIC.</li><li>Or the application adopts a higher-level protocol such as QUIC, which supplies these pieces for it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>QUIC and HTTP/3</h2>
+<ul><li><strong>QUIC</strong> runs on UDP and adds reliable delivery, retransmission, congestion control, and flow control in user space.</li><li>It integrates <strong>TLS 1.3</strong>, so transport and security setup happen together instead of as two sequential handshakes.</li><li>It supports <strong>independent streams</strong>: a lost packet only blocks the stream it belonged to, not the whole connection.</li><li>It identifies connections by a <strong>connection ID</strong>, so a session can survive a network change such as Wi-Fi to cellular.</li><li>Because QUIC is implemented above UDP, it can evolve without waiting for operating-system TCP stacks to change.</li><li>HTTP/3 is HTTP over QUIC, with the same request semantics as HTTP/1.1 and HTTP/2.</li><li>Caveats: some networks block or throttle UDP, so clients and servers keep a TCP-based HTTP/2 fallback.</li><li>0-RTT resumption can send data immediately but is replayable, so it should be limited to safe requests.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends a QUIC Initial packet carrying a TLS 1.3 ClientHello</span><span class="flow-arrow">→</span><span class="flow-step">Server responds with its TLS parameters and certificate</span><span class="flow-arrow">→</span><span class="flow-step">Keys are derived and the connection is usable after one round trip</span><span class="flow-arrow">→</span><span class="flow-step">Streams open independently; loss on one does not block the others</span></div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Choosing between TCP, UDP, and QUIC</h2>
+<ul><li><strong>Choose TCP</strong> when every byte matters and must be processed in order, or when the protocol is already stream-based.</li><li>TCP is also the safer default through firewalls, proxies, and corporate networks that understand it well.</li><li>Typical TCP cases: HTTP/1.1 and HTTP/2, SSH, PostgreSQL, MySQL, SMTP, and standard gRPC.</li><li><strong>Choose UDP</strong> when fresh data beats complete old data, or the application can repair loss itself.</li><li>UDP also fits when you need datagram boundaries or an existing UDP-based protocol.</li><li>Typical UDP cases: DNS queries, real-time voice and video, game state, WebRTC media, and local discovery.</li><li><strong>Choose QUIC/HTTP/3</strong> when you want encrypted HTTP with faster setup, independent streams, or mobile connection migration.</li><li>The practical requirement is that UDP on port 443 works and you can fall back to TCP-based HTTP.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>TCP</th><th>UDP</th><th>QUIC</th></tr></thead><tbody><tr><td>Connection</td><td>Handshake required</td><td>None</td><td>Integrated TLS 1.3 handshake</td></tr>
+<tr><td>Reliability</td><td>Built in</td><td>Application's job</td><td>Built in per stream</td></tr>
+<tr><td>Ordering</td><td>Whole stream</td><td>None</td><td>Per stream</td></tr>
+<tr><td>Message boundaries</td><td>Not preserved</td><td>Preserved</td><td>Preserved per stream</td></tr>
+<tr><td>Header overhead</td><td>20+ bytes</td><td>8 bytes</td><td>Larger than UDP, still encrypted</td></tr>
+<tr><td>Best for</td><td>Correctness and ordered bytes</td><td>Low latency, loss tolerant</td><td>Modern encrypted multiplexed traffic</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Real-world examples</h2>
+<ul><li><strong>Web and APIs</strong>: HTTP/1.1 and HTTP/2 over TCP with TLS; HTTP/3 over QUIC, with a fallback when UDP is blocked.</li><li><strong>Databases</strong>: TCP, because queries, results, and replication streams need reliable ordered bytes.</li><li><strong>DNS</strong>: UDP for small queries because it is simple and fast, with TCP for large answers and zone transfers; encrypted variants include DoT, DoH, and DoQ.</li><li><strong>Real-time media</strong>: UDP with jitter buffers, packet-loss concealment, forward error correction, and rate control.</li><li><strong>Online games</strong>: frequent UDP state updates where the next update supersedes a lost one, with a reliable channel for purchases and inventory.</li><li><strong>AI systems</strong>: TCP-based HTTPS for request correctness and compatibility; streaming tokens over chunked HTTP, SSE, WebSockets, gRPC streaming, or HTTP/3.</li><li>The same question applies everywhere: what should this system do when data is late or lost?</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>What to remember</h2>
+<ul><li>TCP and UDP both sit on IP and use ports; the difference is the guarantees, not the layer.</li><li>TCP establishes state with a three-way handshake, then provides a reliable, ordered byte stream using sequence numbers and acknowledgments.</li><li>Flow control protects the receiver; congestion control protects the network.</li><li>TCP does not preserve message boundaries, so the application protocol must define framing.</li><li>TCP does not prove a business operation succeeded; timeouts, retries, and idempotency are still required.</li><li>UDP sends independent datagrams with no handshake, no retransmission, no ordering, and no flow control.</li><li>QUIC runs over UDP and adds reliability, congestion control, encryption, and independent streams, which is what powers HTTP/3.</li><li>Ask not which protocol is faster, but what the application should do when data is late, lost, duplicated, reordered, or processed twice.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>TCP reliability</strong> guarantees correct ordered bytes but costs handshake round trips and waits for retransmissions.</li><li><strong>UDP</strong> minimizes latency and overhead but pushes loss detection, ordering, and rate control onto the application.</li><li><strong>TCP ordering</strong> simplifies application logic but creates head-of-line blocking when one segment is lost.</li><li><strong>QUIC independent streams</strong> remove TCP-level blocking but add UDP dependency and a fallback path to operate.</li><li><strong>Connection reuse</strong> amortizes handshake cost but concentrates risk: one broken connection affects many requests.</li><li><strong>Large congestion windows</strong> improve throughput on a healthy path but cause sharp backoff and queue buildup when the path degrades.</li><li><strong>Application-level reliability over UDP</strong> can be tuned precisely but reimplements decades of transport engineering.</li><li><strong>Encrypting at the transport layer</strong> protects metadata and payload but prevents middleboxes from inspecting or optimizing traffic.</li><li><strong>0-RTT QUIC resumption</strong> reduces latency but allows replay, so it is limited to safe operations.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the fundamental difference between TCP and UDP?</summary><div class="answer"><p>TCP is connection-oriented and guarantees reliable, ordered byte delivery using handshakes, sequence numbers, acknowledgments, and retransmission. UDP is connectionless and guarantees nothing beyond ports, datagram boundaries, length, and a checksum. TCP trades latency and overhead for correctness; UDP trades guarantees for simplicity and speed.</p></div></details>
+<details><summary>2. Walk through the TCP three-way handshake.</summary><div class="answer"><p>The client sends SYN with its initial sequence number. The server replies SYN-ACK, acknowledging that number and sending its own. The client sends ACK, and the connection is established. It takes one full round trip before application data can flow and initializes the sequence numbers used for reliability.</p></div></details>
+<details><summary>3. How does TCP detect and recover from lost data?</summary><div class="answer"><p>Every byte has a sequence number, and the receiver acknowledges the next byte it expects. A missing acknowledgment or a gap in the sequence tells the sender to retransmit. The receiver buffers out-of-order data and delivers the complete, ordered stream once the gap is filled.</p></div></details>
+<details><summary>4. What is TCP head-of-line blocking?</summary><div class="answer"><p>Because TCP delivers one ordered byte stream, data that arrived after a lost segment cannot be given to the application until that segment is retransmitted. Everything behind the gap waits, even if it belongs to an unrelated request sharing the connection.</p></div></details>
+<details><summary>5. Flow control versus congestion control?</summary><div class="answer"><p>Flow control protects the receiver: the receiver advertises a receive window and the sender limits unacknowledged data to it. Congestion control protects the network: the sender maintains a congestion window and grows or shrinks it based on loss or congestion signals. TCP sends at the smaller of the two limits.</p></div></details>
+<details><summary>6. Does TCP preserve message boundaries?</summary><div class="answer"><p>No. TCP is a byte stream, so three writes can arrive as one read or several partial reads. The application protocol must frame messages with a length prefix, a delimiter, or a structured format.</p></div></details>
+<details><summary>7. If TCP is reliable, why do we still need retries and idempotency?</summary><div class="answer"><p>TCP only guarantees bytes while the connection is healthy. If the server commits a transaction and the connection breaks before the response, the client cannot know the outcome. Retries, timeouts, and idempotency keys handle that uncertainty at the application level.</p></div></details>
+<details><summary>8. What does UDP actually guarantee?</summary><div class="answer"><p>Ports to reach the right process, preserved datagram boundaries, a length field, and a checksum for corruption detection. It does not guarantee delivery, ordering, or flow control.</p></div></details>
+<details><summary>9. When would you deliberately choose UDP?</summary><div class="answer"><p>When stale data is worse than missing data, such as live voice, video, or game state, or when the application implements its own acknowledgments, retransmission, and rate control. DNS also uses UDP for small queries because it avoids a handshake.</p></div></details>
+<details><summary>10. How do you build reliability on top of UDP?</summary><div class="answer"><p>Add sequence numbers, timestamps, application-level acknowledgments, selective retransmission for important messages, forward error correction for media, rate control, and encryption. Or use QUIC, which packages these mechanisms.</p></div></details>
+<details><summary>11. What does QUIC add on top of UDP?</summary><div class="answer"><p>Reliable delivery, retransmission, congestion and flow control, TLS 1.3 encryption, independent streams, and connection migration. It gives HTTP/3 TCP-like reliability without TCP's cross-stream head-of-line blocking.</p></div></details>
+<details><summary>12. Why doesn't everyone use QUIC/HTTP/3?</summary><div class="answer"><p>It needs UDP to work on the path, and some networks block or throttle UDP. It also adds operational complexity and requires a TCP fallback. Many systems therefore support HTTP/2 and HTTP/3 together and measure which performs better.</p></div></details>
+<details><summary>13. How does QUIC survive a network change?</summary><div class="answer"><p>QUIC identifies a connection by a connection ID rather than the IP address and port tuple, so a phone moving from Wi-Fi to cellular can continue the same session without a new handshake.</p></div></details>
+<details><summary>14. Which protocol would you use for a payment API and for a voice call?</summary><div class="answer"><p>A payment API uses TCP-based HTTPS because every byte and the exact result matter, and idempotency keys make retries safe. A voice call uses UDP because a late audio packet is useless, with jitter buffering and forward error correction to keep the conversation usable.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Saying TCP guarantees message boundaries when it only guarantees an ordered byte stream.</li><li>Claiming TCP reliability means the business operation completed, ignoring the ambiguous timeout case.</li><li>Confusing flow control with congestion control, or naming only one when asked how TCP adapts.</li><li>Assuming a lost packet blocks only one HTTP/2 request, when it stalls every stream on that TCP connection.</li><li>Choosing UDP for convenience and then discovering the application has to rebuild ordering and retransmission badly.</li><li>Assuming QUIC is always faster, when UDP may be blocked or throttled on the path.</li><li>Forgetting that UDP datagrams can be reordered or duplicated, not just dropped.</li><li>Treating a graceful FIN close as proof that the request succeeded.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="http-https.html"><span>← Previous</span><strong>HTTP/HTTPS</strong></a><a class="next" href="checksums.html"><span>Next →</span><strong>Checksums</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/tcp-vs-udp">AlgoMaster — TCP vs UDP</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

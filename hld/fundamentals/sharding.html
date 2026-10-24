@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sharding — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 22 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Sharding</h1>
+    <p class="dek">Database Scaling Techniques · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/sharding">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The single-database limit</a>
+<a href="#s2">What database sharding is</a>
+<a href="#s3">Sharding vs replication</a>
+<a href="#s4">The shard key</a>
+<a href="#s5">Range-based sharding</a>
+<a href="#s6">Hash-based sharding</a>
+<a href="#s7">Directory-based sharding</a>
+<a href="#s8">Query routing</a>
+<a href="#s9">Cross-shard queries</a>
+<a href="#s10">Cross-shard transactions</a>
+<a href="#s11">Hot shards</a>
+<a href="#s12">Resharding</a>
+<a href="#s13">Failure isolation and operational complexity</a>
+<a href="#s14">When should you shard?</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Sharding splits one large dataset across multiple independent database instances, so each shard stores and serves only a slice — trading cross-shard simplicity for horizontal write and storage scale.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Shard</dt><dd>An independent database instance that stores and serves only a portion of the total dataset.</dd></div><div class="term"><dt>Shard key</dt><dd>The column whose value decides which shard holds a given row, such as <code>user_id</code>.</dd></div><div class="term"><dt>Range-based sharding</dt><dd>Assigning contiguous ranges of the shard key to shards, preserving locality but risking uneven load.</dd></div><div class="term"><dt>Hash-based sharding</dt><dd>Hashing the shard key and mapping the result to a shard, which spreads keys evenly but destroys key locality.</dd></div><div class="term"><dt>Directory-based sharding</dt><dd>Keeping a lookup table that maps each key or tenant to its shard, giving flexibility at the cost of an extra highly available service.</dd></div><div class="term"><dt>Routing layer</dt><dd>The component — in application code, a library, a proxy, or the database — that sends each query to the correct shard.</dd></div><div class="term"><dt>Scatter-gather query</dt><dd>A query without the shard key that must be broadcast to every shard and have its partial results merged.</dd></div><div class="term"><dt>Hot shard</dt><dd>A shard that receives disproportionate traffic or holds disproportionate load, limiting the whole system despite spare capacity elsewhere.</dd></div><div class="term"><dt>Resharding</dt><dd>Moving data between shards when the number of shards changes, while the system continues serving live traffic.</dd></div><div class="term"><dt>Data locality</dt><dd>Deliberately co-locating related rows on the same shard so common operations remain single-shard.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The single-database limit</h2>
+<p class="lede">A single relational database is the simplest correct design. Growth eventually makes it the constraint.</p>
+<ul><li>Vertical scaling — more CPU, memory, faster storage, a bigger machine — is the first response, and it works for a long time.</li><li>Read replicas absorb read traffic, but they do not reduce the primary's write load or total dataset size.</li><li>The dataset can outgrow what one machine can store, back up, or index efficiently.</li><li>Write traffic can exceed what one primary can absorb, even when reads are already offloaded.</li><li>Each successive machine upgrade costs more than the last, so vertical scaling has an economic ceiling as well as a hardware one.</li><li>When storage and write capacity both run out, the remaining move is to divide the data across multiple servers.</li></ul>
+
+
+<div class="note">Sharding addresses dataset size and write throughput. If the problem is read latency, caching and replicas are cheaper answers.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What database sharding is</h2>
+<p class="lede">Sharding splits a large dataset across multiple independent database instances. Each instance is a shard and holds only a portion of the data.</p>
+<ul><li>With 100 million users spread over four shards, each shard holds roughly 25 million users and serves roughly a quarter of the queries.</li><li>Together the shards hold the complete dataset; no single database stores or processes all of it.</li><li>It is <strong>horizontal scaling</strong> for the data tier: add more database servers rather than a bigger one.</li><li>Each shard is typically a full database in its own right, with its own storage, indexes, connections, and backups.</li><li>The application or a routing layer must know how data is distributed; the shards themselves do not coordinate placement.</li><li>Sharding is a partition of <em>data</em>, not of traffic: the same row always lives on one shard unless it is migrated.</li></ul>
+
+<div class="flow"><span class="flow-step">One primary at capacity</span><span class="flow-arrow">→</span><span class="flow-step">Choose a shard key</span><span class="flow-arrow">→</span><span class="flow-step">Split rows into shards</span><span class="flow-arrow">→</span><span class="flow-step">Route queries by key</span><span class="flow-arrow">→</span><span class="flow-step">Scale by adding shards</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Sharding vs replication</h2>
+<p class="lede">The two are often confused because both put data on multiple servers, but they divide different things.</p>
+<ul><li><strong>Replication copies</strong> the same data onto multiple servers; <strong>sharding divides</strong> different data across servers.</li><li>Replication's main benefit is availability and read scaling; sharding's main benefit is storage and write scaling.</li><li>With replication, every server holds all 100 million users; with sharding, every server holds a slice.</li><li>Large systems usually combine them: data is split into shards, and each shard has its own primary and replicas.</li><li>A shard's replicas copy that shard only, never the other shards' data.</li><li>Replication keeps one logical dataset identical everywhere; sharding makes each node authoritative for a subset.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Replication</th><th>Sharding</th></tr></thead><tbody><tr><td>What each server stores</td><td>A full copy of the data</td><td>A portion of the data</td></tr>
+<tr><td>100 million users</td><td>Every server holds all 100M</td><td>Each server holds a slice</td></tr>
+<tr><td>Main benefit</td><td>Availability and read scaling</td><td>Storage and write capacity</td></tr>
+<tr><td>Read scale</td><td>Yes, add replicas</td><td>Yes, but each shard still needs replicas</td></tr>
+<tr><td>Write scale</td><td>No, one primary accepts writes</td><td>Yes, writes spread across shard primaries</td></tr>
+<tr><td>Failure impact</td><td>A replica loss is harmless; primary loss needs failover</td><td>A shard loss affects only that shard's keys</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The shard key</h2>
+<p class="lede">The shard key is the most important decision in a sharded design. It decides where every row lives and which queries stay cheap.</p>
+<ul><li>The shard key is the field whose value is fed into the placement rule — for example, shard the <code>users</code> table by <code>user_id</code>.</li><li>On insert, the system reads the key and computes or looks up the target shard; on read, the same key routes the query.</li><li>A good key <strong>spreads data and traffic evenly</strong>, so no shard stores far more rows or serves far more requests.</li><li>A good key <strong>appears in common queries</strong>, so the hottest access paths resolve to a single shard.</li><li>A poor key concentrates traffic on one shard, or forces most queries to visit every shard.</li><li>Key choice follows access patterns, not just the shape of the data model.</li><li>Changing the shard key later is effectively a full data migration, so treat it as a long-lived commitment.</li></ul>
+
+
+<div class="note">Test candidate keys against real queries: what fraction of requests include the key, and how evenly does the key's value distribution split?</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Range-based sharding</h2>
+<p class="lede">Range sharding divides the key space into contiguous ranges and assigns each range to a shard.</p>
+<ul><li>Users 1–1,000,000 go to Shard 1, 1,000,001–2,000,000 to Shard 2, and so on.</li><li>It is simple to implement and reason about: a range lookup identifies the shard.</li><li>Range queries are efficient because related values sit together; a query for users 1,200,000–1,300,000 visits only Shard 2.</li><li>Locality helps scans and ordered access, which makes this a natural fit for time-series or sequential ID data.</li><li>The weakness is uneven load: if IDs increase over time, every new signup lands on the shard holding the newest range.</li><li>New users are often the most active, so the newest shard can become a hot shard while older shards idle.</li><li>Preserving locality therefore buys range efficiency at the risk of skewed writes.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Shard</th><th>Key range</th></tr></thead><tbody><tr><td>Shard 1</td><td>user_id 1 to 1,000,000</td></tr>
+<tr><td>Shard 2</td><td>user_id 1,000,001 to 2,000,000</td></tr>
+<tr><td>Shard 3</td><td>user_id 2,000,001 to 3,000,000</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Hash-based sharding</h2>
+<p class="lede">Hash sharding applies a hash function to the shard key and maps the result onto a shard.</p>
+<ul><li>Conceptually the rule is <code>shard = hash(user_id) % number_of_shards</code>, so the key itself is never interpreted as a range.</li><li>Hashing spreads keys more evenly than ranges because consecutive IDs produce unrelated hash values.</li><li>New signups no longer pile onto one shard, which distributes both storage and write traffic.</li><li>The cost is lost locality: users with nearby IDs can land on completely different shards.</li><li>A range query must now visit every shard, because matching rows are scattered across all of them.</li><li>Plain modulo is fragile when the shard count changes: from 4 to 5 shards, most keys map to a different shard and roughly 80% of data moves.</li><li>Consistent hashing is often used instead so that adding a shard moves only the share of data the new shard should own.</li></ul>
+
+
+<pre class="code"><code>shard = hash(user_id) % N
+# N changes -&gt; nearly every key remaps
+# use consistent hashing to limit movement</code></pre>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Directory-based sharding</h2>
+<p class="lede">Range and hash sharding compute the shard from the key. Directory sharding looks the shard up in a table instead.</p>
+<ul><li>A lookup service records which shard holds each customer, tenant, or user — for example Customer A → Shard 3, Customer B → Shard 7.</li><li>This gives the most flexibility: a large tenant can be moved to its own shard by changing one directory entry.</li><li>The shard key does not change when data moves, and no other tenant is affected.</li><li>The directory becomes critical infrastructure: every routed request depends on it.</li><li>If the directory is slow, every request is slow; if it is wrong or unavailable, routing breaks.</li><li>It therefore needs to be fast, highly available, and cached carefully, with a plan for what happens when it cannot be reached.</li><li>Directory sharding trades simplicity for flexibility and an extra always-on dependency.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Customer</th><th>Shard</th></tr></thead><tbody><tr><td>Customer A</td><td>Shard 3</td></tr>
+<tr><td>Customer B</td><td>Shard 7</td></tr>
+<tr><td>Customer C</td><td>Shard 2</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Query routing</h2>
+<p class="lede">Once data is split, something must decide where each query goes. That is the routing layer.</p>
+<ul><li>Routing can live in application code, a data-access library, a proxy, or the database system itself.</li><li>For a query containing the shard key, the router computes the shard and sends the request to exactly one database — the ideal case.</li><li>For a query without the shard key, the router has no way to prune; it must broadcast to all shards.</li><li>A broadcast read is a <strong>scatter-gather</strong> query: send to every shard, wait for all responses, merge the results.</li><li>Scatter-gather cost grows with shard count: 4 shards means 4 times the work, 100 shards means 100 times the work.</li><li>Its latency is set by the slowest shard, so one slow shard degrades the whole query.</li><li>Shard key design should therefore be driven by the application's access patterns, not only by entity relationships.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Query</th><th>Shard key present?</th><th>Routing</th></tr></thead><tbody><tr><td>Fetch user 123</td><td>Yes, user_id</td><td>Single shard</td></tr>
+<tr><td>Fetch user 123's orders</td><td>Yes, user_id</td><td>Single shard</td></tr>
+<tr><td>Users who signed up today</td><td>No, signup_date</td><td>Scatter-gather to all shards</td></tr>
+<tr><td>Global order count</td><td>No</td><td>Scatter-gather plus aggregation</td></tr></tbody></table></div>
+
+<div class="note">A query that omits the shard key is not wrong, but it changes from O(1) shard work to O(number of shards) work.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Cross-shard queries</h2>
+<p class="lede">Scatter-gather is the simplest case of a broader problem: any query needing data from multiple shards becomes an application-level distributed query.</p>
+<ul><li>A global count of active users requires every shard to return a partial count, which the application then sums.</li><li>Global sorting is harder: for the 100 most recent orders, each shard returns its own top 100, and the application merges and re-sorts them.</li><li>Pagination is harder still: the system cannot ask each shard for global rows 101–200, because it does not know how many global rows each shard holds.</li><li>The usual workaround is to fetch the top 200 from every shard and discard most of the result, which wastes work as depth increases.</li><li>Aggregations such as averages need care: averaging per-shard averages is wrong unless the shards also return their counts.</li><li>Cross-shard reads add network round trips, merge logic, and tail latency, and they scale with the number of shards.</li><li>Keeping a separate read model or summary table is often cheaper than repeatedly scattering across shards.</li></ul>
+
+<div class="flow"><span class="flow-step">Send query to all shards</span><span class="flow-arrow">→</span><span class="flow-step">Each shard computes a partial result</span><span class="flow-arrow">→</span><span class="flow-step">Collect responses</span><span class="flow-arrow">→</span><span class="flow-step">Merge, sort, or aggregate</span><span class="flow-arrow">→</span><span class="flow-step">Apply global limit or page window</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Cross-shard transactions</h2>
+<p class="lede">A transaction that spans two shards becomes a distributed transaction, because neither database can guarantee the other's commit.</p>
+<ul><li>If both accounts live on one shard, the local database transaction gives atomicity for free.</li><li>If account A is on Shard 2 and account B on Shard 6, a transfer spans two independent databases with no shared commit.</li><li>One option is a distributed commit protocol such as two-phase commit, where a coordinator asks every participant to prepare and then commit.</li><li>Another is an application-level <strong>Saga</strong>, where each step has a compensating action that undoes it if a later step fails.</li><li>Both add coordination latency, new failure states, and the need to handle partial success, retries, and idempotency.</li><li>The best fix is design-level: keep data that is updated together on the same shard, which is called <strong>data locality</strong>.</li><li>For example, shard both <code>orders</code> and <code>order_items</code> by <code>user_id</code>, storing <code>user_id</code> on items too, so creating an order and its items is a single-shard transaction.</li></ul>
+
+
+<div class="note">Denormalizing the shard key onto child tables is a common price for single-shard transactions.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Hot shards</h2>
+<p class="lede">Even distribution of rows does not guarantee even distribution of work. A hot shard is one that receives far more traffic than its peers.</p>
+<ul><li>In a social system sharded by <code>user_id</code>, a few celebrity accounts may receive millions of requests while most users receive very little.</li><li>If a celebrity lands on one shard, that shard saturates while the others have spare capacity; the whole system is limited by the hottest shard.</li><li>A poor key creates the same effect: sharding by region puts most traffic on one shard when most users come from one country.</li><li>Low-cardinality keys such as <code>status</code> or <code>plan_type</code> concentrate values into few shards and cannot balance load.</li><li>Skew can be in read traffic, write traffic, or storage; each needs a different mitigation.</li><li>Mitigations include choosing a higher-cardinality key, splitting a hot key across sub-shards, isolating large tenants, or caching the hot record.</li><li>Monitoring must track per-shard load, not just the cluster average, or a hot shard hides inside healthy-looking numbers.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Resharding</h2>
+<p class="lede">Growing from four shards to eight does not spread load by itself. Existing data must move, and that process is resharding.</p>
+<ul><li>Adding empty databases changes nothing until some rows are migrated onto them.</li><li>Resharding usually runs while the system serves live traffic, so a row may temporarily exist in both its old and new location.</li><li>The system must route reads and writes correctly during the move, avoid losing writes that arrive mid-copy, and avoid inconsistent results.</li><li>Some databases rebalance automatically; in others the application team owns the migration.</li><li>The mapping strategy determines how much data moves: with plain modulo hashing, 4 → 5 shards remaps most keys even though the new shard needs only about 20% of the data.</li><li>Consistent hashing limits movement to roughly the share the new shard should own.</li><li>Plan for a reversible, observable migration: copy, dual-write or change-data-capture, verify, switch reads, then remove old copies.</li></ul>
+
+<div class="flow"><span class="flow-step">Add new shard</span><span class="flow-arrow">→</span><span class="flow-step">Copy affected ranges</span><span class="flow-arrow">→</span><span class="flow-step">Dual-write or stream changes</span><span class="flow-arrow">→</span><span class="flow-step">Verify counts and checksums</span><span class="flow-arrow">→</span><span class="flow-step">Switch routing</span><span class="flow-arrow">→</span><span class="flow-step">Remove old copies</span></div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Failure isolation and operational complexity</h2>
+<p class="lede">Sharding changes both the blast radius of failure and the day-to-day cost of running the system.</p>
+<ul><li><strong>Failure isolation improves:</strong> if one of ten shards fails, only the users on that shard are affected while the other nine keep serving.</li><li>That isolation is not automatic availability: a shard on a single machine is unavailable until that machine recovers.</li><li>Production shards therefore combine sharding with replication, promoting a replica when a shard's primary fails.</li><li>Schema migrations must run across every shard; a half-finished migration leaves mixed schema versions.</li><li>Monitoring, backups, and point-in-time restores must be per shard, and a consistent restore across all shards is harder than restoring one database.</li><li>Rebalancing becomes an ongoing operational task rather than a one-time setup step.</li><li>Debugging is harder because two users making the same request may hit different databases with different schema or configuration versions.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>When should you shard?</h2>
+<p class="lede">Sharding is a late-stage technique. Exhaust the cheaper options first, then confirm the application has a natural shard key.</p>
+<ul><li>Optimize slow queries and add the right indexes; these are far cheaper than distributing data.</li><li>Introduce caching and scale the database vertically before partitioning.</li><li>Move read traffic to replicas and archive old data out of the hot tables.</li><li>Partition large tables inside one database, which gives some locality and maintenance benefits without cross-node routing.</li><li>Shard when one database can no longer handle the dataset or write workload efficiently and the application must scale horizontally.</li><li>Confirm a natural shard key exists: if most operations route to a single shard, sharding works well.</li><li>Multi-tenant SaaS is a good fit because almost every request belongs to one customer; a system that joins across everything is a poor fit.</li></ul>
+
+<div class="flow"><span class="flow-step">Optimize queries and indexes</span><span class="flow-arrow">→</span><span class="flow-step">Cache</span><span class="flow-arrow">→</span><span class="flow-step">Scale vertically</span><span class="flow-arrow">→</span><span class="flow-step">Add read replicas</span><span class="flow-arrow">→</span><span class="flow-step">Archive old data</span><span class="flow-arrow">→</span><span class="flow-step">Partition tables</span><span class="flow-arrow">→</span><span class="flow-step">Shard</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Sharding</strong> raises storage and write capacity, but turns every query without the shard key into a scatter-gather operation.</li><li><strong>Range sharding</strong> keeps related keys together and makes range scans cheap, but sequential keys concentrate new writes on one shard.</li><li><strong>Hash sharding</strong> spreads data and traffic evenly, but destroys key locality and makes range queries visit every shard.</li><li><strong>Directory sharding</strong> allows per-tenant placement and easy moves, but adds a lookup service that must be fast and always available.</li><li><strong>Data locality</strong> keeps common transactions single-shard, but often requires denormalizing the shard key onto child tables.</li><li><strong>Cross-shard transactions</strong> preserve global atomicity, but add coordination latency, failure states, and retry complexity.</li><li><strong>Failure isolation</strong> limits the blast radius of one shard, but only if each shard also has its own replication and failover.</li><li><strong>More shards</strong> increase aggregate capacity, but multiply migrations, backups, monitoring surfaces, and scatter-gather cost.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is sharding, and how is it different from partitioning?</summary><div class="answer"><p>Sharding splits a dataset across multiple independent database instances, each holding a portion and each capable of running on its own server. Partitioning is the broader idea of dividing a table; a partition can live inside one database. Sharding specifically implies distribution across nodes, so it brings routing, cross-shard queries, and distributed operations.</p></div></details>
+<details><summary>2. Sharding vs replication — what problem does each solve?</summary><div class="answer"><p>Replication copies the same data for availability and read scaling; sharding divides different data for storage and write scaling. Replication leaves one primary accepting all writes. Large systems use both: each shard has a primary and replicas, so writes spread across shards and each shard survives a node failure.</p></div></details>
+<details><summary>3. How do you choose a shard key?</summary><div class="answer"><p>Pick a high-cardinality field that spreads data and traffic evenly and appears in the most common queries, so those queries route to a single shard. Check the real access pattern: what fraction of requests include the key, and how skewed is its value distribution. Avoid low-cardinality fields like status and monotonically increasing fields that concentrate new writes.</p></div></details>
+<details><summary>4. Compare range, hash, and directory sharding.</summary><div class="answer"><p>Range sharding assigns contiguous key ranges: great for range queries, but sequential keys create hot shards. Hash sharding computes a hash and maps it to a shard: even distribution, but range queries hit every shard and modulo remaps most data when the shard count changes. Directory sharding looks up placement in a table: maximum flexibility, but the directory must be fast and highly available.</p></div></details>
+<details><summary>5. What happens to a query that does not include the shard key?</summary><div class="answer"><p>The router cannot prune shards, so it broadcasts the query to all of them and merges the results — a scatter-gather query. Work and tail latency grow with shard count, since the response waits for the slowest shard. Common non-key queries are better served by a secondary index, a read model, or a redesign of the shard key.</p></div></details>
+<details><summary>6. Why is global pagination hard in a sharded system?</summary><div class="answer"><p>Each shard only knows its own rows, so it cannot identify which of its rows correspond to global positions 101–200. A typical approach fetches the top N from every shard, merges and sorts them, then discards the earlier pages. Deep pagination therefore multiplies work across shards and gets worse as the page depth increases.</p></div></details>
+<details><summary>7. How do you handle a transaction that spans two shards?</summary><div class="answer"><p>Use a distributed commit protocol such as two-phase commit, or an application-level Saga with compensating actions for each step. Both add latency and new partial-failure states, so the better answer is usually to avoid the situation: shard related tables by the same key so the operation stays on one shard. For example, store <code>user_id</code> on <code>order_items</code> so orders and items are co-located.</p></div></details>
+<details><summary>8. What is a hot shard and how do you fix it?</summary><div class="answer"><p>A hot shard receives disproportionate traffic even when row counts are even — a celebrity account, a dominant region, or a low-cardinality key. Fixes include choosing a higher-cardinality key, isolating large tenants on dedicated shards, splitting a single hot key into sub-shards, or caching the hot value so reads never reach the database. Detect it with per-shard metrics, not cluster averages.</p></div></details>
+<details><summary>9. Why is resharding risky?</summary><div class="answer"><p>Data must move while live traffic continues, so a row can exist in two places and writes arriving mid-copy can be lost or applied out of order. The system must route correctly throughout, verify the copy, and switch reads safely. Plain modulo hashing makes it worse by remapping most keys; consistent hashing limits movement to roughly the new shard's share.</p></div></details>
+<details><summary>10. Does sharding improve availability?</summary><div class="answer"><p>It improves failure isolation: one failed shard affects only its keys, while the others keep serving. But it does not by itself make a shard available — a shard on one machine is still a single point of failure for its data. Each shard needs its own replicas and failover to turn isolation into availability.</p></div></details>
+<details><summary>11. What operational costs does sharding add?</summary><div class="answer"><p>Schema migrations must run on every shard and can end half-applied; monitoring, backups, and restores become per-shard; rebalancing becomes routine work; and debugging spans multiple databases that may drift in schema or configuration. These costs are why sharding should come after caching, replicas, archiving, and in-database partitioning.</p></div></details>
+<details><summary>12. When would you decide not to shard?</summary><div class="answer"><p>When queries routinely join across many entities, when no natural shard key exists, or when simpler options still have headroom. If most requests would need data from several shards, the design adds latency and complexity without relieving the real bottleneck. A multi-tenant SaaS app with per-customer routing is a good fit; an analytics system joining everything is not.</p></div></details>
+<details><summary>13. How would you migrate a single database to shards?</summary><div class="answer"><p>Start by identifying the shard key and validating its distribution against real queries. Add a routing layer that can direct reads and writes per key, backfill data into shards, dual-write or stream changes, verify counts and checksums, then move read traffic and finally writes. Keep the old database available for rollback until the new topology is proven.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Sharding before trying indexes, caching, vertical scaling, replicas, archiving, or in-database partitioning.</li><li>Choosing a shard key that is not present in the most common queries, turning normal reads into scatter-gather.</li><li>Sharding by a low-cardinality field such as status or plan type and expecting balanced load.</li><li>Assuming even row counts mean even traffic; a single popular key can saturate one shard.</li><li>Using plain modulo hashing and then discovering that doubling the shard count remaps most keys.</li><li>Forgetting that each shard still needs replication and failover to be highly available.</li><li>Underestimating operational work: per-shard migrations, backups, monitoring, and configuration drift.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="indexing.html"><span>← Previous</span><strong>Indexing</strong></a><a class="next" href="denormalization.html"><span>Next →</span><strong>Denormalization</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/sharding">AlgoMaster — Sharding</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

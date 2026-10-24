@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consistent Hashing — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 20 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p1">P1 · Scaling</span></div>
+    <h1>Consistent Hashing</h1>
+    <p class="dek">Consistent hashing is the standard follow-up to sharding and caching, because it tests whether you can keep key ownership stable while the cluster changes. Interviewers look for the ring mechanism, virtual nodes, replica placement, and the data movement the algorithm does not do for you.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">8 trade-offs</span>
+      <span class="pill">12 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Place servers and keys on the same fixed hash ring, give each server many virtual nodes for balance, and move only the arc owned by a joining or leaving node.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Map every key to exactly one primary owner deterministically while membership is stable.</li><li>Add or remove a node while moving only the keys whose ownership actually changes.</li><li>Support virtual nodes so each physical server owns many small arcs and capacity can be weighted.</li><li>Place replicas on distinct physical servers by walking clockwise around the ring.</li><li>Distribute one versioned membership view so all clients and servers agree on ownership.</li><li>Expose ring distribution and rebalance progress to operators.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Lookup is O(log V) over sorted vnode positions with a stable non-cryptographic hash.</li><li>Adding one node to N moves about 1/(N+1) of keys, not most of them.</li><li>Load is balanced within an acceptable band; virtual nodes reduce variance but do not guarantee equal load.</li><li>A node failure is absorbed by several successors rather than one, and reads degrade to misses or retries rather than corruption.</li><li>Membership changes converge quickly and are versioned to prevent split ownership.</li><li>Hash a stable server ID rather than an ephemeral IP so restarts do not reshuffle the ring.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 100 cache nodes with 150 virtual nodes each: 15,000 ring positions, still small enough for a sorted array in memory.</li><li>Assume 50M keys at 1 KB per value: about 50 GB of cache data, roughly 500 MB per node before replicas.</li><li>Adding the 101st node moves about 1% of keys, roughly 500k keys, which is a bounded refill rather than a full cache flush.</li><li>At 20k lookups/s per client, binary search over 15k positions is negligible; the network hop dominates.</li><li>Target membership convergence in seconds, with a version and checksum so a stale client can detect that its ring is old.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Node</span><span class="fields">node_id, address, vnode_count, capacity_weight, status</span></div><div class="entity"><span class="name">VNode</span><span class="fields">position, node_id, ring_version</span></div><div class="entity"><span class="name">Membership</span><span class="fields">ring_version, nodes, updated_at, checksum</span></div><div class="entity"><span class="name">KeyOwnership</span><span class="fields">key_hash, primary_node, replica_nodes, ring_version</span></div><div class="entity"><span class="name">RebalanceJob</span><span class="fields">job_id, source_node, target_nodes, keys_total, keys_moved, state</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>GET</code></td><td><code>/v1/ring/{key}</code></td><td>Return the primary and replica owners for a key without moving data.</td></tr><tr><td><code>GET</code></td><td><code>/v1/ring</code></td><td>Return the current membership version, checksum, and node list.</td></tr><tr><td><code>POST</code></td><td><code>/internal/v1/nodes</code></td><td>Register a node and assign its virtual nodes on the ring.</td></tr><tr><td><code>DELETE</code></td><td><code>/internal/v1/nodes/{id}</code></td><td>Drain a node and remove it after its keys have moved or been rebuilt.</td></tr><tr><td><code>GET</code></td><td><code>/internal/v1/ring/distribution</code></td><td>Show per-node key share and the hottest arcs for imbalance detection.</td></tr><tr><td><code>POST</code></td><td><code>/internal/v1/rebalance</code></td><td>Start or resume the key transfer required by a membership change.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Ring representation</td><td>A sorted array of vnode positions plus a map from position to physical node</td><td>Lookup is a binary search for the first position at or after the key hash, giving O(log V) routing with a small in-memory footprint.</td></tr><tr><td>Virtual node count</td><td>100 to 200 virtual nodes per physical node as a starting point, weighted by capacity</td><td>Many small arcs average out uneven gaps and spread a failed node's load across several successors; more vnodes add metadata and membership-update work.</td></tr><tr><td>Hash function</td><td>A stable, fast, non-cryptographic hash such as xxHash, MurmurHash, or CityHash with a fixed seed</td><td>Placement needs speed and determinism, not cryptographic strength, and every client must produce the same position for the same identifier.</td></tr><tr><td>Replica placement</td><td>Walk clockwise and take the next vnodes belonging to distinct physical servers</td><td>Two copies on the same machine do not survive that machine failing, and spreading replicas across racks or zones improves durability.</td></tr><tr><td>Membership distribution</td><td>One coordination service publishes a versioned ring; clients cache it and refresh on a version change</td><td>Independent membership views cause the same key to route to different owners, producing misses and divergence.</td></tr><tr><td>Key movement</td><td>Background transfer or cache refill, throttled and tracked per rebalance job; not part of the routing algorithm</td><td>Consistent hashing only changes ownership, while moving bytes, warming the new owner, and repairing replicas are separate mechanisms.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> R[🧭 Ring Router]
+  R -->|hash + binary search| T[🔢 Vnode Table]
+  R --> N1[⚙️ Node A]
+  R --> N2[⚙️ Node B]
+  R --> N3[⚙️ Node C]
+  M[📚 Membership Service] -->|versioned ring| R
+  N1 <-->|replicate arc| N2
+  N2 <-->|replicate arc| N3
+  N1 --> D[(🗄️ Shard Store)]
+  N2 --> D
+  N3 --> D
+  B[📊 Balance Monitor] --> M
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef service fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef data fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef ops fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class C client;
+  class R,M,T edge;
+  class N1,N2,N3 service;
+  class D data;
+  class B ops;</div><div class="diagram-caption">The router hashes each key, binary-searches the vnode table for the first position clockwise, and routes to that physical node while a versioned membership service keeps every client's ring consistent.</div></div>
+        <ul><li>The ring is logical: an in-memory sorted array of vnode positions plus a map to physical nodes, not a literal circle.</li><li>Every client must use the same hash function, vnode scheme, and membership version, or the same key routes to different owners.</li><li>Publish membership from one authority and include a version and checksum so a stale router can refresh or fail fast.</li><li>Replication chooses where copies live; write quorum, read repair, and anti-entropy are separate mechanisms.</li><li>Plan key movement as a throttled background transfer, and decide whether reads during the move go to the old owner, the new owner, or both.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Consistent hashing instead of modulo hashing</td><td>Membership changes move only the affected arcs, avoiding a near-total remap and a cache-miss storm.</td><td>A ring structure, vnode metadata, and a shared membership view that must be kept in sync.</td></tr><tr><td>Many virtual nodes per server</td><td>Better balance and a failed node's load is spread across several successors.</td><td>More metadata and more routing-table work on every membership change.</td></tr><tr><td>One vnode per server</td><td>A tiny ring and trivial membership updates.</td><td>Uneven arcs and a single neighbor inheriting the whole failed range.</td></tr><tr><td>Clockwise replication</td><td>Availability and durability without a separate placement service.</td><td>Storage and write amplification, plus a repair process for missed writes.</td></tr><tr><td>Rendezvous hashing instead of a ring</td><td>No ring state and graceful membership changes.</td><td>O(N) work per lookup, which gets awkward for very large server sets.</td></tr><tr><td>Fixed partitions instead of a ring</td><td>Explicit data movement and a stable modulo mapping on partition IDs.</td><td>The partition count is a long-term commitment and hot partitions remain possible.</td></tr><tr><td>Client-side routing</td><td>No extra network hop and low latency per lookup.</td><td>Every client must stay in sync with membership, and an old client silently routes to the wrong owner.</td></tr><tr><td>Server-side routing proxy</td><td>One authoritative ring view and simpler clients.</td><td>An extra network hop and a potential bottleneck or single point of failure.</td></tr></tbody></table></div>
+        <ul><li>Use 100 to 200 vnodes per node as a starting point, then measure the actual key distribution instead of trusting theory.</li><li>Weight vnode counts by machine capacity instead of hand-tuning individual arcs.</li><li>Binary search the sorted positions and cache the ring in each client to avoid a central lookup per request.</li><li>Precompute the replica set per key when the ring version changes, not on every request.</li><li>Throttle rebalance transfers and keep serving from the old owner until the new owner confirms it has the keys.</li><li>Use a fast non-cryptographic hash with a fixed seed; cryptographic hashes add CPU without improving placement.</li><li>Alert on per-node key share and request rate, not just the cluster average.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>What problem does consistent hashing solve?</strong> Modulo hashing remaps most keys whenever the server count changes, while consistent hashing changes ownership only for the arcs affected by the membership change.</div><div class="followup"><strong>Walk me through a lookup on the ring.</strong> Hash the key into the fixed space, binary-search for the first vnode position at or after the hash, and wrap to the first position if the key falls past the end.</div><div class="followup"><strong>Why does adding one server to five move about one sixth of the keys?</strong> A new node takes over the arc between its predecessor and itself, which is roughly 1/(N+1) of a balanced ring.</div><div class="followup"><strong>Does consistent hashing move the data for you?</strong> No, it changes ownership only; a cache simply misses and reloads, while persistent storage needs a separate transfer and repair process.</div><div class="followup"><strong>What happens if a server fails without virtual nodes?</strong> Its entire arc moves to the next server clockwise, which can multiply that neighbor's load and cause a cascading failure.</div><div class="followup"><strong>What are virtual nodes and why do they help?</strong> A vnode is an extra ring position for the same physical server, so many small arcs average out uneven gaps, spread failure load, and allow capacity weighting.</div><div class="followup"><strong>Do virtual nodes guarantee even load?</strong> No, they only reduce variance statistically; hot keys, skewed key distributions, and heterogeneous request costs can still overload one server.</div><div class="followup"><strong>How would you implement the ring efficiently?</strong> Keep a sorted array of vnode positions and a position-to-node map, hash the key, binary-search with wrap-around, and return the owner in O(log V).</div><div class="followup"><strong>What breaks if two clients have different ring views?</strong> The same key can route to two different owners, causing misses and divergent data, so membership must be published from one authority and versioned.</div><div class="followup"><strong>How do you place replicas on the ring?</strong> Take the primary vnode, then walk clockwise and choose the next vnodes on distinct physical servers until the replication factor is met, spreading them across failure domains.</div><div class="followup"><strong>Consistent hashing versus rendezvous hashing?</strong> Consistent hashing keeps ring state and looks up in O(log V), while rendezvous hashing scores every node per key in O(N) but needs no ring.</div><div class="followup"><strong>When is consistent hashing the wrong choice?</strong> For stateless services where any healthy server can handle any request, or when fixed partitions or a plain load balancer is simpler.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Claiming consistent hashing moves data when it only changes ownership and the transfer is a separate process.</li><li>Using one vnode per server in production, creating hot spots and single-neighbor failure overload.</li><li>Hashing ephemeral IPs so every restart reshuffles the ring and invalidates caches.</li><li>Letting clients compute membership independently so they disagree about the owner of a key.</li><li>Placing a replica on the next vnode without checking that it belongs to a different physical server.</li><li>Assuming virtual nodes guarantee perfectly even load rather than reducing variance.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="multi-region.html"><span>← Previous</span><strong>Run Across Multiple Regions</strong></a><a class="next" href="api-pagination-versioning.html"><span>Next →</span><strong>API Pagination and Versioning</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

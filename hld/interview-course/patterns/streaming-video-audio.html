@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Streaming Video and Audio — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 08 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Streaming Video and Audio</h1>
+    <p class="dek">Interview Patterns · Delivering Content</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/media-streaming">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: continuous playback over unpredictable networks</a>
+<a href="#s2">Where this pattern shows up</a>
+<a href="#s3">Why one large file does not work</a>
+<a href="#s4">The streaming model: manifest plus segments</a>
+<a href="#s5">Encoding and the bitrate ladder</a>
+<a href="#s6">Packaging: HLS and DASH</a>
+<a href="#s7">Adaptive bitrate playback</a>
+<a href="#s8">CDN delivery and cache hierarchy</a>
+<a href="#s9">The upload and processing pipeline</a>
+<a href="#s10">Live streaming versus on demand</a>
+<a href="#s11">Latency, startup, and buffering trade-offs</a>
+<a href="#s12">Access control and DRM</a>
+<a href="#s13">Failure modes and quality monitoring</a>
+<a href="#s14">Interview walkthrough</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Streaming replaces one giant download with a <strong>manifest plus short segments</strong>, so the player can start quickly, switch quality as the network changes, and fetch each segment from a nearby CDN.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Codec</dt><dd>The algorithm that compresses and decompresses audio or video, such as H.264, HEVC, VP9, or AV1.</dd></div><div class="term"><dt>Container</dt><dd>The file format that wraps encoded tracks and metadata, such as MP4 or fragmented MP4.</dd></div><div class="term"><dt>Transcode</dt><dd>Decoding a source and re-encoding it into other codecs, resolutions, and bitrates.</dd></div><div class="term"><dt>Rendition</dt><dd>One encoded version of the content at a specific resolution and bitrate.</dd></div><div class="term"><dt>Bitrate ladder</dt><dd>The ordered set of renditions a player can choose from, from low to high quality.</dd></div><div class="term"><dt>Segment</dt><dd>A short, independently fetchable chunk of media, usually a few seconds long.</dd></div><div class="term"><dt>Manifest</dt><dd>A playlist describing available renditions and segment locations, fetched first by the player.</dd></div><div class="term"><dt>Adaptive bitrate (ABR)</dt><dd>Player logic that switches renditions based on measured throughput, buffer level, and device limits.</dd></div><div class="term"><dt>CDN</dt><dd>A cache hierarchy that serves segments from an edge near the viewer and shields the origin.</dd></div><div class="term"><dt>DRM</dt><dd>Digital rights management: encryption and license delivery that restrict playback to authorized devices.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: continuous playback over unpredictable networks</h2>
+<p class="lede">A streaming service must deliver huge amounts of data to many viewers at once, over connections ranging from fast home Wi-Fi to unreliable mobile networks.</p>
+<ul><li>Videos should <strong>start quickly</strong>, because viewers abandon slow starts.</li><li>Playback must <strong>adapt</strong> when bandwidth rises or falls instead of stalling.</li><li>The same content must work on phones, laptops, TVs, and set-top boxes with different codec support.</li><li>A single viewer may consume more bandwidth than thousands of API requests, so delivery cost dominates.</li><li>Viewers expect to seek, pause, resume, and change devices without losing their place.</li><li>The system must do all of this while millions of people watch the same popular title at the same time.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Where this pattern shows up</h2>
+<ul><li><strong>Video on demand</strong> (YouTube, Netflix): a catalog of pre-processed titles watched at arbitrary times.</li><li><strong>Live streaming</strong> (sports, events, live shopping): the same content delivered to a large audience with low delay.</li><li><strong>Music streaming</strong> (Spotify): audio renditions, playlists, and fast start on mobile networks.</li><li><strong>Video conferencing</strong>: real-time two-way media with much tighter latency budgets.</li><li><strong>Social video</strong> (TikTok, Instagram Reels): short clips expected to start instantly while scrolling.</li><li><strong>Enterprise training and webinars</strong>: large internal audiences with access control requirements.</li><li>Each variant reuses the same building blocks: encode, package, distribute, and adapt.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Variant</th><th>Latency need</th><th>Dominant design pressure</th></tr></thead><tbody><tr><td>Video on demand</td><td>Seconds of startup, no live delay</td><td>Catalog processing and CDN cost</td></tr>
+<tr><td>Live streaming</td><td>Seconds, sometimes sub-second</td><td>Ingest and real-time packaging</td></tr>
+<tr><td>Music streaming</td><td>Fast start, small files</td><td>Mobile bandwidth and catalog size</td></tr>
+<tr><td>Conferencing</td><td>Sub-second, interactive</td><td>Uplink, jitter, and echo</td></tr>
+<tr><td>Short social clips</td><td>Instant start, loop</td><td>Prefetch and edge caching</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Why one large file does not work</h2>
+<ul><li>Downloading a whole file before playing delays startup in proportion to file size.</li><li>Progressive download can play while fetching, but it cannot cleanly switch quality mid-stream.</li><li>A single high-bitrate file wastes bandwidth on small screens and weak networks.</li><li>A single low-bitrate file looks poor on large screens and fast connections.</li><li>Seeking deep into a single file requires byte-range math and server support, and still assumes one encoding.</li><li>Any interruption forces buffering because there is no smaller unit to retry.</li><li>Splitting the media into segments turns one fragile transfer into many small, cacheable, retryable ones.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The streaming model: manifest plus segments</h2>
+<p class="lede">The player fetches a small manifest first, then requests segments one at a time.</p>
+<ul><li>The media is cut into <strong>segments</strong>, each containing a short span of audio and video.</li><li>A <strong>manifest</strong> lists the available renditions and the URLs or templates for their segments.</li><li>The player reads the manifest, picks an initial rendition, and starts fetching segments.</li><li>Playback can begin after a small buffer instead of the whole file.</li><li>Each segment is an independent HTTP object, so it can be cached, ranged, retried, and served by a CDN.</li><li>Switching quality means requesting the next segment from a different rendition, not re-downloading the file.</li><li>Segment boundaries must line up across renditions so the player can switch without losing sync.</li></ul>
+
+<div class="flow"><span class="flow-step">Player fetches manifest</span><span class="flow-arrow">→</span><span class="flow-step">Selects initial rendition</span><span class="flow-arrow">→</span><span class="flow-step">Requests first segments</span><span class="flow-arrow">→</span><span class="flow-step">Buffers briefly</span><span class="flow-arrow">→</span><span class="flow-step">Starts playback</span><span class="flow-arrow">→</span><span class="flow-step">Requests subsequent segments</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Encoding and the bitrate ladder</h2>
+<ul><li>The source is <strong>transcoded</strong> into multiple renditions at different resolutions and bitrates.</li><li>The set of renditions forms a <strong>bitrate ladder</strong>, from a low mobile-friendly version to a high-quality version.</li><li>More rungs improve adaptation granularity but multiply encoding and storage cost.</li><li>Codec choice trades compression efficiency against device support and licensing.</li><li>Audio is usually encoded separately with its own bitrates and packaged alongside video.</li><li>Per-title or per-scene encoding can allocate bits where the content needs them, at the cost of more processing.</li><li>The ladder should reflect real device classes and network conditions, not just the highest possible quality.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Packaging: HLS and DASH</h2>
+<ul><li><strong>HLS</strong> uses a manifest playlist and TS or fragmented MP4 segments; it is widely supported, especially on Apple devices.</li><li><strong>MPEG-DASH</strong> uses an XML manifest and is common on Android, browsers, and smart TVs.</li><li>Both describe multiple renditions and let the player switch between them.</li><li>Many services package the same segments into both formats to cover all clients.</li><li>Low-latency variants shorten segments or use chunked delivery, trading resilience for delay.</li><li>Encryption metadata is carried in the manifest, so packaging and DRM are designed together.</li><li>Packaging must produce consistent segment boundaries across renditions or switching breaks.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>HLS</th><th>MPEG-DASH</th></tr></thead><tbody><tr><td>Manifest</td><td>Playlist (m3u8)</td><td>XML (MPD)</td></tr>
+<tr><td>Typical strength</td><td>Apple devices and broad support</td><td>Android, browsers, smart TVs</td></tr>
+<tr><td>Segment style</td><td>TS or fragmented MP4</td><td>Fragmented MP4 or WebM</td></tr>
+<tr><td>Adaptation</td><td>Multiple renditions</td><td>Multiple representations</td></tr>
+<tr><td>Low latency</td><td>Short segments or chunked</td><td>Short segments or chunked</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Adaptive bitrate playback</h2>
+<p class="lede">The player continuously decides which rendition to request next.</p>
+<ul><li>It measures throughput and segment download time, and watches how much buffer remains.</li><li>If bandwidth drops, it switches to a lower rendition before the buffer drains.</li><li>If bandwidth recovers, it steps up cautiously to avoid oscillating between qualities.</li><li>The goal is to minimize rebuffering first, then startup delay, then quality switching.</li><li>Aggressive upswitching improves sharpness but risks stalls; conservative switching looks softer but plays smoothly.</li><li>Device constraints such as screen size, decoder support, and battery also influence the choice.</li><li>ABR logic lives in the player, so the backend only needs to publish a correct ladder and manifest.</li></ul>
+
+<div class="flow"><span class="flow-step">Measure throughput</span><span class="flow-arrow">→</span><span class="flow-step">Check buffer level</span><span class="flow-arrow">→</span><span class="flow-step">Choose next rendition</span><span class="flow-arrow">→</span><span class="flow-step">Fetch segment</span><span class="flow-arrow">→</span><span class="flow-step">Update estimate</span><span class="flow-arrow">→</span><span class="flow-step">Repeat</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>CDN delivery and cache hierarchy</h2>
+<ul><li>Segments are immutable, so they cache extremely well at every layer.</li><li>A <strong>CDN</strong> serves most requests from an edge close to the viewer, reducing latency and origin egress.</li><li>Popular titles are cached at many edges; long-tail content may be fetched from origin or a mid-tier cache.</li><li>Request collapsing prevents many simultaneous misses for the same new segment from hammering the origin.</li><li>Segment URLs should be versioned or content-addressed so a re-encode does not serve stale bytes.</li><li>Signed URLs or tokens authorize CDN access without routing every request through the application.</li><li>The origin must be shielded from flash crowds, for example when a live event or a new release starts.</li></ul>
+
+<div class="flow"><span class="flow-step">Player requests segment</span><span class="flow-arrow">→</span><span class="flow-step">Edge cache hit?</span><span class="flow-arrow">→</span><span class="flow-step">Yes: serve</span><span class="flow-arrow">→</span><span class="flow-step">No: fetch from mid-tier or origin</span><span class="flow-arrow">→</span><span class="flow-step">Cache at edge</span><span class="flow-arrow">→</span><span class="flow-step">Serve and update hit ratio</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>The upload and processing pipeline</h2>
+<ul><li>Creators upload large source files directly to object storage, as in the large-file pattern.</li><li>An event triggers validation, scanning, and a transcode job rather than doing work in the upload request.</li><li>Transcoding is parallelized across renditions and segmented so failures retry only part of the work.</li><li>The packager builds manifests and encrypts segments for each supported format.</li><li>Derived artifacts are written back to storage and registered in the catalog with metadata.</li><li>The title becomes playable only after the ladder and manifests are complete, or it is published progressively.</li><li>Long transcodes need priority queues, progress tracking, and cost controls for large catalogs.</li></ul>
+
+<div class="flow"><span class="flow-step">Upload source</span><span class="flow-arrow">→</span><span class="flow-step">Validate and scan</span><span class="flow-arrow">→</span><span class="flow-step">Transcode renditions</span><span class="flow-arrow">→</span><span class="flow-step">Package and encrypt</span><span class="flow-arrow">→</span><span class="flow-step">Publish manifests</span><span class="flow-arrow">→</span><span class="flow-step">Mark playable</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Live streaming versus on demand</h2>
+<ul><li>Live has an <strong>ingest</strong> path: the encoder pushes a continuous stream to the service.</li><li>The ingest is transcoded and packaged into short segments in near real time.</li><li>The manifest is continually updated as new segments become available.</li><li>Players stay near the live edge but keep a buffer to survive jitter.</li><li>A larger buffer improves stability but increases delay behind the event.</li><li>Live segments are cached only briefly because they are new and time-sensitive.</li><li>DVR and replay require retaining recent segments and exposing them as a window or a recorded asset.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Video on demand</th><th>Live</th></tr></thead><tbody><tr><td>Source</td><td>Complete uploaded file</td><td>Continuous ingest stream</td></tr>
+<tr><td>Processing</td><td>Batch transcode before publish</td><td>Near-real-time transcode</td></tr>
+<tr><td>Manifest</td><td>Static</td><td>Updated continuously</td></tr>
+<tr><td>Cache lifetime</td><td>Long, immutable</td><td>Short, time-sensitive</td></tr>
+<tr><td>Main risk</td><td>Processing cost and catalog scale</td><td>Latency and flash crowds</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Latency, startup, and buffering trade-offs</h2>
+<ul><li>Startup delay is reduced by smaller initial segments and starting at a modest rendition.</li><li>Rebuffering is reduced by a larger buffer, which increases startup delay and live lag.</li><li>Shorter segments lower latency but add request overhead and reduce compression efficiency.</li><li>Higher bitrates improve quality but require more bandwidth and risk stalls.</li><li>Preloading the first segments of likely next videos improves perceived startup at the cost of wasted bandwidth.</li><li>Players often start slightly below the best rendition and step up once throughput is known.</li><li>The product requirement decides the balance: live sport tolerates less delay, on-demand tolerates more buffering.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Access control and DRM</h2>
+<ul><li>Authorize playback per user and per title before issuing a manifest or segment URL.</li><li>Use short-lived signed URLs or tokens so a shared link expires quickly.</li><li><strong>DRM</strong> encrypts segments and delivers decryption keys only to authorized, compliant players.</li><li>Key rotation and license renewal limit the impact of extracted keys.</li><li>Geo-restriction and concurrent-stream limits are enforced at the authorization layer.</li><li>Watermarking can deter and trace leaks, especially for pre-release content.</li><li>CDN tokens must be validated at the edge so unauthorized requests never reach origin storage.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Failure modes and quality monitoring</h2>
+<ul><li>A bad segment or manifest breaks playback for a rendition, so players need fallback and retry logic.</li><li>Origin overload during a premiere is mitigated by pre-warming caches and shielding.</li><li>Encoding errors are caught by validating duration, resolution, and segment continuity before publish.</li><li>CDN outages require multi-CDN failover, which means manifests must be able to point at another provider.</li><li>Monitor startup time, rebuffer ratio, average bitrate, exit-before-start rate, and error rate by device and region.</li><li>Server-side metrics alone are insufficient; real quality metrics come from player telemetry.</li><li>Alert on segment 5xx rates and cache hit ratio drops, which usually precede visible playback failures.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Signal</th><th>What it tells you</th></tr></thead><tbody><tr><td>Startup time</td><td>How long viewers wait before playback</td></tr>
+<tr><td>Rebuffer ratio</td><td>Share of watch time spent stalled</td></tr>
+<tr><td>Average bitrate</td><td>Quality actually delivered</td></tr>
+<tr><td>Exit before start</td><td>Manifest or first-segment failures</td></tr>
+<tr><td>Edge hit ratio</td><td>CDN effectiveness and origin risk</td></tr>
+<tr><td>Segment error rate</td><td>Broken packaging or storage issues</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Interview walkthrough</h2>
+<ul><li>Clarify catalog size, live or on-demand, device mix, and latency target.</li><li>Separate the control plane (metadata, authorization) from the data plane (segments).</li><li>Describe ingest or upload, then transcode into a bitrate ladder.</li><li>Package into HLS and DASH with aligned segments and encryption.</li><li>Serve segments through a CDN with signed URLs and request collapsing.</li><li>Explain ABR: the player measures throughput and buffer, then chooses the next rendition.</li><li>Cover the hard cases: live latency, flash crowds, DRM, re-encoding, and CDN failure.</li><li>Estimate storage from ladder size and catalog, and egress from watch hours rather than title count.</li></ul>
+
+<div class="flow"><span class="flow-step">Clarify requirements</span><span class="flow-arrow">→</span><span class="flow-step">Ingest or upload</span><span class="flow-arrow">→</span><span class="flow-step">Transcode ladder</span><span class="flow-arrow">→</span><span class="flow-step">Package and encrypt</span><span class="flow-arrow">→</span><span class="flow-step">Distribute via CDN</span><span class="flow-arrow">→</span><span class="flow-step">Adapt in the player</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>More ladder rungs</strong> improve adaptation but multiply encoding, storage, and packaging cost.</li><li><strong>Higher maximum bitrate</strong> improves quality on good networks but increases stalls on weak ones.</li><li><strong>Shorter segments</strong> reduce latency and speed adaptation but add request overhead and hurt compression.</li><li><strong>Larger buffers</strong> reduce rebuffering but increase startup delay and live lag.</li><li><strong>Aggressive ABR upswitching</strong> improves sharpness but causes oscillation and stalls.</li><li><strong>Multi-CDN delivery</strong> improves resilience and reach but adds cost and operational complexity.</li><li><strong>DRM</strong> protects content but adds licensing, device compatibility, and player complexity.</li><li><strong>Pre-transcoding the full ladder</strong> gives instant playback but wastes compute on titles nobody watches.</li><li><strong>Long CDN cache lifetimes</strong> maximize hit ratio but require versioned URLs for every re-encode.</li><li><strong>Low-latency live packaging</strong> improves interactivity but reduces resilience to jitter and packet loss.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why not serve video as a single MP4 download?</summary><div class="answer"><p>It delays startup, cannot adapt quality to the network, wastes bandwidth, and makes seeking and retries coarse. Segmenting the media into small objects allows fast start, ABR switching, caching, and per-segment retry.</p></div></details>
+<details><summary>2. What is a manifest?</summary><div class="answer"><p>A small playlist that lists available renditions and where their segments live. The player fetches it first and uses it to choose what to download.</p></div></details>
+<details><summary>3. What is a bitrate ladder?</summary><div class="answer"><p>The set of renditions at different resolutions and bitrates. The player chooses among them so it can match the viewer's network and device without changing content.</p></div></details>
+<details><summary>4. How does adaptive bitrate work?</summary><div class="answer"><p>The player estimates throughput from segment downloads and watches buffer level, then picks the next segment's rendition. It steps down before the buffer drains and steps up cautiously when bandwidth allows.</p></div></details>
+<details><summary>5. What is the difference between HLS and DASH?</summary><div class="answer"><p>Both are segmented streaming protocols with manifests and multiple renditions. HLS is strongest on Apple devices; DASH is common on Android, browsers, and TVs. Many services package both from the same segments.</p></div></details>
+<details><summary>6. Why do segment boundaries need to align across renditions?</summary><div class="answer"><p>So the player can switch renditions at a boundary without losing audio-video sync or skipping content. Misaligned segments make quality switching glitchy.</p></div></details>
+<details><summary>7. How do you reduce startup time?</summary><div class="answer"><p>Start with a small first segment or a modest rendition, preload the first segments, and keep the initial buffer small. Then step up quality once throughput is measured.</p></div></details>
+<details><summary>8. How is live streaming different from on demand?</summary><div class="answer"><p>Live has a continuous ingest, near-real-time transcoding, a manifest that updates constantly, and short cache lifetimes. On-demand transcodes a complete file once and serves immutable segments from long-lived caches.</p></div></details>
+<details><summary>9. How do you handle a flash crowd for a live event?</summary><div class="answer"><p>Pre-warm CDN caches, shield the origin with request collapsing and mid-tier caches, and scale ingest and packaging ahead of the event. Multi-CDN capacity provides headroom.</p></div></details>
+<details><summary>10. How do you protect premium content?</summary><div class="answer"><p>Authorize per user and title, issue short-lived signed URLs, encrypt segments with DRM, deliver keys only to compliant players, and enforce geo and concurrency limits.</p></div></details>
+<details><summary>11. What do you monitor for streaming quality?</summary><div class="answer"><p>Player telemetry: startup time, rebuffer ratio, delivered bitrate, exit-before-start, and errors by device and region. On the server side, segment error rate and CDN hit ratio.</p></div></details>
+<details><summary>12. How do you estimate storage and bandwidth?</summary><div class="answer"><p>Storage is catalog hours multiplied by the bitrate of every rendition plus audio and artifacts. Bandwidth is watch hours multiplied by the bitrate actually delivered, which is why CDN egress dominates cost.</p></div></details>
+<details><summary>13. Why is transcoding asynchronous?</summary><div class="answer"><p>It is CPU-heavy and much slower than real time for high-quality ladders. Doing it in the upload request would block the creator and tie up servers, so it runs as a queue-backed job with retries.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Designing streaming as a single file download and ignoring adaptation.</li><li>Forgetting the manifest, or treating segments as one monolithic object.</li><li>Letting segment boundaries differ across renditions, which breaks quality switching.</li><li>Serving segments from application servers instead of a CDN.</li><li>Ignoring live ingest and manifest updates when the question is about live streaming.</li><li>Assuming server metrics capture quality without player telemetry.</li><li>Using long-lived public URLs for private or premium content.</li><li>Caching live or re-encoded segments under unversioned URLs and serving stale media.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="uploading-serving-large-files.html"><span>← Previous</span><strong>Uploading and Serving Large Files</strong></a><a class="next" href="surviving-component-failures.html"><span>Next →</span><strong>Surviving Component Failures</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/media-streaming">AlgoMaster — Streaming Video and Audio</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

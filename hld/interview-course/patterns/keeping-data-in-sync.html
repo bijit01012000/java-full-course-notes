@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Keeping Data in Sync — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 13 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Keeping Data in Sync</h1>
+    <p class="dek">Interview Patterns · Keeping Data Correct</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/keeping-data-in-sync">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Why copies drift</a>
+<a href="#s3">Choose a source of truth and a consistency promise</a>
+<a href="#s4">The dual-write problem</a>
+<a href="#s5">Transactional outbox</a>
+<a href="#s6">Change data capture</a>
+<a href="#s7">Consumers and derived stores</a>
+<a href="#s8">Idempotency, ordering, and replay</a>
+<a href="#s9">Reconciliation and repair</a>
+<a href="#s10">Read-path consistency</a>
+<a href="#s11">Failure modes to design for</a>
+<a href="#s12">What to monitor</a>
+<a href="#s13">Choosing a design in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Most real systems store the same fact in several places — a database, a cache, a search index, a warehouse — and every one of those copies is a chance for the data to disagree. The pattern is about choosing a <strong>source of truth</strong>, propagating changes from it, and repairing drift when propagation fails.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Source of truth</dt><dd>The one store whose value is authoritative when copies disagree; every other copy is derived.</dd></div><div class="term"><dt>Derived store</dt><dd>A copy built from the source of truth for a specific access pattern: cache, search index, read model, analytics warehouse.</dd></div><div class="term"><dt>Dual write</dt><dd>Application code writing to two systems in the same request. Simple to read, but not atomic, so partial failure leaves copies divergent.</dd></div><div class="term"><dt>Transactional outbox</dt><dd>A table in the same database as the business write that records the event to publish. One local transaction makes the state change and the event atomic.</dd></div><div class="term"><dt>Change data capture (CDC)</dt><dd>Reading the database's replication log and turning committed row changes into an ordered event stream.</dd></div><div class="term"><dt>Reconciliation</dt><dd>A periodic comparison between source and copy that finds and repairs differences the streaming path missed.</dd></div><div class="term"><dt>Idempotency</dt><dd>Making a consumer safe to apply the same event more than once, usually by tracking processed event IDs or by making the write naturally repeatable.</dd></div><div class="term"><dt>Eventual consistency</dt><dd>A promise that copies converge when writes stop, not that every read sees the latest value.</dd></div><div class="term"><dt>Read-your-writes</dt><dd>A session guarantee that a user sees their own recent write, usually by routing that read to the source or by tracking a version.</dd></div><div class="term"><dt>Tombstone</dt><dd>A deletion marker kept in the event stream so consumers learn about deletes that no longer exist as rows.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">One fact, several representations. A product lives in the primary database, its document in a search index, its hot fields in a cache, its sales in a warehouse. Each copy exists because a different read pattern is too expensive against the primary.</p>
+<ul><li>The primary database is optimized for transactional writes, not for full-text search, feed ranking, or analytics.</li><li>So the system <strong>denormalizes</strong>: the same fact is materialized into stores shaped for each query.</li><li>Every copy must be updated when the fact changes, and every update path can fail independently.</li><li>Users notice drift quickly: a renamed product still shows the old title in search, a deleted post stays visible in the feed.</li><li>The hard part is not the happy path; it is what happens when the second write fails, is delayed, or arrives twice.</li><li>This pattern appears in almost every design: search, feeds, caches, analytics, notifications, and read models.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why copies drift</h2>
+<p class="lede">Drift has a small number of root causes. Naming them makes the fix obvious in an interview.</p>
+<ul><li><strong>Partial failure:</strong> the primary write commits and the secondary write times out.</li><li><strong>Ordering:</strong> an update and a delete are applied out of order, so the older value wins.</li><li><strong>Duplicates:</strong> a retried message applies a non-idempotent change twice, such as incrementing a counter.</li><li><strong>Lost events:</strong> the process crashes between committing and publishing, so the change is never propagated.</li><li><strong>Schema drift:</strong> a new column is added but the projection code does not consume it.</li><li><strong>Consumer lag:</strong> the copy is simply behind, and a read at the wrong moment looks like corruption.</li><li>Distinguish <em>temporary lag</em> from <em>permanent divergence</em>; they need different fixes and different monitoring.</li></ul>
+
+
+<div class="note">If you cannot name how a copy gets updated, you have not designed synchronization — you have hoped for it.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Choose a source of truth and a consistency promise</h2>
+<ul><li>Declare exactly one writer-owned source of truth per fact; ambiguity here causes conflicting writes later.</li><li>Derived stores should be <strong>rebuildable</strong>: given the source and the event history, you can recreate them from scratch.</li><li>State the promise explicitly: strong for the primary, eventual for search and analytics, bounded staleness for caches.</li><li>Decide which reads must see fresh data and which can tolerate lag; do not apply one promise to every query.</li><li>A user editing their own profile usually needs read-your-writes; another user browsing it does not.</li><li>Write the promise into the API contract so clients know whether to refresh or retry.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Store</th><th>Typical role</th><th>Consistency needed</th></tr></thead><tbody><tr><td>Primary database</td><td>Source of truth, transactional writes</td><td>Strong within the transaction</td></tr>
+<tr><td>Cache</td><td>Hot reads, session data</td><td>Bounded staleness, TTL</td></tr>
+<tr><td>Search index</td><td>Full-text and faceted queries</td><td>Eventual, seconds of lag</td></tr>
+<tr><td>Read model / feed</td><td>Precomputed views</td><td>Eventual, ordered per entity</td></tr>
+<tr><td>Warehouse</td><td>Analytics and reporting</td><td>Eventual, batch is acceptable</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The dual-write problem</h2>
+<p class="lede">The intuitive design is to write to the database and then write to the cache or index in the same request handler. It fails in a way that is easy to demonstrate.</p>
+<ul><li>The two writes are not in one transaction, so there is no atomic commit across them.</li><li>If the second write fails, the request may still return success, leaving the copies divergent until someone notices.</li><li>Retrying the whole request can duplicate side effects unless every step is idempotent.</li><li>Ordering is not guaranteed when two requests write the same entity concurrently: the slower one may land last with older data.</li><li>Wrapping both writes in a distributed transaction is usually worse — it couples availability and adds a coordinator.</li><li><strong>Rule:</strong> do not dual-write to systems you cannot commit atomically. Write once, then propagate.</li></ul>
+<h3>Cache-aside still dual-writes</h3>
+<ul><li>Updating the database then deleting the cache key is a dual write with a race: a concurrent read can repopulate the key with the stale value.</li><li>A common mitigation is delete-after-commit plus a short TTL, accepting a small window of staleness rather than pretending it is atomic.</li><li>Versioned cache values or write-through to a single owner are stronger but more invasive.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Transactional outbox</h2>
+<p class="lede">The outbox removes the gap between committing state and announcing it by putting both in the same local transaction.</p>
+<ul><li>The business write and an <code>outbox</code> row are inserted in <strong>one database transaction</strong>; either both commit or neither does.</li><li>A separate relay reads unsent outbox rows in order and publishes them to the broker.</li><li>After a successful publish the relay marks the row sent, or deletes it after a retention window.</li><li>If the relay crashes after publishing but before marking, the event is published again — so consumers must be idempotent.</li><li>The outbox table needs an index on status and creation time, plus a cleanup job, or it becomes an unbounded hot table.</li><li>It works with any broker and needs no log access, which makes it the default answer for service-to-service propagation.</li></ul>
+
+<div class="flow"><span class="flow-step">Begin transaction</span><span class="flow-arrow">→</span><span class="flow-step">Write business rows + outbox row</span><span class="flow-arrow">→</span><span class="flow-step">Commit</span><span class="flow-arrow">→</span><span class="flow-step">Relay polls unsent rows</span><span class="flow-arrow">→</span><span class="flow-step">Publish event</span><span class="flow-arrow">→</span><span class="flow-step">Mark sent (or retry)</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Change data capture</h2>
+<p class="lede">CDC inverts the direction: instead of the application publishing, a connector tails the database log and emits every committed change.</p>
+<ul><li>Reads the <strong>replication log</strong> (binlog, WAL, oplog), so it captures changes made by any writer, including migrations and admin scripts.</li><li>Because it follows commit order, it gives a per-key ordering that application-level publishing often loses.</li><li>No extra write in the request path, so latency and failure surface of the API are unchanged.</li><li>Requires log retention long enough to survive connector downtime; a long outage can mean a full re-snapshot.</li><li>Row-level events are schema-coupled: a column rename must be handled by consumers, and raw events leak internal table structure.</li><li>Deletes must be represented explicitly, which usually means row images or an application-level tombstone.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Outbox</th><th>CDC</th></tr></thead><tbody><tr><td>What it watches</td><td>An application-written table</td><td>The database replication log</td></tr>
+<tr><td>Captures non-app writes</td><td>No</td><td>Yes</td></tr>
+<tr><td>Schema coupling</td><td>Event contract you control</td><td>Table structure leaks</td></tr>
+<tr><td>Extra request-path write</td><td>Yes, one insert</td><td>No</td></tr>
+<tr><td>Operational cost</td><td>Low; just a table and relay</td><td>Connector, log retention, snapshots</td></tr>
+<tr><td>Best fit</td><td>Service-owned events</td><td>Keeping external stores in sync</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Consumers and derived stores</h2>
+<ul><li>Each derived store has a consumer that translates the canonical event into its own write: index document, cache entry, feed row.</li><li>Consumers must be <strong>idempotent</strong> because delivery is usually at-least-once.</li><li>Keep the consumer's write and its offset/checkpoint in the same transaction where possible, so it does not skip or repeat work on restart.</li><li>Per-entity ordering matters more than global ordering: use a partition key derived from the entity ID.</li><li>A consumer that falls behind should lag visibly, not silently drop events to catch up.</li><li>Backfills should write through the same code path as live events, or the two will produce different shapes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Idempotency, ordering, and replay</h2>
+<ul><li>Attach a stable <strong>event ID</strong> (or entity ID plus version) so duplicates are detectable.</li><li>Prefer <strong>last-writer-wins by version</strong> over blind overwrite; a late older event must not clobber a newer value.</li><li>For counts and balances, store the source value or a delta keyed by event ID rather than applying an increment.</li><li>Deletes need tombstones so a replayed older update cannot resurrect a removed record.</li><li>Replay is a feature: you should be able to rebuild a derived store from the log after a bug or a bad deploy.</li><li>Replays interact badly with non-deterministic transforms (timestamps, random IDs); make those deterministic or version the output.</li></ul>
+
+
+<div class="note">At-least-once delivery plus a non-idempotent consumer is the single most common cause of duplicated derived data.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Reconciliation and repair</h2>
+<p class="lede">Streaming is best-effort in practice. Reconciliation is the safety net that turns silent divergence into a bounded, detectable condition.</p>
+<ul><li>Periodically <strong>compare counts and checksums</strong> per partition or time window to detect missing or extra records.</li><li>Repair by re-emitting the authoritative record for the mismatched keys, not by patching the copy directly.</li><li>Keep a <strong>full rebuild</strong> path: drop the index and replay from the source or a snapshot.</li><li>Track the age of the oldest unreconciled window; if it grows, the repair path is not keeping up.</li><li>Make repairs idempotent so a reconciliation job that runs twice is harmless.</li><li>Reconciliation cost grows with data volume; sample or prioritize recently changed and high-value records.</li></ul>
+
+<div class="flow"><span class="flow-step">Snapshot source</span><span class="flow-arrow">→</span><span class="flow-step">Compare with copy</span><span class="flow-arrow">→</span><span class="flow-step">Diff keys</span><span class="flow-arrow">→</span><span class="flow-step">Re-emit authoritative records</span><span class="flow-arrow">→</span><span class="flow-step">Verify convergence</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Read-path consistency</h2>
+<ul><li>After a write, route the user's next read to the source of truth for a short window, or until their write version is visible.</li><li>Expose a <strong>version or watermark</strong> in the write response so the client can wait for a copy that has caught up.</li><li>Read from a replica only when the read can tolerate lag; do not mix replicas casually inside one user flow.</li><li>For caches, prefer deleting after commit over updating before commit, and accept a TTL-bounded window.</li><li>UI-level optimism (show the value you just saved) hides lag without fixing it, and must reconcile on refresh.</li><li>Document which endpoints are strongly consistent; otherwise clients assume all reads are.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes to design for</h2>
+<ul><li><strong>Broker outage:</strong> outbox grows; alert on row count and age, not just on publish errors.</li><li><strong>Consumer crash mid-batch:</strong> partial application; checkpoint after the write, and make the write idempotent.</li><li><strong>Poison event:</strong> one record fails forever and blocks the partition; route it to a dead-letter path with the original payload.</li><li><strong>Schema change:</strong> a consumer deployed against the old contract breaks silently; version events and run consumers before producers.</li><li><strong>Replication lag:</strong> reads look stale but data is correct; separate lag metrics from corruption metrics.</li><li><strong>Thundering rebuild:</strong> a full reindex saturates the source; throttle reads and write in batches.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>What to monitor</h2>
+<ul><li><strong>Consumer lag</strong> per partition, in events and in time — time is what users feel.</li><li><strong>Publish-to-apply latency</strong> percentiles, not just averages, because tail lag is what shows up as bugs.</li><li><strong>Outbox depth and oldest unsent age</strong>, which together reveal a stuck relay.</li><li><strong>Reconciliation mismatch rate</strong> per store, with a threshold that triggers a rebuild.</li><li><strong>Dead-letter volume</strong> and the age of the oldest message in it.</li><li><strong>Duplicate-apply rate</strong>, to verify idempotency guards are actually working.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Choosing a design in an interview</h2>
+<ul><li>Name the copies first: which stores hold this fact, and why each exists.</li><li>Pick one source of truth and say what consistency each derived store needs.</li><li>Choose the propagation mechanism: outbox for service-owned events, CDC when external writers or tables must be captured.</li><li>State the delivery guarantee honestly — usually at-least-once — and then make consumers idempotent.</li><li>Add reconciliation and a rebuild path before you are asked; that is the difference between a diagram and a design.</li><li>Close with what you would monitor and what you would do when a consumer falls behind.</li></ul>
+
+<div class="flow"><span class="flow-step">List copies</span><span class="flow-arrow">→</span><span class="flow-step">Pick source of truth</span><span class="flow-arrow">→</span><span class="flow-step">Choose outbox or CDC</span><span class="flow-arrow">→</span><span class="flow-step">Idempotent consumers</span><span class="flow-arrow">→</span><span class="flow-step">Reconcile</span><span class="flow-arrow">→</span><span class="flow-step">Monitor lag</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Outbox</strong> gives atomic state-plus-event with no log access, but adds a table, a relay, and a cleanup job to the write path.</li><li><strong>CDC</strong> captures every writer and preserves commit order, but couples consumers to table schema and needs log retention and re-snapshots.</li><li><strong>Synchronous propagation</strong> keeps copies fresh but couples availability and latency to every derived store.</li><li><strong>Asynchronous propagation</strong> isolates failures and absorbs bursts but exposes users to lag and requires reconciliation.</li><li><strong>Strong read-your-writes</strong> removes confusing stale reads but pushes traffic back to the primary and reduces read scaling.</li><li><strong>Aggressive caching</strong> cuts latency and load but increases the number of copies that can drift.</li><li><strong>Full reconciliation</strong> catches everything but is expensive at volume; sampled reconciliation is cheaper but can miss divergence.</li><li><strong>Event versioning and contracts</strong> protect consumers from breaking changes but slow down producer teams and add schema governance.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why does the same data end up in multiple systems?</summary><div class="answer"><p>Because each access pattern wants a different physical layout. The primary database is tuned for transactional writes; search needs an inverted index, feeds need precomputed read models, analytics needs columnar scans. Denormalizing into derived stores is cheaper than making one store serve every query.</p></div></details>
+<details><summary>2. What is the dual-write problem?</summary><div class="answer"><p>Writing to two independent systems in one request has no atomic commit. One write can succeed while the other fails or is delayed, and concurrent requests can apply in the wrong order, leaving the copies permanently divergent.</p></div></details>
+<details><summary>3. How does a transactional outbox fix it?</summary><div class="answer"><p>The business rows and an outbox row are written in the same local transaction, so the intent to publish commits atomically with the state change. A relay then publishes the row and marks it sent. The publish may repeat, so consumers must be idempotent.</p></div></details>
+<details><summary>4. When would you use CDC instead of an outbox?</summary><div class="answer"><p>When changes come from sources the application does not control — admin tools, batch scripts, other services sharing the database — or when you want zero extra writes in the request path. CDC reads the replication log, so it sees every committed change in commit order, at the cost of schema coupling and log-retention operations.</p></div></details>
+<details><summary>5. What delivery guarantee do these systems usually give?</summary><div class="answer"><p>At-least-once. Exactly-once end-to-end requires transactional coordination between the broker and every sink, which is rarely worth it. The practical answer is at-least-once delivery plus idempotent consumers keyed by event ID.</p></div></details>
+<details><summary>6. How do you prevent an old event from overwriting a new value?</summary><div class="answer"><p>Carry a version or timestamp per entity and apply last-writer-wins on that version, or partition by entity so events for the same key are processed in order. Blind overwrite without a version is the bug.</p></div></details>
+<details><summary>7. How do you handle deletes in a derived store?</summary><div class="answer"><p>Emit an explicit tombstone event, because a deleted row produces no positive value to project. The consumer removes or marks the document, and tombstones must be retained long enough for slow consumers and replays.</p></div></details>
+<details><summary>8. What is reconciliation and why is it necessary?</summary><div class="answer"><p>It is a periodic comparison between the source of truth and a derived copy, followed by repair of mismatched keys. Streaming paths lose events, have bugs, and lag; reconciliation bounds how long divergence can survive and gives you a way to detect it.</p></div></details>
+<details><summary>9. How would you rebuild a search index without downtime?</summary><div class="answer"><p>Build a new index alongside the old one from a snapshot, replay recent changes to catch up, verify counts and samples, then switch reads with an alias and delete the old index. Throttle the rebuild so it does not starve the primary.</p></div></details>
+<details><summary>10. How do you give a user read-your-writes across copies?</summary><div class="answer"><p>Pin that user's reads to the primary briefly, or return a version/watermark with the write and have the read wait for a replica or projection that has reached it. Reads by other users can stay on the stale copy.</p></div></details>
+<details><summary>11. What happens when a consumer falls behind?</summary><div class="answer"><p>The copy is stale but correct in the end. Alert on lag in time, scale consumers or reduce per-event work, and protect the source from a catch-up storm. If the backlog exceeds retention, you need a re-snapshot instead of a replay.</p></div></details>
+<details><summary>12. How do you stop a poison message from blocking a partition?</summary><div class="answer"><p>Bound the retries, then move the event and its payload to a dead-letter queue with context, and continue. A poison message left in place blocks all later events for that partition, which turns one bad record into total lag.</p></div></details>
+<details><summary>13. What should you monitor for data sync?</summary><div class="answer"><p>Consumer lag in time, publish-to-apply latency percentiles, outbox depth and oldest unsent age, reconciliation mismatch rate, dead-letter volume, and duplicate-apply rate. Counts alone hide the problem until users report it.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Dual-writing to the database and a search index or cache and calling it consistent.</li><li>Assuming the message broker gives exactly-once delivery to every consumer.</li><li>Building a derived store with no rebuild or reconciliation path.</li><li>Letting raw table rows leak into event contracts, so a column rename breaks every consumer.</li><li>Partitioning events by something other than the entity ID and then expecting per-entity order.</li><li>Applying increments and other non-idempotent deltas to duplicated events.</li><li>Forgetting tombstones, so replayed updates resurrect deleted records.</li><li>Monitoring publish errors but not consumer lag, so a silently stuck relay looks healthy.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="coordinating-transactions.html"><span>← Previous</span><strong>Coordinating Transactions Across Services</strong></a><a class="next" href="preventing-double-booking.html"><span>Next →</span><strong>Preventing Double Booking</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/keeping-data-in-sync">AlgoMaster — Keeping Data in Sync</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

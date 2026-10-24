@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design a News Feed — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 03 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Product design</span></div>
+    <h1>Design a News Feed</h1>
+    <p class="dek">It is the cleanest test of fan-out: whether you can choose between push and pull, handle celebrity accounts, and keep a read-heavy feed fast while accepting bounded staleness.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>5</strong> entities</span>
+      <span class="pill">6 APIs</span>
+      <span class="pill">7 trade-offs</span>
+      <span class="pill">11 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Push posts from ordinary accounts into per-user feed caches asynchronously, pull recent posts from celebrity accounts at read time, and hydrate a bounded page of post ids with cursor pagination.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Users can publish text and media posts, follow and unfollow other users, and delete or edit their own posts.</li><li>The home feed shows posts from followed accounts, newest first or ranked, with a stable cursor for pagination.</li><li>Feed reads include author, text, media, and engagement counts, and tolerate a few seconds of propagation delay.</li><li>A user sees their own new post immediately in their own feed.</li><li>Deleted posts and unfollowed accounts stop appearing within a bounded time.</li><li>Support a user profile timeline of posts by a single author.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Feed read p99 under a few hundred milliseconds, with a bounded amount of work per request regardless of how many accounts a user follows.</li><li>The feed is eventually consistent: a follower may see a new post seconds later, but never loses an older post because of fan-out lag.</li><li>Read traffic dominates; assume roughly 100 feed reads for every publish.</li><li>Stay available during a celebrity post or a traffic spike; one publish must not saturate the fan-out fleet.</li><li>Pagination must remain stable while new posts arrive, with no duplicates or skipped pages.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 500M daily active users, each opening the feed 10 times a day: about 5B feed reads per day, roughly 58k per second average and 3x that at peak.</li><li>Assume 100M posts per day, about 1.2k publishes per second, with an average of 200 followers per author.</li><li>Naive write fan-out is therefore about 20B feed insertions per day, roughly 230k per second, which is why fan-out must be asynchronous and batched.</li><li>Cap each cached feed at 500-1000 post ids; a feed is a recent window, not a permanent archive.</li><li>At 500 ids and 8 bytes per id, caching 100M active feed readers is roughly 400GB of id storage before overhead, so cache only active users or trim aggressively.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">User</span><span class="fields">user_id, handle, display_name, avatar_url, follower_count, is_celebrity, status</span></div><div class="entity"><span class="name">Follow</span><span class="fields">follower_id, followee_id, created_at (stored as both follower-to-followees and followee-to-followers)</span></div><div class="entity"><span class="name">Post</span><span class="fields">post_id, author_id, text, media_ids, created_at, edited_at, deleted_at, like_count, comment_count</span></div><div class="entity"><span class="name">FeedEntry</span><span class="fields">user_id, post_id, author_id, score, inserted_at (cached as an ordered set per user)</span></div><div class="entity"><span class="name">Engagement</span><span class="fields">post_id, user_id, type (like/comment/repost), created_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/posts</code></td><td>Create a post, persist it, and enqueue a fan-out event; returns as soon as the post is durable, not when fan-out completes.</td></tr><tr><td><code>GET</code></td><td><code>/v1/feed?cursor=...&amp;limit=20</code></td><td>Return one page of hydrated feed items plus the next cursor, merging pushed entries with celebrity posts and the viewer's own posts.</td></tr><tr><td><code>POST</code></td><td><code>/v1/users/{user_id}/follow</code></td><td>Create a follow edge, update both adjacency lists, and optionally backfill a bounded number of recent posts.</td></tr><tr><td><code>DELETE</code></td><td><code>/v1/users/{user_id}/follow</code></td><td>Remove a follow edge and stop that author's future posts from entering the follower's feed.</td></tr><tr><td><code>DELETE</code></td><td><code>/v1/posts/{post_id}</code></td><td>Soft-delete a post and mark it so cached feed entries and hydration skip it without rewriting every feed.</td></tr><tr><td><code>GET</code></td><td><code>/v1/users/{user_id}/posts?cursor=...</code></td><td>Return a single author's timeline directly from the post store for profile pages.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Post storage</td><td>Shard posts by post_id for direct hydration, use a time-sortable post_id (Snowflake-style) as the ordering key, and keep a separate per-author timeline index for profile pages.</td><td>Feed reads hydrate many authors' posts by id, so point lookups must not scatter across author shards; the author index serves profile timelines without making the main store author-partitioned.</td></tr><tr><td>Follow graph</td><td>Store the edge twice: follower_id to followee_id for building a user's feed, and followee_id to follower_id for fan-out.</td><td>Fan-out needs the follower list of an author, while feed repair and follow suggestions need the followee list of a user; a single direction makes one of those a full scan.</td></tr><tr><td>Feed cache</td><td>Redis sorted set per user keyed feed:{user_id}, score by post time and id, trimmed to the newest 500-1000 entries.</td><td>A feed read becomes one bounded range query, id storage stays small, and trimming prevents inactive users from consuming memory forever.</td></tr><tr><td>Fan-out strategy</td><td>Hybrid: push posts from authors below a follower threshold, pull recent posts from authors above it and merge at read time.</td><td>Pure push makes one celebrity post write to millions of feeds, while pure pull makes every read gather from every followee; hybrid bounds both the write and the read.</td></tr><tr><td>Post hydration</td><td>Fetch post bodies in a batched multi-get from a shared post cache, falling back to the post database, and skip missing or deleted ids.</td><td>The feed stores only ids, so many readers share one cached body; batching avoids one lookup per item and a missing body must not fail the whole page.</td></tr><tr><td>Pagination</td><td>Opaque cursor encoding the last seen score and post_id, never an offset.</td><td>New posts shift offsets and cause duplicates or skipped items; a cursor anchored to the last returned item stays stable as the feed changes.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  U[📱 User] --> API[🛡️ Feed API]
+  API --> FS[⚙️ Feed Service]
+  FS --> FC[⚡ Feed Cache]
+  FS -->|merge celebrity posts| CE[⭐ Celebrity Index]
+  FS --> HY[🔎 Hydration Service]
+  HY --> PC[⚡ Post Cache]
+  HY --> PDB[(🗄️ Post DB)]
+  API --> PS[✍️ Post Service]
+  PS --> PDB
+  PS --> Q[📬 Fan-out Queue]
+  Q --> W[👷 Fan-out Workers]
+  W --> FG[(🗄️ Follow Graph)]
+  W --> FC
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef svc fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef store fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  class U client;
+  class API edge;
+  class FS,HY,PS,W svc;
+  class FC,CE,PC,Q,FG,PDB store;</div><div class="diagram-caption">Publishing writes the post durably and enqueues fan-out; workers push ids into ordinary followers' feed caches, while celebrity posts are merged and hydrated at read time.</div></div>
+        <ul><li>The publish request writes the post, then writes a fan-out event to an outbox in the same transaction, and returns. A relay publishes the event to the queue so a crash between the database commit and the queue publish cannot lose fan-out.</li><li>Fan-out workers page through the follower list in batches rather than loading millions of ids into memory, and pipeline feed insertions per shard to keep throughput high.</li><li>Feed insertion must be idempotent by post_id, because the queue delivers at least once and a worker can retry after a timeout; duplicate ids in a sorted set collapse naturally, but counter updates need their own dedupe.</li><li>Mark authors above a follower threshold as high-fan-out. Do not push their posts. At read time, fetch their recent posts from a small per-author index and merge by score with the pushed feed.</li><li>Hydration is a separate service so the feed service never joins across the post database; it batches ids, filters deleted posts, and returns partial pages rather than failing on one missing item.</li><li>Engagement counts are cached aggregates updated asynchronously from like and comment events, so a feed read never runs a count query and a hot post does not concentrate write load on one row.</li><li>The author's own posts are merged into their feed at read time, which gives read-your-writes without waiting for fan-out.</li><li>Rebuild a feed from the follow graph and recent posts when its cache is lost; never treat the cache as the only copy of the feed.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Fan-out on write for ordinary accounts</td><td>Feed reads become a single bounded cache lookup, which keeps p99 low and makes capacity predictable.</td><td>One publish becomes hundreds of writes, so the queue and worker fleet must absorb bursts and the system pays storage per recipient.</td></tr><tr><td>Fan-out on read for celebrities</td><td>One post is stored once regardless of audience size, so a celebrity publish cannot saturate the worker fleet.</td><td>Every reader of a celebrity must fetch and merge extra posts, and the read path becomes more complex and slightly slower.</td></tr><tr><td>Asynchronous fan-out</td><td>Publishing stays fast and the queue absorbs spikes instead of making the author wait for millions of writes.</td><td>Followers see posts seconds later, and the system needs lag monitoring, idempotent workers, and a dead-letter repair path.</td></tr><tr><td>Redis feed cache as the read model</td><td>Fast ordered range reads and cheap trimming, with the database left to serve the durable post record.</td><td>Cache loss requires a rebuild, memory is significant at scale, and the cache is eventually consistent with follows and deletes.</td></tr><tr><td>Cap feeds at 500-1000 entries</td><td>Bounds memory and fan-out cost per user and matches how far back users realistically scroll.</td><td>Older posts require a slower archive path, and a user returning after a long absence may see gaps until the feed is rebuilt.</td></tr><tr><td>Rank at read time</td><td>Ranking can use fresh engagement signals and can be changed without rewriting every feed.</td><td>Each read does more work and needs more candidate items than it returns; pure chronological feeds are cheaper and easier to explain.</td></tr><tr><td>Soft delete and filter at hydration</td><td>A delete is one row update instead of a fan-out to every feed that contains the post.</td><td>Stale ids remain in caches and every read pays a small filtering cost; storage is not reclaimed immediately.</td></tr></tbody></table></div>
+        <ul><li>Cache the first page of each active user's feed separately so the most common request avoids a range query and hydration of a full page.</li><li>Batch hydrate 20-50 post ids per request and cache post bodies with a short TTL; hot posts are then served once for millions of readers.</li><li>Trim feeds to a fixed length and stop writing to users who have not opened the app recently; rebuild their feed on return.</li><li>Use cursor pagination with a deterministic tiebreaker of post_id so equal timestamps do not reorder between pages.</li><li>Coalesce duplicate fan-out work when an author posts several times in a row, and debounce feed invalidation for very active accounts.</li><li>Apply backpressure to the fan-out queue: if lag exceeds a threshold, pause low-priority fan-out and let reads fall back to pull rather than dropping posts.</li><li>Cache celebrity recent-post lists separately, since thousands of readers merge the same small list at the same time.</li><li>Filter deleted and blocked authors at hydration time, so deletion does not require rewriting millions of cached feeds.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>How do you handle a celebrity with 50M followers?</strong> Do not push their posts; mark the account as high-fan-out and merge its recent posts from a per-author index at read time.</div><div class="followup"><strong>What happens when a user follows someone new?</strong> Write both edges, then backfill a bounded number of recent posts from the new followee rather than their entire history.</div><div class="followup"><strong>How does a deleted post disappear?</strong> Soft-delete the post and filter it during hydration, so cached feed ids become harmless without a mass rewrite.</div><div class="followup"><strong>How does the author see their own post immediately?</strong> Merge the author's recent posts into their feed at read time, giving read-your-writes without waiting for asynchronous fan-out.</div><div class="followup"><strong>Why cursor pagination instead of offset?</strong> New posts shift offsets and cause duplicates or skipped items, while a cursor anchored to the last item stays stable.</div><div class="followup"><strong>What if fan-out lags by minutes?</strong> Monitor queue age, pause low-priority work, and let affected reads fall back to pulling recent posts from followees until the backlog drains.</div><div class="followup"><strong>What if the feed cache loses a shard?</strong> Rebuild affected feeds from the follow graph and recent posts, serving a pull-based feed in the meantime rather than returning an empty page.</div><div class="followup"><strong>Where does ranking happen?</strong> Usually at read time over a bounded candidate set, because engagement signals change after publication and rewriting every feed for a ranking change is impractical.</div><div class="followup"><strong>How do you stop duplicate posts in a feed?</strong> Make fan-out insertion idempotent by post_id and deduplicate the merged push and pull candidates by id before hydration.</div><div class="followup"><strong>How do you handle a hot post read by millions?</strong> Cache the post body and its recent engagement counts close to the feed service, and coalesce cache misses so one request rebuilds the value.</div><div class="followup"><strong>Would you use push or pull for a brand-new user?</strong> Pull for an empty or cold feed, then switch to push once the user follows enough accounts and opens the app regularly.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Fanning out synchronously in the publish request, which makes posting latency proportional to follower count and fails on celebrity accounts.</li><li>Using offset pagination on a feed that changes constantly, producing duplicate and skipped posts as users scroll.</li><li>Storing full post bodies in every user's feed, which multiplies storage and makes edits and deletes nearly impossible.</li><li>Choosing pure push or pure pull without discussing the follower distribution; neither extreme survives both ordinary users and celebrities.</li><li>Forgetting read-your-writes for the author, so a user posts and does not see their own post until fan-out finishes.</li><li>Treating the feed cache as the source of truth, with no rebuild path when a shard is lost or a fan-out job fails.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="design-rate-limiter.html"><span>← Previous</span><strong>Design a Rate Limiter</strong></a><a class="next" href="design-chat.html"><span>Next →</span><strong>Design a Chat Application</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

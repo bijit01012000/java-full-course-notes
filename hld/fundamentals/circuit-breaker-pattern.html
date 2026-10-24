@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Circuit Breaker Pattern — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 32 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Circuit Breaker Pattern</h1>
+    <p class="dek">Microservices · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>11</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/circuit-breaker-pattern">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">How one slow dependency takes down the caller</a>
+<a href="#s2">Why timeouts and retries are not enough</a>
+<a href="#s3">What a circuit breaker is</a>
+<a href="#s4">The three states</a>
+<a href="#s5">Thresholds that actually work</a>
+<a href="#s6">Fallbacks and degraded behavior</a>
+<a href="#s7">Scope: one breaker per dependency</a>
+<a href="#s8">Retries and retry budgets</a>
+<a href="#s9">Where to implement it</a>
+<a href="#s10">Observability and tuning</a>
+<a href="#s11">Failure modes and design rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A circuit breaker watches calls to one dependency and, once failures or slow calls cross a threshold, stops calling it so a local slowdown does not consume every thread and become a system-wide outage.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Cascading failure</dt><dd>A failure that spreads because callers hold threads and connections waiting on a degraded dependency, so healthy endpoints also stop serving.</dd></div><div class="term"><dt>Circuit breaker</dt><dd>A state machine around calls to one dependency that passes, rejects, or probes traffic based on recent outcomes.</dd></div><div class="term"><dt>Closed state</dt><dd>Normal operation: calls flow through and the breaker records successes, failures, and slow calls.</dd></div><div class="term"><dt>Open state</dt><dd>The breaker rejects calls immediately — or routes them to a fallback — for a cool-down period instead of waiting on a failing dependency.</dd></div><div class="term"><dt>Half-open state</dt><dd>A limited number of trial calls are allowed after the cool-down; success closes the breaker and failure reopens it.</dd></div><div class="term"><dt>Failure-rate threshold</dt><dd>The proportion of failed calls in a sliding window that trips the breaker from closed to open.</dd></div><div class="term"><dt>Slow-call threshold</dt><dd>A latency above which a call counts as a failure even if it eventually succeeds, catching degradation before hard errors.</dd></div><div class="term"><dt>Minimum request volume</dt><dd>The number of calls required in the window before the breaker is allowed to trip, preventing noise on low-traffic dependencies.</dd></div><div class="term"><dt>Fallback</dt><dd>The response used when a call is rejected or fails: a cached value, a safe default, a queued retry, or an explicit fast error.</dd></div><div class="term"><dt>Retry budget</dt><dd>A cap on retries as a fraction of successful traffic, so retry amplification cannot exceed a small multiple of normal load.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>How one slow dependency takes down the caller</h2>
+<p class="lede">Remote calls fail differently from local calls. A dependency can stay up, accept connections, and simply take far too long to answer.</p>
+<ul><li>The order service calls payment on every checkout; normally payment responds quickly.</li><li>If payment's database saturates, calls do not fail fast — they hang for many seconds each.</li><li>Every waiting request holds a thread, a connection, and memory in the order service.</li><li>Thread and connection pools are finite, so once they fill, unrelated endpoints on the same service also stop responding.</li><li>Callers of the order service then queue behind it, and the slowdown propagates upstream as a <strong>cascading failure</strong>.</li><li>The dependency may be only partially degraded while the caller becomes completely unavailable.</li></ul>
+
+
+<div class="note">The dangerous failure is not the one that returns an error immediately. It is the one that makes every caller wait.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why timeouts and retries are not enough</h2>
+<p class="lede">A timeout is necessary but not sufficient. It bounds a single call; it does not stop the aggregate damage of many doomed calls.</p>
+<ul><li>A timeout still spends its full duration on every failing call, so under load the pool still fills with waiters.</li><li>Retries add load exactly when the dependency is weakest: 1 attempt plus 3 retries can turn 100 requests/s into up to 400 calls/s.</li><li>Retries also extend how long the caller holds a thread, making exhaustion faster.</li><li>Layered retries are worse — gateway, sidecar, and application each retrying can multiply attempts again.</li><li>Timeouts must be shorter than the caller's own deadline and should propagate as a remaining-time budget.</li><li>What is missing is <strong>memory of failure</strong>: the caller keeps paying the timeout even after it knows the dependency is down.</li></ul>
+
+
+<div class="note">Retries help with transient, isolated faults. They make sustained overload worse.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What a circuit breaker is</h2>
+<ul><li>A circuit breaker wraps calls to one dependency and records the outcome of each call.</li><li>When the failure or slow-call rate crosses a threshold, it stops forwarding calls and fails them fast.</li><li>After a cool-down it admits a small number of probe calls to test recovery.</li><li>It is named after the electrical breaker: it trips to protect the wider system rather than trying harder.</li><li>It is a state machine, not a retry policy; its job is to shed load, not to make a failing call succeed.</li><li>It converts an unpredictable slow failure into a fast, bounded, observable one.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The three states</h2>
+<ul><li><strong>Closed</strong> is normal operation; the breaker is invisible except for its metrics.</li><li><strong>Open</strong> protects the caller and gives the dependency room to recover, but every rejected call needs a defined behavior.</li><li><strong>Half-open</strong> answers the question the timer cannot: has the dependency actually recovered?</li><li>The probe count should be small; a large half-open allowance floods a service that is still broken.</li><li>Each instance usually keeps its own breaker state, so a fleet has many independent breakers.</li><li>Operational controls often include a forced-open mode for draining a dependency during maintenance.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>State</th><th>Behavior</th><th>Moves when</th></tr></thead><tbody><tr><td>Closed</td><td>Calls pass through; successes, failures, and slow calls are recorded</td><td>Failure rate crosses threshold and minimum volume is met</td></tr>
+<tr><td>Open</td><td>Calls are rejected immediately or sent to fallback; a timer runs</td><td>Cool-down expires</td></tr>
+<tr><td>Half-open</td><td>A small number of probe calls are allowed through</td><td>Probes succeed (close) or any probe fails (reopen)</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Closed</span><span class="flow-arrow">→</span><span class="flow-step">Failure rate crosses threshold</span><span class="flow-arrow">→</span><span class="flow-step">Open</span><span class="flow-arrow">→</span><span class="flow-step">Cool-down elapses</span><span class="flow-arrow">→</span><span class="flow-step">Half-open</span><span class="flow-arrow">→</span><span class="flow-step">Probe succeeds → Closed</span><span class="flow-arrow">→</span><span class="flow-step">Probe fails → Open</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Thresholds that actually work</h2>
+<ul><li>Use a <strong>failure rate over a sliding window</strong>, not a lifetime average that takes hours to react.</li><li>Track a <strong>slow-call rate</strong> as well as errors; a call that takes many seconds is a failure for capacity purposes.</li><li>Set a <strong>minimum request volume</strong> so two failures out of two calls do not trip a low-traffic dependency.</li><li>Choose the <strong>open duration</strong> long enough for recovery and short enough to restore service when the dependency returns.</li><li>Limit <strong>permitted calls in half-open</strong> so the probe itself cannot become a load spike.</li><li>On very low-traffic dependencies, a consecutive-failure count is often more stable than a percentage.</li><li>Tune from observed latency and error budgets, not from copied defaults; thresholds depend on the dependency's normal behavior.</li></ul>
+
+
+<div class="note">A breaker that trips on every single error flaps. One tuned too loosely never protects. Both are configuration bugs.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Fallbacks and degraded behavior</h2>
+<ul><li>Failing fast with a clear error is a valid fallback and is far better than making the user wait.</li><li>Return a cached or last-known value when slight staleness is acceptable, such as recommendations or a shipping estimate.</li><li>Use a safe default for non-critical sections: an empty list, a generic message, or a hidden widget.</li><li>Queue the operation for later when it is deferrable, such as sending a confirmation email.</li><li>Return a partial response: serve the page without the recommendations that are currently unavailable.</li><li>The fallback must not call the same failing dependency or another one likely to fail at the same moment.</li><li>Never fake a critical success — a payment must not be reported as captured because the breaker opened.</li><li>Make degradation explicit in the product and in metrics so nobody mistakes a fallback for a healthy path.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Scope: one breaker per dependency</h2>
+<ul><li>Scope a breaker to the dependency it protects, usually per callee and per caller instance.</li><li>A single global breaker would let a failing recommendation service block checkout.</li><li>If one dependency has very different endpoints or clusters, separate breakers prevent one bad route from disabling the rest.</li><li>Per-tenant or per-shard breakers stop one noisy tenant from tripping protection for everyone.</li><li>Breakers do not limit concurrency; pair them with bulkheads so a slow dependency cannot consume all threads or connections.</li><li>In a service mesh, breakers are often per proxy and per route, which is coarser than application-level business semantics.</li><li>Track breaker state per dependency; an aggregate health number hides which dependency is actually failing.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Retries and retry budgets</h2>
+<ul><li>Retry only transient, retryable failures, and only operations that are safe or idempotent to repeat.</li><li>Use exponential backoff with jitter so retries do not synchronize into waves.</li><li>A <strong>retry budget</strong> caps retries as a small fraction of successful traffic, so total attempts stay bounded even during an incident.</li><li>Retry at exactly one layer; gateway, sidecar, and application retries otherwise multiply into a retry storm.</li><li>An open breaker should suppress retries rather than queue them for after the cool-down.</li><li>Respect an overall deadline: a retry that will finish after the caller's deadline is wasted capacity.</li><li>Hedged requests — sending a second copy after a latency threshold — reduce tail latency but add load; use them selectively.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Where to implement it</h2>
+<ul><li>An in-process library can distinguish a business failure from a transport failure; a proxy usually cannot.</li><li>A mesh applies the same policy to every service without code changes, which is valuable in a polyglot estate.</li><li>An API gateway protects the system from client traffic but not from internal service-to-service failures.</li><li>Pick one owner per hop for timeouts, retries, and breakers, and document the division.</li><li>Duplicating protection at several layers makes behavior hard to predict and can amplify retries.</li><li>Whichever layer you choose, expose its state and transitions to the people on call.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Strength</th><th>Weakness</th></tr></thead><tbody><tr><td>In-process library</td><td>Business-aware, fine-grained, per endpoint</td><td>Reimplemented per language</td></tr>
+<tr><td>Sidecar / service mesh</td><td>Uniform across languages, config-driven</td><td>Per-route rather than per business operation</td></tr>
+<tr><td>API gateway</td><td>Protects the north-south entry point</td><td>Coarse; does not cover internal calls</td></tr>
+<tr><td>Database / client driver</td><td>Protects a specific resource pool</td><td>Limited to that client's semantics</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Observability and tuning</h2>
+<ul><li>Expose the current state as a gauge and every transition as an event with a reason.</li><li>Track rejected calls, fallback rate, half-open probe results, and time spent open.</li><li>Alert on breakers that stay open for a long time and on breakers that flap repeatedly.</li><li>Correlate breaker state with dependency latency and error rate to distinguish a real outage from a misconfigured threshold.</li><li>A breaker that never opens during real incidents is too loose; one that opens every day is hiding an unresolved problem.</li><li>Fault-inject latency and errors in staging to verify that the breaker trips and the fallback behaves.</li><li>Revisit thresholds after major traffic, deployment, or dependency changes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes and design rules</h2>
+<ul><li>Without timeouts, the breaker has no bounded outcome to count; slow calls must be classified, not waited on forever.</li><li>All instances opening at once can create a thundering herd when they all probe in half-open; add jitter to the open timer.</li><li>A cached fallback with no expiry can serve stale data indefinitely and hide a permanent failure.</li><li>A breaker cannot fix a deterministic bug; if every call fails the same way, fix the dependency instead of tuning thresholds.</li><li>Per-instance state can oscillate: some instances open while others keep sending traffic; aggregate health before declaring recovery.</li><li>Retries on top of an open breaker turn rejection into a delay loop unless retries are suppressed.</li><li>Design rule: timeout &lt; caller deadline, bounded retries, one retry layer, a safe fallback, and a per-dependency bulkhead.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Fast failure</strong> protects the caller's capacity but turns a slow dependency into an immediate user-visible error.</li><li><strong>Aggressive thresholds</strong> trip early and preserve availability but cause false positives during normal variance.</li><li><strong>Lenient thresholds</strong> avoid false positives but let a degraded dependency exhaust the caller before protection engages.</li><li><strong>Per-instance breakers</strong> are simple and local but give an inconsistent fleet view and can oscillate.</li><li><strong>Mesh-level breakers</strong> are uniform and language-agnostic but cannot distinguish business-level failures.</li><li><strong>Cached fallbacks</strong> preserve the user experience but risk serving stale or incorrect data.</li><li><strong>Retry budgets</strong> bound amplification but can reject otherwise recoverable requests during a partial outage.</li><li><strong>Short open windows</strong> recover quickly but hammer a dependency that is still down; long windows are safer but slower to restore.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does a circuit breaker solve?</summary><div class="answer"><p>It prevents a caller from repeatedly waiting on a failing or slow dependency. By failing fast once failures cross a threshold, it preserves threads, connections, and capacity so the failure does not cascade to other services.</p></div></details>
+<details><summary>2. Why isn't a timeout enough?</summary><div class="answer"><p>A timeout bounds one call but every doomed call still consumes its full duration. At high volume the pool still fills. A breaker stops issuing calls entirely for a cool-down, which is the part a timeout cannot do.</p></div></details>
+<details><summary>3. Explain the three states.</summary><div class="answer"><p><strong>Closed:</strong> calls pass and outcomes are recorded. <strong>Open:</strong> calls are rejected immediately for a cool-down. <strong>Half-open:</strong> a few probe calls are allowed; success closes the breaker, failure reopens it.</p></div></details>
+<details><summary>4. What thresholds matter when configuring a breaker?</summary><div class="answer"><p>Failure rate and slow-call rate over a sliding window, a minimum request volume so low-traffic services do not trip on noise, the open duration, and the number of permitted half-open probes.</p></div></details>
+<details><summary>5. Why count slow calls as failures?</summary><div class="answer"><p>A dependency can return successful responses too slowly to be usable. Counting calls above a latency threshold as failures lets the breaker trip on degradation before the caller's pools are exhausted.</p></div></details>
+<details><summary>6. What is a good fallback?</summary><div class="answer"><p>A response that is safe, cheap, and does not depend on the failing service: a cached value, a default, a partial page, a queued retry, or an explicit error. It must never report a critical action as successful when it did not happen.</p></div></details>
+<details><summary>7. Why scope breakers per dependency?</summary><div class="answer"><p>Protection should apply to the failing dependency only. A global breaker would let a broken recommendation service block checkout, turning a partial degradation into a full outage.</p></div></details>
+<details><summary>8. How do circuit breakers and retries interact?</summary><div class="answer"><p>Retries increase load on a struggling dependency and can turn a blip into an outage. Bound them with a retry budget, backoff, and jitter, retry at one layer, and suppress retries when the breaker is open.</p></div></details>
+<details><summary>9. What is a retry budget?</summary><div class="answer"><p>A cap on retries relative to successful traffic, for example a small percentage of normal request volume. It keeps amplification bounded during an incident instead of letting every caller multiply its attempts.</p></div></details>
+<details><summary>10. Where should the breaker live?</summary><div class="answer"><p>In-process when it needs business semantics, in a sidecar or mesh when uniformity across languages matters, or at the gateway for north-south traffic. Choose one owner per hop to avoid duplicated protection.</p></div></details>
+<details><summary>11. What can go wrong when the breaker opens on every instance at once?</summary><div class="answer"><p>When the cool-down expires, all instances may probe simultaneously and create a load spike. Jitter the open timer and keep the half-open probe count small.</p></div></details>
+<details><summary>12. How do you know the breaker is configured correctly?</summary><div class="answer"><p>It trips during injected faults, recovers cleanly when the dependency returns, does not flap during normal variance, and its state correlates with dependency latency and errors. Test it with fault injection rather than assuming.</p></div></details>
+<details><summary>13. Is a circuit breaker a substitute for a bulkhead?</summary><div class="answer"><p>No. A breaker stops calls after failure is detected; a bulkhead limits how many resources one dependency can consume in the first place. They are complementary, along with timeouts and bounded retries.</p></div></details>
+<details><summary>14. When would you not add a circuit breaker?</summary><div class="answer"><p>When the dependency is local and fast, when failures are deterministic and must be surfaced, or when the caller has no fallback and no capacity risk. Adding one without a fallback plan mainly changes the error message.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Adding a breaker without timeouts, so slow calls never produce a bounded outcome to count.</li><li>Retrying at the gateway, the sidecar, and the application, multiplying attempts during an outage.</li><li>Tripping on a single failure with no minimum request volume, causing constant flapping.</li><li>Using one global breaker for all dependencies, so one failure disables unrelated calls.</li><li>Treating an open breaker as a success path and silently returning fake data for critical operations.</li><li>Forgetting that breaker state is usually per instance and assuming the whole fleet is protected at once.</li><li>Tuning thresholds once and never revisiting them after traffic or dependency changes.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="sidecar-pattern.html"><span>← Previous</span><strong>Sidecar Pattern</strong></a><a class="next" href="saga-pattern.html"><span>Next →</span><strong>SAGA Pattern</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/circuit-breaker-pattern">AlgoMaster — Circuit Breaker Pattern</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

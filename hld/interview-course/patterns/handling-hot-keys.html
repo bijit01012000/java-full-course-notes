@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Handling Hot Keys — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 03 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Handling Hot Keys</h1>
+    <p class="dek">Interview Patterns · Scaling Under Load</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/hot-keys">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What a hot key is</a>
+<a href="#s2">Why one key can sink a healthy system</a>
+<a href="#s3">Where this pattern shows up</a>
+<a href="#s4">Detecting hot keys</a>
+<a href="#s5">Read fix: cache close to the request</a>
+<a href="#s6">Read fix: replicate the key</a>
+<a href="#s7">Read fix: coalesce and protect the origin</a>
+<a href="#s8">Write fix: split the counter</a>
+<a href="#s9">Write fix: batch and aggregate</a>
+<a href="#s10">Choosing a better partition key</a>
+<a href="#s11">Failure modes and limits</a>
+<a href="#s12">A decision guide</a>
+<a href="#s13">Discussing hot keys in an interview</a>
+<a href="#s14">Key takeaways</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A system can have plenty of aggregate capacity and still fail when too much traffic lands on one key — the fix is to spread, replicate, coalesce, or split that key rather than adding more nodes.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Hot key</dt><dd>A single key that receives a disproportionate share of requests, overloading the node or shard that owns it.</dd></div><div class="term"><dt>Key skew</dt><dd>An uneven distribution of traffic or data across keys, so some partitions do far more work than others.</dd></div><div class="term"><dt>Hot partition</dt><dd>A shard, cache node, or queue partition that receives most of the traffic because of key placement or a bad partition key.</dd></div><div class="term"><dt>Consistent hashing</dt><dd>A ring-based placement where each key maps to one node; useful for adding capacity, but it still puts a single key on a single node.</dd></div><div class="term"><dt>Key replication</dt><dd>Storing several copies of a hot key under suffixed names that land on different nodes, then picking one per read.</dd></div><div class="term"><dt>Local cache</dt><dd>A small in-process cache on each application server that absorbs repeated reads before they reach the shared cache.</dd></div><div class="term"><dt>Request coalescing</dt><dd>Letting one in-flight request compute or load a value while concurrent requests for the same key wait for that result.</dd></div><div class="term"><dt>Split counter</dt><dd>Replacing one hot counter with several sub-counters that are updated independently and summed on read.</dd></div><div class="term"><dt>Negative caching</dt><dd>Briefly caching a "not found" result so repeated requests for a missing key do not reach the database.</dd></div><div class="term"><dt>Backpressure</dt><dd>Slowing or rejecting producers when a node is saturated, instead of queueing unbounded work.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What a hot key is</h2>
+<p class="lede">A hot key is one key whose request rate is far above the rest of the dataset. The overall system may be underloaded, but the single node responsible for that key is not.</p>
+<ul><li>Traffic concentrates on one item: a viral post, a popular product, a trending topic, or a heavily updated counter.</li><li>The key's owner — a cache server, a database shard, or a queue partition — receives most of the load.</li><li>Other nodes holding the rest of the data may be almost idle, so average utilization looks healthy.</li><li>The problem is <strong>per-key concentration</strong>, not total capacity.</li><li>Hot keys appear on both the read path and the write path, and the fixes differ.</li><li>A hot key can be temporary, lasting minutes during an event, or structural, lasting as long as the data model does.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why one key can sink a healthy system</h2>
+<p class="lede">Distribution is the assumption behind most scaling techniques. Hashing spreads keys across nodes, and sharding spreads rows across databases — but neither splits a single key.</p>
+<ul><li>A distributed cache stores each key on one node, so every request for that key goes to the same machine.</li><li>A sharded database stores each row on one shard, so every update to that row serializes on one shard.</li><li>Adding cache servers or shards redistributes the other keys but leaves the hot key exactly where it was.</li><li>The hot node hits CPU, network, or connection limits first, and its latency rises for every key it owns.</li><li>Timeouts and retries then add even more traffic to the already saturated node.</li><li>The failure looks like a capacity problem but behaves like a single-point-of-failure problem.</li><li>This is why "scale out" alone is the wrong answer when the interviewer asks about a viral post.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Unit that owns a key</th><th>What saturates</th></tr></thead><tbody><tr><td>Distributed cache</td><td>One cache server per key</td><td>CPU, network, connection count on that server</td></tr>
+<tr><td>Sharded database</td><td>One shard per row</td><td>Write serialization and disk I/O on that shard</td></tr>
+<tr><td>Message queue</td><td>One partition per key</td><td>Consumer throughput for that partition</td></tr>
+<tr><td>Application tier</td><td>Every instance serves the key</td><td>Downstream dependency that the key maps to</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Where this pattern shows up</h2>
+<ul><li>A <strong>viral social post</strong> read by millions of users at once, all mapped to one cache key.</li><li>A <strong>celebrity account</strong> whose profile or feed is requested far more than anyone else's.</li><li>A <strong>flash-sale product</strong> where every user loads the same product row and inventory counter.</li><li>A <strong>ticket on-sale page</strong> that thousands of users refresh while waiting to buy.</li><li>A <strong>trending hashtag or live event</strong> that concentrates reads and writes on a few keys.</li><li>A <strong>like, view, or vote counter</strong> updated for one very popular item.</li><li>A <strong>leaderboard or global stats key</strong> that every request reads or updates.</li><li>A <strong>single large tenant</strong> in a multi-tenant system whose partition key routes all of its traffic to one shard.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Detecting hot keys</h2>
+<p class="lede">Hot keys are invisible in system-wide averages. You need per-key and per-node visibility, sampled if necessary, to see the concentration.</p>
+<ul><li>Track request rate and latency <strong>per key</strong>, not just per service.</li><li>Track per-node and per-shard load; one saturated node beside idle peers is the signature.</li><li>Use cache-provider tooling or sampled key logging to find the top keys by request count.</li><li>Watch for <strong>partition skew</strong> in queues and shards, where one partition's lag or write rate diverges.</li><li>Alert on the ratio between the hottest key and the median key, not only on absolute traffic.</li><li>Correlate hot keys with deploys, marketing events, and external news so the cause is not mistaken for a code regression.</li><li>Sample aggressively; logging every key access can itself become the bottleneck.</li></ul>
+
+
+<div class="note">A useful interview move is to say how you would detect the problem before proposing a fix. That shows you are designing an operable system, not reciting techniques.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Read fix: cache close to the request</h2>
+<p class="lede">The cheapest read for a hot key is the one that never reaches the shared cache. Keeping a small copy in each application process absorbs most of the traffic.</p>
+<ul><li>Store very popular values in a small <strong>in-process cache</strong> on every application server.</li><li>Most reads for the hot key are served locally, so the shared cache and database see far less traffic.</li><li>A process-local cache adds no network hop, making it the lowest-latency option.</li><li>The copies are per-instance, so invalidation must be handled or tolerated.</li><li>Use a <strong>very short TTL</strong> so stale data expires quickly without explicit coordination.</li><li>Bound the local cache size with an LRU policy so it cannot grow without limit.</li><li>This is a good fit for data that is read constantly and changes rarely, such as a viral post's text or a product description.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Read fix: replicate the key</h2>
+<p class="lede">If the hot value cannot live in every process, the next option is to make several copies of the key so the reads spread across nodes.</p>
+<ul><li>Create N copies under distinct names, such as <code>post:123:copy1</code> through <code>post:123:copyN</code>.</li><li>The suffixed names hash to different cache servers, so reads distribute across them.</li><li>Each reader picks a copy at random, or uses a cheap local random choice per request.</li><li>On a write or invalidation, <strong>every copy must be updated or deleted</strong>; missing one leaves stale data.</li><li>The value in each copy is identical, so the storage cost multiplies by the number of copies.</li><li>This is often called <strong>key salting</strong> or key fan-out, and it directly targets read concentration.</li><li>Choose N based on how far above a single node's capacity the hot key is, not on total system traffic.</li></ul>
+
+<div class="flow"><span class="flow-step">Read for post:123</span><span class="flow-arrow">→</span><span class="flow-step">Pick copy at random</span><span class="flow-arrow">→</span><span class="flow-step">post:123:copy2 on cache server 2</span><span class="flow-arrow">→</span><span class="flow-step">Hit returns the value</span><span class="flow-arrow">→</span><span class="flow-step">Write invalidates all copies</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Read fix: coalesce and protect the origin</h2>
+<p class="lede">When a hot key expires or is missing, the danger is many identical requests doing the same expensive work at once. Coalescing and admission control keep that burst from reaching the backend.</p>
+<ul><li><strong>Request coalescing</strong> lets one request load the value while concurrent requests for the same key wait for that result.</li><li>A per-key lock or single-flight mechanism prevents a thundering herd on rebuild.</li><li>Serving the previous value briefly while a refresh runs in the background avoids a hard miss.</li><li>Add <strong>TTL jitter</strong> so related keys do not all expire at the same moment.</li><li>Apply per-key <strong>rate limiting</strong> or admission control so one key cannot consume the whole service's capacity.</li><li>Cache <strong>negative results</strong> briefly so requests for deleted or invented keys do not hit the database repeatedly.</li><li>Return a degraded but useful response, such as a cached summary, instead of failing all requests for that key.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Write fix: split the counter</h2>
+<p class="lede">For a hot write, the bottleneck is one row that cannot be updated in parallel. Splitting the logical value into several physical rows restores concurrency.</p>
+<ul><li>Replace a single counter row with several sub-counters, for example <code>likes:video42:0</code> through <code>likes:video42:9</code>.</li><li>Each write updates one sub-counter chosen at random, so writes spread across rows and potentially shards.</li><li>The logical total is the sum of all sub-counters, computed on read.</li><li>The read becomes slightly more expensive, but popular counts are usually cached.</li><li>Choose the number of sub-counters from the write rate relative to what one row can absorb.</li><li>Keep the sub-counter count stable; changing it later requires reconciling old and new totals.</li><li>The same idea applies to inventory, votes, and any single hot aggregate.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Write path</th><th>Read path</th></tr></thead><tbody><tr><td>One counter</td><td>Every update touches the same row</td><td>Read one value</td></tr>
+<tr><td>Split counter</td><td>Update one of N rows at random</td><td>Sum N values, usually from cache</td></tr>
+<tr><td>Split counter with sharding</td><td>Sub-counters can live on different shards</td><td>Aggregate across shards or cache the total</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Write fix: batch and aggregate</h2>
+<p class="lede">If the system does not need every individual update persisted, reduce the number of writes before they reach the hot row.</p>
+<ul><li>Buffer updates in memory or a stream processor and write a single aggregated delta.</li><li>For a counter, write "add the accumulated amount" instead of one update per event.</li><li>Use a queue to absorb the burst, then let consumers write at a controlled rate.</li><li>Make the consumer idempotent so retries do not double-count the aggregate.</li><li>If only the latest state matters, overwrite it rather than appending a new row.</li><li>If full detail is not needed, sample the stream and store fewer events.</li><li>These techniques trade freshness or completeness for a large reduction in write pressure.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Choosing a better partition key</h2>
+<ul><li>A hot key is sometimes a symptom of a bad partition key rather than a genuinely popular item.</li><li>Avoid monotonically increasing keys such as timestamps or auto-increment IDs for range partitioning; all new data lands on the newest partition.</li><li>Use a high-cardinality key that matches how the data is written and read.</li><li>For time-series data, a composite key such as <code>(device_id, day)</code> spreads writes while keeping one device's data together.</li><li>Check that related records which are read together still land on the same partition.</li><li>Adding a hash prefix or salt to a key can spread writes, but it also makes range queries harder.</li><li>Changing the partition key later means migrating data, so justify the choice before committing to it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes and limits</h2>
+<ul><li>Replicating a key increases read capacity but multiplies invalidation work and storage.</li><li>Local caches can serve stale data and make a global purge difficult.</li><li>Request coalescing adds waiting latency for requests that lose the race.</li><li>Split counters make reads more expensive and complicate exact reconciliation.</li><li>Batching can lose buffered updates and delays visibility.</li><li>A queue absorbs a burst but cannot fix a sustained consumer deficit; lag keeps growing.</li><li>Every mitigation shifts load somewhere else, so re-measure after applying it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Mitigation</th><th>Helps with</th><th>New failure mode</th></tr></thead><tbody><tr><td>Local cache</td><td>Read hot key</td><td>Per-instance staleness</td></tr>
+<tr><td>Key replication</td><td>Read hot key</td><td>All copies must be invalidated</td></tr>
+<tr><td>Request coalescing</td><td>Miss stampede</td><td>Waiting latency</td></tr>
+<tr><td>Split counter</td><td>Write hot row</td><td>Expensive reads and reconciliation</td></tr>
+<tr><td>Batching or queueing</td><td>Write burst</td><td>Delayed or lost updates</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>A decision guide</h2>
+<ul><li>First confirm the key really is hot, using per-key metrics rather than a guess.</li><li>If the key is read-heavy, start with a local cache, then replicate the key if one node is still saturated.</li><li>If the key is write-heavy, split the counter or aggregate before reaching for more shards.</li><li>If the hot key is a missing or deleted item, add negative caching.</li><li>If the cause is a monotonic partition key, fix the key instead of adding mitigations.</li><li>If the spike is temporary, a queue plus coalescing may be enough; if it is structural, change the data model.</li><li>State the trade-off you are accepting and the metric that will tell you whether it worked.</li></ul>
+
+<div class="flow"><span class="flow-step">Detect per-key skew</span><span class="flow-arrow">→</span><span class="flow-step">Read or write hot?</span><span class="flow-arrow">→</span><span class="flow-step">Read → local cache / replicate key</span><span class="flow-arrow">→</span><span class="flow-step">Write → split counter / aggregate</span><span class="flow-arrow">→</span><span class="flow-step">Re-measure skew and latency</span></div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Discussing hot keys in an interview</h2>
+<ul><li>Mention the possibility of a hot key when you design any cache or shard, not only when asked.</li><li>Explain why adding nodes does not help a single key.</li><li>Separate read-side and write-side mitigations and pick according to the workload.</li><li>Say how you would detect the problem in production.</li><li>Describe invalidation for any replicated or local cache you propose.</li><li>Name the trade-off and the fallback if the mitigation is not enough.</li><li>Tie the answer to the specific product: viral post, flash sale, celebrity account, or live event.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Key takeaways</h2>
+<ul><li>A hot key is a concentration problem: total capacity is irrelevant if one node owns the traffic.</li><li>Hashing and sharding spread many keys but never split a single key.</li><li>For reads, move the value closer (local cache) or spread copies of the key across nodes.</li><li>For writes, split the logical value into independent sub-values or reduce the write rate.</li><li>Protect the origin with coalescing, TTL jitter, negative caching, and per-key limits.</li><li>Fix a bad partition key at the source instead of layering mitigations on top.</li><li>Always explain invalidation and re-measure skew after applying a fix.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Local caching</strong> gives the lowest latency and offloads the shared cache but creates per-instance copies that are hard to invalidate.</li><li><strong>Key replication</strong> spreads reads across nodes but multiplies storage and requires every copy to be invalidated on write.</li><li><strong>Request coalescing</strong> prevents duplicate work but adds waiting latency for requests that must wait on the leader.</li><li><strong>Split counters</strong> restore write parallelism but make reads an aggregation and complicate exact totals.</li><li><strong>Batching and aggregation</strong> cut write volume but delay visibility and can lose recent updates.</li><li><strong>Queueing</strong> absorbs a burst but cannot fix sustained overload; it converts a latency problem into growing lag.</li><li><strong>Negative caching</strong> protects the database from missing-key traffic but can briefly hide a newly created record.</li><li><strong>Salting the partition key</strong> spreads writes but makes range queries and related-data lookups harder.</li><li><strong>Per-key rate limiting</strong> protects shared capacity but rejects or delays legitimate users during a genuine surge.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a hot key?</summary><div class="answer"><p>A key that receives a disproportionate share of traffic, so the single cache node, shard, or partition that owns it is overloaded while the rest of the system is underloaded.</p></div></details>
+<details><summary>2. Why doesn't adding more cache servers fix a hot key?</summary><div class="answer"><p>A distributed cache maps each key to one server. Adding servers redistributes the other keys but the hot key still maps to exactly one node, so its traffic remains concentrated.</p></div></details>
+<details><summary>3. How do you detect a hot key in production?</summary><div class="answer"><p>Track request rate and latency per key, per-node and per-shard load, partition skew, and consumer lag. Look for one node saturated while its peers are idle, and alert on the ratio between the hottest key and the median.</p></div></details>
+<details><summary>4. How would you handle a viral post being read millions of times?</summary><div class="answer"><p>Serve it from a local in-process cache with a short TTL on each application server, or replicate the key under several suffixed names across cache servers and pick one per read. Add coalescing so an expiry does not cause a stampede.</p></div></details>
+<details><summary>5. How do you invalidate replicated keys?</summary><div class="answer"><p>On write, delete or update every copy. That is the main cost of replication: the write becomes N operations and a missed copy leaves stale data, so keep N modest and pair it with a TTL.</p></div></details>
+<details><summary>6. What is the difference between a hot key and a hot shard?</summary><div class="answer"><p>A hot key is one record with extreme traffic. A hot shard is a partition receiving too much traffic, often from a bad partition key such as a timestamp. Fixing the key or splitting the record are different remedies.</p></div></details>
+<details><summary>7. How do you scale writes to one popular counter?</summary><div class="answer"><p>Split it into several sub-counters, update one at random per event, and sum them on read. This spreads writes across rows and shards at the cost of a more expensive read, which is usually cached.</p></div></details>
+<details><summary>8. When would you aggregate instead of splitting?</summary><div class="answer"><p>When individual updates do not need to be persisted, such as view counts or analytics. Buffer and write one delta, accepting a short delay and possible loss of recent data.</p></div></details>
+<details><summary>9. What is a cache stampede and how does it relate to hot keys?</summary><div class="answer"><p>A stampede is many simultaneous misses for the same expired key. It is worst for hot keys because the request volume is highest there. Locks, background refresh, and TTL jitter prevent it.</p></div></details>
+<details><summary>10. How do you protect against requests for keys that do not exist?</summary><div class="answer"><p>Negative caching: store the "not found" result for a short time so repeated requests for a deleted or invented key do not reach the database.</p></div></details>
+<details><summary>11. How do you choose the number of key copies or sub-counters?</summary><div class="answer"><p>From the per-key load relative to what one node or row can handle, not from total system traffic. Keep the number stable because changing it requires reconciling copies or totals.</p></div></details>
+<details><summary>12. What trade-off are you making with a local cache?</summary><div class="answer"><p>Latency and offload improve, but each instance holds its own copy. Invalidation is difficult, so use a very short TTL and accept brief staleness for data that can tolerate it.</p></div></details>
+<details><summary>13. When is the right fix to change the partition key?</summary><div class="answer"><p>When the skew comes from the key itself, such as a timestamp sending every new write to the newest partition. A high-cardinality or composite key spreads the load at the source instead of masking it.</p></div></details>
+<details><summary>14. What would you monitor after applying a hot-key fix?</summary><div class="answer"><p>Per-key request rate, per-node and per-shard load, cache hit ratio, p99 latency for the hot key, invalidation failures, and queue lag. Confirm the skew actually moved rather than just moving elsewhere.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Responding to a hot key by adding more cache servers or shards.</li><li>Treating a viral item as a general capacity problem instead of a per-key concentration problem.</li><li>Replicating a key but forgetting to invalidate every copy on write.</li><li>Using a local cache with a long TTL and serving visibly stale data.</li><li>Splitting a counter and then reading only one sub-counter.</li><li>Sharding time-series data by timestamp and calling the resulting hot shard a traffic spike.</li><li>Blaming a hot key for a problem that is actually a queue backlog or a missing index.</li><li>Applying a fix without per-key metrics to prove the skew moved.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="scaling-write-traffic.html"><span>← Previous</span><strong>Scaling Write Traffic</strong></a><a class="next" href="absorbing-traffic-spikes.html"><span>Next →</span><strong>Absorbing Traffic Spikes</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/hot-keys">AlgoMaster — Handling Hot Keys</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

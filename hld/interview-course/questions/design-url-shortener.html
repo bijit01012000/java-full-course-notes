@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design a URL Shortener — Interview Answer</title>
+<style>
+  :root{
+    --ink:#17211f; --muted:#5d6a66; --line:#d8ded6; --line-strong:#b8c4bb;
+    --teal:#0f766e; --teal-soft:#e2f4ef; --blue:#1d4ed8; --blue-soft:#e8efff;
+    --amber:#a85b00; --amber-soft:#fff2d6; --rose:#b42342; --rose-soft:#ffe8ec;
+    --violet:#6d3fc4; --violet-soft:#f0e9ff; --paper:#fffdf8;
+  }
+  *{box-sizing:border-box} html,body{margin:0;padding:0}
+  body{background:#ece9e1;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:var(--teal);text-decoration:none}
+  .toolbar{max-width:210mm;margin:14px auto 0;display:flex;justify-content:flex-end;gap:8px}
+  .btn{border:1px solid var(--line-strong);background:#fff;color:var(--muted);border-radius:999px;padding:7px 12px;font:inherit;font-size:.76rem;font-weight:700;cursor:pointer}
+  .btn:hover{border-color:var(--teal);color:var(--teal)}
+  .page{width:210mm;min-height:297mm;padding:15mm;margin:14px auto 22px;background:var(--paper);box-shadow:0 12px 40px rgba(23,33,31,.12);position:relative;overflow:hidden;page-break-after:always;break-after:page}
+  .page:last-child{page-break-after:auto;break-after:auto}
+  .page-head{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:7px;margin-bottom:14px;color:var(--muted);font-size:8pt;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+  .page-head span:last-child{color:var(--line-strong)}
+  .page-foot{position:absolute;left:15mm;right:15mm;bottom:9mm;display:flex;justify-content:space-between;color:var(--muted);font-size:7.5pt;border-top:1px solid var(--line);padding-top:5px}
+  .eyebrow{display:flex;align-items:center;gap:8px;color:var(--teal);font-size:8pt;font-weight:800;letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px}
+  .eyebrow::before{content:"";width:26px;height:2px;background:var(--teal);border-radius:2px}
+  h1{font-family:Georgia,"Times New Roman",serif;font-size:35pt;line-height:1.02;letter-spacing:-.035em;margin:0;font-weight:600;max-width:170mm}
+  h2{font-family:Georgia,"Times New Roman",serif;font-size:19pt;line-height:1.15;margin:0 0 8px;padding-bottom:6px;border-bottom:1px solid var(--line);font-weight:600;letter-spacing:-.01em}
+  h3{font-size:11.5pt;margin:13px 0 5px;font-weight:760}
+  p{margin:0 0 8px;font-size:10pt}
+  .dek{font-size:12pt;color:var(--muted);line-height:1.5;max-width:155mm;margin:14px 0 0}
+  .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:18px}
+  .pill{display:inline-flex;gap:5px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:5px 9px;font-size:8pt;font-weight:650;color:var(--muted);background:#fff}
+  .pill.accent{background:var(--teal-soft);border-color:var(--teal);color:var(--teal)}
+  .pill strong{color:var(--ink)}
+  .cover-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:10mm;margin-top:16mm}
+  .card{border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 12px}
+  .card h3{margin:0 0 4px;font-size:10.5pt}
+  .card p,.card li{font-size:9.2pt;line-height:1.5}
+  .card ul{margin:4px 0 0;padding-left:1.1rem}
+  .card .tag{display:block;color:var(--teal);font-size:7pt;font-weight:800;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px}
+  .callout{border:1px solid var(--line);border-left:4px solid var(--teal);background:var(--teal-soft);border-radius:0 9px 9px 0;padding:10px 12px;margin:9px 0}
+  .callout .label{display:block;color:var(--teal);font-size:7pt;font-weight:800;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px}
+  .callout p:last-child{margin:0}
+  .callout.warn{background:var(--amber-soft);border-color:var(--amber);border-left-color:var(--amber)}
+  .callout.warn .label{color:var(--amber)}
+  .callout.rose{background:var(--rose-soft);border-color:var(--rose);border-left-color:var(--rose)}
+  .callout.rose .label{color:var(--rose)}
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin:8px 0}
+  .flow-step{border:1px solid var(--line);background:#fff;border-radius:999px;padding:4px 8px;font-size:8.2pt;font-weight:650;color:var(--ink)}
+  .flow-arrow{color:var(--teal);font-weight:800;font-size:9pt}
+  ul,ol{margin:5px 0 9px;padding-left:1.15rem}
+  li{margin:3px 0;font-size:9.5pt;line-height:1.52}
+  li::marker{color:var(--line-strong)}
+  strong{font-weight:760}
+  code{background:#eef3f0;border:1px solid #dbe5df;border-radius:4px;padding:.05em .28em;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
+  .table{width:100%;border-collapse:collapse;margin:7px 0 11px;font-size:8.8pt;line-height:1.4}
+  .table th{background:var(--teal-soft);color:var(--muted);text-align:left;font-size:7pt;letter-spacing:.06em;text-transform:uppercase;padding:6px 8px;border-bottom:1px solid var(--line)}
+  .table td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  .table tr:last-child td{border-bottom:0}
+  .diagram{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 8px 5px;margin:8px 0 9px}
+  .diagram svg{display:block;width:100%;height:auto}
+  .diagram figcaption{font-size:7.8pt;color:var(--muted);text-align:center;line-height:1.4;margin:4px 0 1px}
+  .svg-box{fill:#f5faf8;stroke:#a9c9c2;stroke-width:1.3}
+  .svg-box.strong{fill:#dff3ee;stroke:#0f766e;stroke-width:1.5}
+  .svg-box.blue{fill:#e8efff;stroke:#4d74dc}
+  .svg-box.warm{fill:#fff2d6;stroke:#c07a12}
+  .svg-box.rose{fill:#ffe8ec;stroke:#c23a57}
+  .svg-box.violet{fill:#f0e9ff;stroke:#7c55c9}
+  .svg-text{fill:#17211f;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:12px;font-weight:650;text-anchor:middle;dominant-baseline:middle}
+  .svg-text.small{font-size:10.5px}
+  .svg-text.tiny{font-size:8.5px;font-weight:500;fill:#5d6a66}
+  .svg-label{fill:#5d6a66;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:8.5px;font-weight:600;text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:2.5px;stroke-linejoin:round}
+  .svg-line{fill:none;stroke:#5d6a66;stroke-width:1.4;marker-end:url(#arrow)}
+  .svg-line.teal{stroke:#0f766e;marker-end:url(#arrow-teal)}
+  .svg-line.amber{stroke:#b26a08;marker-end:url(#arrow-amber)}
+  .svg-line.rose{stroke:#b42342;marker-end:url(#arrow-rose)}
+  .svg-line.blue{stroke:#3157bd;marker-end:url(#arrow-blue)}
+  .svg-line.dashed{stroke-dasharray:5 4}
+  .svg-line.both{marker-start:url(#arrow-teal);marker-end:url(#arrow-teal)}
+  .svg-line.both-blue{marker-start:url(#arrow-blue);marker-end:url(#arrow-blue)}
+  .svg-lifeline{stroke:#b8c4bb;stroke-width:1;stroke-dasharray:3 4}
+  .marker{fill:#5d6a66}.marker-teal{fill:#0f766e}.marker-amber{fill:#b26a08}.marker-rose{fill:#b42342}.marker-blue{fill:#3157bd}
+  .icon{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .icon.teal{color:#0f766e}.icon.blue{color:#1d4ed8}.icon.amber{color:#a85b00}.icon.rose{color:#b42342}.icon.violet{color:#6d3fc4}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .kv{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:7px 0}
+  .kv .item{border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 8px}
+  .kv .k{display:block;color:var(--teal);font-size:6.8pt;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+  .kv .v{display:block;font-size:8.6pt;line-height:1.4;margin-top:1px}
+  .big-number{font-family:Georgia,serif;font-size:18pt;color:var(--teal);line-height:1}
+  .toc{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;margin-top:12px}
+  .toc div{display:flex;gap:7px;font-size:9pt;border-bottom:1px solid var(--line);padding:4px 0}
+  .toc .n{color:var(--teal);font-size:7.5pt;font-weight:800;min-width:14px}
+  .note{font-size:8.4pt;color:var(--muted);line-height:1.45}
+  .oneline{border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 9px;margin:6px 0;font-size:8.8pt;line-height:1.45}
+  .oneline strong{color:var(--ink)}
+  .page:last-of-type .oneline{font-size:8.2pt;padding:5px 8px;margin:4px 0;line-height:1.38}
+  .page:last-of-type h3{margin:9px 0 4px}
+  .page:last-of-type .callout{padding:8px 10px}
+  .page:last-of-type .callout li{font-size:8.2pt;margin:2px 0;line-height:1.42}
+  @page{size:A4;margin:15mm 15mm 16mm}
+  @media print{
+    body{background:#fff}
+    .toolbar{display:none}
+    .page{width:auto;min-height:0;margin:0;padding:0;box-shadow:none;background:#fff;overflow:visible}
+    .page-foot{position:static;margin-top:7mm}
+    .diagram,.card,.callout,table,.kv,.flow,.oneline{break-inside:avoid}
+    h2,h3{break-after:avoid}
+  }
+  @media screen and (max-width:800px){
+    .page{width:auto;min-height:0;padding:18px;margin:10px}
+    .page-foot{position:static;margin-top:20px}
+    .cover-grid,.two-col,.toc{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker-teal" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker-amber" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker-rose" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="marker-blue" d="M0,0 L10,5 L0,10 z"/></marker>
+
+    <symbol id="i-client" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></g></symbol>
+    <symbol id="i-gateway" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h6M7 16h8"/></g></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="5" rx="1"/><rect x="4" y="10" width="16" height="5" rx="1"/><rect x="4" y="17" width="16" height="4" rx="1"/><circle cx="7" cy="5.5" r=".7" fill="currentColor"/><circle cx="7" cy="12.5" r=".7" fill="currentColor"/></g></symbol>
+    <symbol id="i-id" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H20M17 12v3M20 12v2"/></g></symbol>
+    <symbol id="i-db" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v14c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></g></symbol>
+    <symbol id="i-cache" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 10-13h-7z"/></g></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="15" width="18" height="4" rx="1"/></g></symbol>
+    <symbol id="i-worker" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></g></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-7"/></g></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></g></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></g></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></g></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></g></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 5-3 8-7 9-4-1-7-4-7-9V6z"/><path d="M9 12l2 2 4-4"/></g></symbol>
+  </defs>
+</svg>
+
+<div class="toolbar"><a class="btn" href="index.html">← All questions</a><button class="btn" onclick="window.print()">Print / Save as PDF</button></div>
+
+<!-- ================= PAGE 1 ================= -->
+<section class="page">
+  <div class="page-head"><span>System Design Interviews · Question Bank</span><span>P0 · 3–5 YOE</span></div>
+  <div class="eyebrow">Sample answer · high-probability question</div>
+  <h1>Design a<br>URL Shortener</h1>
+  <p class="dek">A complete interview answer: requirements, key entities, API design, data modelling, architecture, optimisation, trade-offs, and one-line follow-ups.</p>
+  <div class="meta">
+    <span class="pill accent"><strong>P0</strong> very high</span>
+    <span class="pill">3–5 YOE</span>
+    <span class="pill">Read-heavy · 100:1</span>
+    <span class="pill">3 diagrams</span>
+    <span class="pill">9 pages</span>
+  </div>
+
+  <div class="cover-grid">
+    <div class="card">
+      <span class="tag">Why interviewers ask it</span>
+      <h3>One question, many fundamentals</h3>
+      <ul>
+        <li>Unique ID generation and collision handling</li>
+        <li>Key-value modelling and secondary indexes</li>
+        <li>Cache-aside and hot links</li>
+        <li>Read-heavy scaling and replication</li>
+        <li>Async analytics and failure handling</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="tag">What strong candidates do</span>
+      <h3>Make the read path obvious</h3>
+      <ul>
+        <li>Scope the product before drawing boxes</li>
+        <li>Define entities and keys before the architecture</li>
+        <li>Draw one clean diagram, not five sketches</li>
+        <li>Explain 301 vs 302 and cache behaviour</li>
+        <li>Move analytics off the redirect path</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout" style="margin-top:16px">
+    <span class="label">60-second answer</span>
+    <p>“A URL shortener is a read-heavy key-value system. The write path validates the URL, generates a unique short code, stores <code>code → long URL</code> in a sharded, replicated KV store, and caches it. The redirect path reads the cache, falls back to the KV store on a miss, returns a 301 or 302, and publishes the click event asynchronously. I’d keep app servers stateless, shard by short code, and use a queue for analytics so the redirect stays fast.”</p>
+  </div>
+
+  <h3 style="margin-top:14px">Answer map</h3>
+  <div class="flow">
+    <span class="flow-step">Requirements</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Key entities</span><span class="flow-arrow">→</span>
+    <span class="flow-step">API</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Data model</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Architecture</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Optimise</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Follow-ups</span>
+  </div>
+
+  <div class="toc">
+    <div><span class="n">02</span>Requirements &amp; estimates</div>
+    <div><span class="n">03</span>Key entities &amp; API design</div>
+    <div><span class="n">04</span>Data modelling &amp; code generation</div>
+    <div><span class="n">05</span>Architecture diagram</div>
+    <div><span class="n">06</span>Write flow</div>
+    <div><span class="n">07</span>Redirect flow</div>
+    <div><span class="n">08</span>Optimisation &amp; trade-offs</div>
+    <div><span class="n">09</span>Follow-ups, one-liners, traps</div>
+  </div>
+
+  <div class="page-foot"><span>Design a URL Shortener · Sample answer</span><span>01 / 09</span></div>
+</section>
+
+<!-- ================= PAGE 2 ================= -->
+<section class="page">
+  <div class="page-head"><span>Design a URL Shortener</span><span>Requirements &amp; estimates</span></div>
+  <h2>1. Requirements</h2>
+  <div class="two-col">
+    <div class="card">
+      <span class="tag">Functional</span>
+      <h3>What it must do</h3>
+      <ul>
+        <li>Create a short link from a long URL.</li>
+        <li>Redirect <code>GET /{code}</code> to the original URL.</li>
+        <li>Optional custom alias and expiry.</li>
+        <li>Optional click analytics.</li>
+        <li>Disable or delete a link.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="tag">Non-functional</span>
+      <h3>How well</h3>
+      <ul>
+        <li>Redirect p99 under ~100–200 ms.</li>
+        <li>Very high availability; redirects must not depend on analytics.</li>
+        <li>Read-heavy: ~100 redirects per write.</li>
+        <li>Short codes unique and hard to guess if security matters.</li>
+        <li>Analytics can be eventually consistent.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Assumptions and estimates</h3>
+  <ul>
+    <li>100 million new links per day; 10 billion redirects per day.</li>
+    <li>Peak traffic is 2–3× average; average mapping is ~500 bytes.</li>
+    <li>Over five years: ~183 billion links, ~91 TB raw, ~300 TB with replication/index overhead.</li>
+  </ul>
+  <div class="kv">
+    <div class="item"><span class="k">Writes / sec</span><span class="v"><span class="big-number">~1.2k</span><br>avg · ~3.5k peak</span></div>
+    <div class="item"><span class="k">Redirects / sec</span><span class="v"><span class="big-number">~116k</span><br>avg · ~350k peak</span></div>
+    <div class="item"><span class="k">Links over 5 years</span><span class="v"><span class="big-number">~183B</span><br>100M × 365 × 5</span></div>
+    <div class="item"><span class="k">Storage with replication</span><span class="v"><span class="big-number">~300 TB</span><br>raw + copies + indexes</span></div>
+  </div>
+
+  <table class="table">
+    <thead><tr><th>Pressure</th><th>Consequence</th></tr></thead>
+    <tbody>
+      <tr><td>~350k redirects/sec at peak</td><td>Stateless app tier, cache, many KV shards</td></tr>
+      <tr><td>~3.5k writes/sec at peak</td><td>ID generation and unique-code check</td></tr>
+      <tr><td>~300 TB over five years</td><td>Shard the KV store; do not use one node</td></tr>
+      <tr><td>Every redirect produces analytics</td><td>Queue + workers; never block the redirect</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <span class="label">Estimation rule</span>
+    <p>The exact numbers are assumptions. What matters is the ratio: reads dominate, so the redirect path gets the cache and the simplest lookup. Analytics and other slow work stay off that path.</p>
+  </div>
+
+  <div class="page-foot"><span>Design a URL Shortener · Requirements</span><span>02 / 09</span></div>
+</section>
+
+<!-- ================= PAGE 3 ================= -->
+<section class="page">
+  <div class="page-head"><span>Design a URL Shortener</span><span>Key entities &amp; API design</span></div>
+  <h2>2. Key entities</h2>
+  <div class="two-col">
+    <div class="card">
+      <span class="tag">Core entities</span>
+      <h3>Three entities are enough</h3>
+      <ul>
+        <li><strong>User</strong> — optional owner of a link.</li>
+        <li><strong>UrlMapping</strong> — short code, long URL, owner, expiry, status.</li>
+        <li><strong>ClickEvent</strong> — append-only event for analytics.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="tag">Relationships</span>
+      <h3>Simple ownership</h3>
+      <ul>
+        <li>User 1 → N UrlMapping.</li>
+        <li>UrlMapping 1 → N ClickEvent.</li>
+        <li>A mapping is uniquely identified by <code>code</code>.</li>
+        <li>Click events are never queried during redirect.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 style="margin-top:14px">3. API design</h2>
+  <table class="table">
+    <thead><tr><th>Operation</th><th>Contract</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Create</td><td><code>POST /urls</code><br><code>{ longUrl, customAlias?, expiresAt? }</code></td><td>201 with short URL; 400 invalid; 409 alias conflict; optional <code>Idempotency-Key</code>.</td></tr>
+      <tr><td>Redirect</td><td><code>GET /{code}</code></td><td>301 or 302 with <code>Location</code>; 404 unknown; 410 expired.</td></tr>
+      <tr><td>Delete</td><td><code>DELETE /urls/{code}</code></td><td>204; soft delete; invalidate cache.</td></tr>
+      <tr><td>Stats</td><td><code>GET /urls/{code}/stats</code></td><td>Reads analytics store; never on redirect path.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="two-col">
+    <div class="card">
+      <span class="tag">Create response</span>
+      <h3>Example</h3>
+      <p><code>POST /urls</code><br><code>{ "longUrl": "https://example.com/very/long" }</code></p>
+      <p><code>201 Created</code><br><code>{ "code": "aB3xK9p", "shortUrl": "https://sho.rt/aB3xK9p" }</code></p>
+    </div>
+    <div class="card">
+      <span class="tag">Redirect contract</span>
+      <h3>Keep it cheap</h3>
+      <p><code>GET /aB3xK9p</code></p>
+      <p><code>302 Found</code><br><code>Location: https://example.com/very/long</code></p>
+      <p>No body required; cache headers only if the redirect is permanent.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="label">API decisions worth stating</span>
+    <p>Use an <code>Idempotency-Key</code> on create to survive client retries. Use 302 by default if you need analytics or revocable links. Add <code>Cache-Control</code> only when the redirect is truly permanent; otherwise a CDN/browser may keep sending users to the old destination.</p>
+  </div>
+
+  <div class="page-foot"><span>Design a URL Shortener · Entities and API</span><span>03 / 09</span></div>
+</section>
+
+<!-- ================= PAGE 4 ================= -->
+<section class="page">
+  <div class="page-head"><span>Design a URL Shortener</span><span>Data modelling &amp; code generation</span></div>
+  <h2>4. Data modelling</h2>
+  <div class="two-col">
+    <div class="card">
+      <span class="tag">Write model</span>
+      <h3><code>urls</code></h3>
+      <ul>
+        <li><code>code</code> — primary key, unique</li>
+        <li><code>long_url</code> — normalized URL</li>
+        <li><code>owner_id</code> — optional</li>
+        <li><code>created_at</code>, <code>expires_at</code></li>
+        <li><code>status</code> — active / disabled / deleted</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="tag">Analytics model</span>
+      <h3><code>click_events</code></h3>
+      <ul>
+        <li><code>event_id</code>, <code>code</code>, <code>ts</code></li>
+        <li>country / device / referrer (optional)</li>
+        <li>Append-only; partition by time</li>
+        <li>Aggregated by workers</li>
+        <li>Never read on redirect</li>
+      </ul>
+    </div>
+  </div>
+
+  <table class="table">
+    <thead><tr><th>Modelling decision</th><th>Choice</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Primary lookup</td><td><code>code</code> → <code>long_url</code></td><td>One O(1) key lookup on the redirect path</td></tr>
+      <tr><td>Sharding</td><td>Hash of <code>code</code></td><td>Even distribution; single-shard redirect lookup</td></tr>
+      <tr><td>Secondary index</td><td><code>(owner_id, created_at)</code></td><td>List a user’s links without scanning</td></tr>
+      <tr><td>Duplicate prevention</td><td>Unique <code>(owner_id, long_url)</code></td><td>Makes create idempotent for the same owner</td></tr>
+      <tr><td>Expiry</td><td><code>expires_at</code> + lazy check + cleanup job</td><td>No extra lookup on redirect; reclaim space later</td></tr>
+      <tr><td>Cache</td><td><code>code → long_url</code>, TTL</td><td>Hot links stay fast; negative cache for missing codes</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Short-code generation</h3>
+  <table class="table">
+    <thead><tr><th>Approach</th><th>How</th><th>Trade-off</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Counter + base62</strong></td><td>Increment a segment counter; encode in base62.</td><td>Short, no collisions; needs an ID service or preallocated ranges.</td></tr>
+      <tr><td><strong>Hash + collision check</strong></td><td>Hash URL, take N chars, retry on collision.</td><td>No ID service; collisions and extra writes.</td></tr>
+      <tr><td><strong>Random code</strong></td><td>7 random base62 chars; unique constraint.</td><td>Hard to guess; collision probability grows with volume.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <span class="label">Default</span>
+    <p>A 7-character base62 code gives roughly <strong>62⁷ ≈ 3.5 trillion</strong> combinations. Use a counter with preallocated ranges when you want no collisions; use random codes when guessability and central coordination matter. Always enforce uniqueness with a conditional write.</p>
+  </div>
+
+  <div class="page-foot"><span>Design a URL Shortener · Data modelling</span><span>04 / 09</span></div>
+</section>
+
+<!-- ================= PAGE 5 ================= -->
+<section class="page">
+  <div class="page-head"><span>Design a URL Shortener</span><span>Architecture</span></div>
+  <h2>5. Architecture diagram</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 980 620" role="img" aria-label="URL shortener architecture with icon-based nodes">
+      <rect x="0" y="0" width="980" height="620" fill="#fff"/>
+
+      <!-- client -->
+      <rect class="svg-box blue" x="18" y="245" width="135" height="92" rx="10"/>
+      <use href="#i-client" x="38" y="257" width="26" height="26" class="icon blue"/>
+      <text class="svg-text" x="95" y="269">Client</text>
+      <text class="svg-text tiny" x="95" y="288">browser / app</text>
+      <text class="svg-text tiny" x="95" y="306">create · redirect</text>
+
+      <!-- gateway -->
+      <rect class="svg-box warm" x="205" y="240" width="160" height="102" rx="10"/>
+      <use href="#i-gateway" x="223" y="252" width="26" height="26" class="icon amber"/>
+      <text class="svg-text" x="315" y="265">API gateway</text>
+      <text class="svg-text tiny" x="315" y="284">TLS · auth · rate limit</text>
+      <text class="svg-text tiny" x="315" y="302">load balancing</text>
+
+      <!-- url service -->
+      <rect class="svg-box strong" x="420" y="218" width="180" height="145" rx="11"/>
+      <use href="#i-server" x="440" y="230" width="26" height="26" class="icon teal"/>
+      <text class="svg-text" x="535" y="245">URL service</text>
+      <text class="svg-text tiny" x="535" y="264">stateless</text>
+      <text class="svg-text tiny" x="535" y="282">validate · create</text>
+      <text class="svg-text tiny" x="535" y="300">lookup · redirect</text>
+
+      <!-- id generator -->
+      <rect class="svg-box violet" x="705" y="45" width="180" height="90" rx="10"/>
+      <use href="#i-id" x="725" y="57" width="26" height="26" class="icon violet"/>
+      <text class="svg-text" x="825" y="70">ID generator</text>
+      <text class="svg-text tiny" x="825" y="89">counter / segments</text>
+      <text class="svg-text tiny" x="825" y="107">base62 encode</text>
+
+      <!-- kv store -->
+      <rect class="svg-box blue" x="705" y="215" width="180" height="100" rx="10"/>
+      <use href="#i-db" x="725" y="227" width="26" height="26" class="icon blue"/>
+      <text class="svg-text" x="825" y="240">KV store</text>
+      <text class="svg-text tiny" x="825" y="259">code → long URL</text>
+      <text class="svg-text tiny" x="825" y="277">sharded · replicated</text>
+
+      <!-- cache -->
+      <rect class="svg-box strong" x="705" y="365" width="180" height="96" rx="10"/>
+      <use href="#i-cache" x="725" y="377" width="26" height="26" class="icon teal"/>
+      <text class="svg-text" x="825" y="390">Cache</text>
+      <text class="svg-text tiny" x="825" y="409">hot codes · TTL</text>
+      <text class="svg-text tiny" x="825" y="427">negative cache</text>
+
+      <!-- queue / workers / analytics -->
+      <rect class="svg-box rose" x="420" y="455" width="170" height="78" rx="10"/>
+      <use href="#i-queue" x="438" y="467" width="26" height="26" class="icon rose"/>
+      <text class="svg-text" x="515" y="480">Queue / stream</text>
+      <text class="svg-text tiny" x="515" y="499">click events</text>
+      <text class="svg-text tiny" x="515" y="517">async</text>
+
+      <rect class="svg-box strong" x="640" y="455" width="155" height="78" rx="10"/>
+      <use href="#i-worker" x="658" y="467" width="26" height="26" class="icon teal"/>
+      <text class="svg-text" x="725" y="480">Workers</text>
+      <text class="svg-text tiny" x="725" y="499">aggregate clicks</text>
+
+      <rect class="svg-box blue" x="825" y="455" width="135" height="78" rx="10"/>
+      <use href="#i-chart" x="828" y="467" width="26" height="26" class="icon blue"/>
+      <text class="svg-text" x="892" y="480">Analytics DB</text>
+      <text class="svg-text tiny" x="892" y="499">counts · reports</text>
+
+      <!-- arrows -->
+      <path class="svg-line" d="M153 275 L205 275"/>
+      <text class="svg-label" x="179" y="265">1 request</text>
+      <path class="svg-line teal dashed" d="M205 305 C180 325 165 315 153 305"/>
+      <text class="svg-label" x="180" y="325">301/302</text>
+
+      <path class="svg-line" d="M365 275 L420 275"/>
+      <text class="svg-label" x="392" y="265">2 forward</text>
+
+      <path class="svg-line amber" d="M600 245 C650 245 660 100 705 100"/>
+      <text class="svg-label" x="655" y="165">3 next ID + code</text>
+
+      <path class="svg-line both-blue" d="M600 275 L705 275"/>
+      <text class="svg-label" x="650" y="265">4 write / read</text>
+
+      <path class="svg-line teal both" d="M600 325 C650 325 660 395 705 395"/>
+      <text class="svg-label" x="660" y="370">5 get / set / hit</text>
+
+      <path class="svg-line rose dashed" d="M510 363 L510 455"/>
+      <text class="svg-label" x="550" y="410">6 click event</text>
+      <path class="svg-line rose" d="M590 494 L640 494"/>
+      <path class="svg-line rose" d="M795 494 L825 494"/>
+
+      <rect x="18" y="570" width="942" height="34" rx="7" fill="#f5faf8" stroke="#d8ded6"/>
+      <text class="svg-text tiny" x="489" y="588">Read path: cache → KV on miss. Write path: ID → KV → cache. Click analytics is asynchronous and never blocks the redirect.</text>
+    </svg>
+    <figcaption>Figure 1 — The architecture. Icons mark clients, gateway, service, ID generation, storage, cache, queue, workers, and analytics.</figcaption>
+  </figure>
+
+  <div class="two-col">
+    <div class="card">
+      <span class="tag">Critical path</span>
+      <h3>Only what the redirect needs</h3>
+      <ul>
+        <li><strong>Gateway:</strong> TLS, auth, rate limit, routing.</li>
+        <li><strong>URL service:</strong> stateless; scales horizontally.</li>
+        <li><strong>KV store:</strong> O(1) lookup by code.</li>
+        <li><strong>Cache:</strong> absorbs hot-link traffic.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="tag">Off the critical path</span>
+      <h3>Async by design</h3>
+      <ul>
+        <li><strong>ID generator:</strong> only on create.</li>
+        <li><strong>Queue + workers:</strong> analytics.</li>
+        <li><strong>Analytics DB:</strong> counters and reports.</li>
+        <li>Analytics lag does not break redirects.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="page-foot"><span>Design a URL Shortener · Architecture</span><span>05 / 09</span></div>
+</section>
+
+<!-- ================= PAGE 6 ================= -->
+<section class="page">
+  <div class="page-head"><span>Design a URL Shortener</span><span>Write flow</span></div>
+  <h2>6. Write flow: create a short link</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 980 320" role="img" aria-label="URL shortener create flow with icon cards">
+      <rect x="0" y="0" width="980" height="320" fill="#fff"/>
+      <!-- step cards -->
+      <rect class="svg-box warm" x="20" y="75" width="160" height="130" rx="10"/>
+      <use href="#i-shield" x="86" y="87" width="28" height="28" class="icon amber"/>
+      <text class="svg-text" x="100" y="128">1 Validate</text>
+      <text class="svg-text tiny" x="100" y="148">scheme + domain</text>
+      <text class="svg-text tiny" x="100" y="166">expiry + abuse</text>
+
+      <rect class="svg-box warm" x="220" y="75" width="160" height="130" rx="10"/>
+      <use href="#i-id" x="286" y="87" width="28" height="28" class="icon amber"/>
+      <text class="svg-text" x="300" y="128">2 Generate code</text>
+      <text class="svg-text tiny" x="300" y="148">base62 / random</text>
+      <text class="svg-text tiny" x="300" y="166">uniqueness</text>
+
+      <rect class="svg-box warm" x="420" y="75" width="160" height="130" rx="10"/>
+      <use href="#i-db" x="486" y="87" width="28" height="28" class="icon amber"/>
+      <text class="svg-text" x="500" y="128">3 Persist mapping</text>
+      <text class="svg-text tiny" x="500" y="148">conditional put</text>
+      <text class="svg-text tiny" x="500" y="166">code → URL</text>
+
+      <rect class="svg-box warm" x="620" y="75" width="160" height="130" rx="10"/>
+      <use href="#i-cache" x="686" y="87" width="28" height="28" class="icon amber"/>
+      <text class="svg-text" x="700" y="128">4 Cache set</text>
+      <text class="svg-text tiny" x="700" y="148">best effort</text>
+      <text class="svg-text tiny" x="700" y="166">TTL</text>
+
+      <rect class="svg-box warm" x="820" y="75" width="140" height="130" rx="10"/>
+      <use href="#i-link" x="876" y="87" width="28" height="28" class="icon amber"/>
+      <text class="svg-text" x="890" y="128">5 Return</text>
+      <text class="svg-text tiny" x="890" y="148">201 Created</text>
+      <text class="svg-text tiny" x="890" y="166">short URL</text>
+
+      <path class="svg-line amber" d="M180 140 L220 140"/>
+      <path class="svg-line amber" d="M380 140 L420 140"/>
+      <path class="svg-line amber" d="M580 140 L620 140"/>
+      <path class="svg-line amber" d="M780 140 L820 140"/>
+
+      <path class="svg-line rose dashed" d="M500 205 L500 265 L700 265"/>
+      <text class="svg-label" x="600" y="278">collision → retry with a new code (custom alias → 409)</text>
+      <text class="svg-label" x="500" y="295">write must succeed before returning 201</text>
+    </svg>
+    <figcaption>Figure 2 — Create flow. A successful write is the source of truth; cache population is best-effort.</figcaption>
+  </figure>
+
+  <h3>What can go wrong</h3>
+  <ul>
+    <li><strong>Collision:</strong> retry with a new code; custom alias returns 409.</li>
+    <li><strong>Duplicate create:</strong> idempotency key or unique <code>(owner_id, long_url)</code>.</li>
+    <li><strong>ID service down:</strong> preallocate ranges per app instance or fall back to random codes.</li>
+    <li><strong>Partial failure:</strong> persist before returning success; never rely on cache as the source of truth.</li>
+    <li><strong>Malicious URL:</strong> validate scheme/domain, use safe-browsing/allowlist, rate-limit creates.</li>
+  </ul>
+
+  <div class="callout">
+    <span class="label">What to say</span>
+    <p>“I generate a unique code, write it with a conditional put, and only then return success. Cache population is an optimization, not the source of truth.”</p>
+  </div>
+
+  <div class="page-foot"><span>Design a URL Shortener · Write flow</span><span>06 / 09</span></div>
+</section>
+
+<!-- ================= PAGE 7 ================= -->
+<section class="page">
+  <div class="page-head"><span>Design a URL Shortener</span><span>Redirect flow</span></div>
+  <h2>7. Redirect flow: the hot path</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 980 390" role="img" aria-label="URL shortener redirect flow with cache hit and miss branches">
+      <rect x="0" y="0" width="980" height="390" fill="#fff"/>
+      <rect class="svg-box blue" x="18" y="120" width="125" height="90" rx="10"/>
+      <use href="#i-client" x="36" y="132" width="26" height="26" class="icon blue"/>
+      <text class="svg-text" x="80" y="145">Client</text>
+      <text class="svg-text tiny" x="80" y="164">GET /{code}</text>
+
+      <rect class="svg-box warm" x="185" y="120" width="145" height="90" rx="10"/>
+      <use href="#i-gateway" x="203" y="132" width="26" height="26" class="icon amber"/>
+      <text class="svg-text" x="257" y="145">Gateway</text>
+      <text class="svg-text tiny" x="257" y="164">route · rate limit</text>
+
+      <rect class="svg-box strong" x="370" y="120" width="155" height="90" rx="10"/>
+      <use href="#i-server" x="388" y="132" width="26" height="26" class="icon teal"/>
+      <text class="svg-text" x="447" y="145">URL service</text>
+      <text class="svg-text tiny" x="447" y="164">lookup</text>
+
+      <polygon class="svg-box warm" points="640,105 730,165 640,225 550,165"/>
+      <text class="svg-text tiny" x="640" y="158">cache</text>
+      <text class="svg-text tiny" x="640" y="174">hit?</text>
+
+      <rect class="svg-box strong" x="820" y="55" width="140" height="70" rx="9"/>
+      <use href="#i-link" x="838" y="67" width="24" height="24" class="icon teal"/>
+      <text class="svg-text" x="890" y="78">301 / 302</text>
+      <text class="svg-text tiny" x="890" y="97">Location header</text>
+
+      <rect class="svg-box blue" x="555" y="270" width="170" height="80" rx="9"/>
+      <use href="#i-db" x="573" y="282" width="26" height="26" class="icon blue"/>
+      <text class="svg-text" x="640" y="295">KV store</text>
+      <text class="svg-text tiny" x="640" y="314">code → URL</text>
+
+      <rect class="svg-box strong" x="800" y="270" width="160" height="80" rx="9"/>
+      <use href="#i-cache" x="818" y="282" width="26" height="26" class="icon teal"/>
+      <text class="svg-text" x="880" y="295">Set cache</text>
+      <text class="svg-text tiny" x="880" y="314">populate + TTL</text>
+
+      <rect class="svg-box rose" x="370" y="270" width="150" height="70" rx="9"/>
+      <use href="#i-queue" x="388" y="282" width="24" height="24" class="icon rose"/>
+      <text class="svg-text" x="445" y="295">Queue</text>
+      <text class="svg-text tiny" x="445" y="313">click event</text>
+
+      <path class="svg-line" d="M143 165 L185 165"/>
+      <text class="svg-label" x="164" y="155">1</text>
+      <path class="svg-line" d="M330 165 L370 165"/>
+      <text class="svg-label" x="350" y="155">2</text>
+      <path class="svg-line teal" d="M525 165 L550 165"/>
+      <text class="svg-label" x="537" y="155">3</text>
+
+      <path class="svg-line teal" d="M680 140 C730 120 770 90 820 90"/>
+      <text class="svg-label" x="748" y="105">hit</text>
+      <path class="svg-line blue dashed" d="M640 225 L640 270"/>
+      <text class="svg-label" x="665" y="250">miss</text>
+      <path class="svg-line blue" d="M725 310 L800 310"/>
+      <path class="svg-line teal" d="M880 270 L880 125"/>
+      <text class="svg-label" x="905" y="205">serve</text>
+
+      <path class="svg-line rose dashed" d="M445 190 L445 270"/>
+      <text class="svg-label" x="475" y="235">async click</text>
+
+      <text class="svg-label" x="640" y="375">Hit: one cache read. Miss: KV read + cache populate. Analytics never blocks the redirect.</text>
+    </svg>
+    <figcaption>Figure 3 — Redirect flow. The decision is explicit: cache hit or miss; analytics runs separately.</figcaption>
+  </figure>
+
+  <div class="two-col">
+    <div class="card">
+      <span class="tag">Happy path</span>
+      <h3>Cache hit</h3>
+      <ul>
+        <li>Gateway routes the request.</li>
+        <li>URL service reads the code from cache.</li>
+        <li>Return 301/302 immediately.</li>
+        <li>Publish click event without waiting.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="tag">Fallback</span>
+      <h3>Cache miss</h3>
+      <ul>
+        <li>Read the KV store by code.</li>
+        <li>Repopulate cache with a TTL.</li>
+        <li>Return the redirect; never block on analytics.</li>
+        <li>404 unknown / 410 expired.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <span class="label">Hot-link protection</span>
+    <p>Cache hot codes, use request coalescing or a short lock against stampedes, add jitter to TTLs, and negative-cache missing codes briefly. A viral link should not turn into thousands of identical KV reads.</p>
+  </div>
+
+  <div class="page-foot"><span>Design a URL Shortener · Redirect flow</span><span>07 / 09</span></div>
+</section>
+
+<!-- ================= PAGE 8 ================= -->
+<section class="page">
+  <div class="page-head"><span>Design a URL Shortener</span><span>Optimisation &amp; trade-offs</span></div>
+  <h2>8. Optimisation and trade-offs</h2>
+  <h3>What to optimise, and in what order</h3>
+  <ol>
+    <li><strong>Read path first:</strong> cache hot codes; keep the redirect to one cache lookup.</li>
+    <li><strong>KV sharding:</strong> shard by hash(code) and replicate each shard across zones.</li>
+    <li><strong>Write path:</strong> preallocate ID ranges; use conditional writes for uniqueness.</li>
+    <li><strong>Analytics:</strong> queue/stream clicks; aggregate offline; never block redirects.</li>
+    <li><strong>Abuse:</strong> rate-limit creates, validate destinations, block malicious domains.</li>
+  </ol>
+
+  <table class="table">
+    <thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead>
+    <tbody>
+      <tr><td>Cache-aside</td><td>Low redirect latency; less KV load</td><td>Staleness; invalidation complexity</td></tr>
+      <tr><td>301 redirect</td><td>Fewer origin requests; browser/CDN caching</td><td>Less click visibility; changes can be ignored by clients</td></tr>
+      <tr><td>302 redirect</td><td>Control, expiry, analytics visibility</td><td>More traffic reaches the service</td></tr>
+      <tr><td>Counter + base62</td><td>No collisions; short codes</td><td>Central ID service or range coordination</td></tr>
+      <tr><td>Random codes</td><td>Hard to guess; no central counter</td><td>Collision checks and retries</td></tr>
+      <tr><td>Async analytics</td><td>Redirect stays fast</td><td>Eventual counts; queue/worker complexity</td></tr>
+      <tr><td>Sharding</td><td>Scales storage and write throughput</td><td>Cross-shard operations are harder</td></tr>
+      <tr><td>Multi-region reads</td><td>Lower latency near users</td><td>Replication lag; writes still need a primary</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Failure modes</h3>
+  <table class="table">
+    <thead><tr><th>Failure</th><th>Impact</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Cache node down</td><td>Higher KV traffic and latency</td><td>Replicas, timeouts, KV fallback</td></tr>
+      <tr><td>Hot KV shard</td><td>One shard saturates</td><td>Cache hot codes; split/salt; isolate viral links</td></tr>
+      <tr><td>ID generator down</td><td>New links fail</td><td>Preallocated ranges; retry; random fallback</td></tr>
+      <tr><td>Queue backlog</td><td>Analytics lag only</td><td>Scale workers; sample low-value events</td></tr>
+      <tr><td>KV failover</td><td>Brief read/write errors</td><td>Replica promotion; retries with backoff</td></tr>
+      <tr><td>Expired/malicious link</td><td>Bad redirect or abuse</td><td>Expiry check; safe-browsing; rate limits</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <span class="label">Monitoring</span>
+    <p>Redirect p99, cache hit ratio, KV latency/errors, hot-shard QPS, ID failures, queue lag, 404/410 rate, and abuse/rate-limit rejections.</p>
+  </div>
+
+  <div class="page-foot"><span>Design a URL Shortener · Optimisation</span><span>08 / 09</span></div>
+</section>
+
+<!-- ================= PAGE 9 ================= -->
+<section class="page">
+  <div class="page-head"><span>Design a URL Shortener</span><span>Follow-ups &amp; traps</span></div>
+  <h2>9. Follow-ups — one-line answers</h2>
+  <div class="oneline"><strong>Custom alias collision?</strong> Use a conditional put on the alias; return 409 instead of overwriting.</div>
+  <div class="oneline"><strong>Link expiry?</strong> Store <code>expires_at</code>, check lazily on redirect, return 410, and reclaim space with a cleanup job.</div>
+  <div class="oneline"><strong>Deleted link still cached?</strong> Soft-delete, invalidate the cache, and keep a short negative-cache entry.</div>
+  <div class="oneline"><strong>Hot/viral link?</strong> Cache it, coalesce requests, add a local cache layer, and rate-limit abusive traffic.</div>
+  <div class="oneline"><strong>Analytics without slowing redirects?</strong> Publish a click event to a queue/stream; aggregate asynchronously.</div>
+  <div class="oneline"><strong>Multi-region?</strong> Route users to a nearby read cache; keep writes in a primary region and replicate asynchronously.</div>
+  <div class="oneline"><strong>Malicious destinations?</strong> Validate scheme/domain, use safe-browsing/allowlists, rate-limit creates, and block reported domains.</div>
+  <div class="oneline"><strong>ID generation down?</strong> Preallocate ranges per instance; if exhausted, fall back to random codes with retries.</div>
+  <div class="oneline"><strong>301 or 302?</strong> 301 is cacheable and fewer origin hits; 302 keeps control and analytics visibility.</div>
+  <div class="oneline"><strong>Cache down?</strong> Fall back to the KV store with timeouts and a circuit breaker; serve stale if the product allows it.</div>
+  <div class="oneline"><strong>Shard key?</strong> Hash <code>code</code> for even distribution; avoid keys that create one hot shard.</div>
+  <div class="oneline"><strong>Duplicate create?</strong> Use an idempotency key or a unique <code>(owner_id, long_url)</code> constraint.</div>
+  <div class="oneline"><strong>Storage growth?</strong> Expire links, archive cold mappings, compress values, and avoid storing media in the KV store.</div>
+  <div class="oneline"><strong>How many servers?</strong> Peak QPS ÷ safe per-server QPS, then add 30–50% headroom.</div>
+
+  <h3 style="margin-top:14px">Traps</h3>
+  <div class="callout rose">
+    <span class="label">Avoid these</span>
+    <ul>
+      <li>Forgetting collision handling.</li>
+      <li>Returning a short URL before the mapping is stored.</li>
+      <li>Writing analytics synchronously on the redirect path.</li>
+      <li>No cache fallback when the cache is down.</li>
+      <li>Using a raw auto-increment ID, leaking volume and order.</li>
+      <li>Assuming 301 and 302 are interchangeable for analytics.</li>
+      <li>Ignoring malicious URLs, expiry, and abuse.</li>
+      <li>Sharding before a single KV store is the measured bottleneck.</li>
+    </ul>
+  </div>
+
+  <div class="callout" style="margin-top:8px">
+    <span class="label">Closing answer</span>
+    <p>“The design is a read-optimized key-value system: a unique short code maps to a long URL, the redirect path is cache-first with a KV fallback, and analytics is asynchronous. The main trade-offs are 301 vs 302, counter vs random codes, and how much cache staleness the product can tolerate.”</p>
+  </div>
+
+  <div class="page-foot"><span>Design a URL Shortener · Follow-ups</span><span>09 / 09</span></div>
+</section>
+
+</body>
+</html>

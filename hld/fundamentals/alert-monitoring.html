@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alert &amp; Monitoring — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 46 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Alert &amp; Monitoring</h1>
+    <p class="dek">Observability · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/alert-monitoring">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Two ways alerting fails</a>
+<a href="#s2">Monitoring vs alerting</a>
+<a href="#s3">What makes an alert worth sending</a>
+<a href="#s4">The four golden signals</a>
+<a href="#s5">Symptoms vs causes</a>
+<a href="#s6">Thresholds, baselines, and anomalies</a>
+<a href="#s7">SLOs and error budgets</a>
+<a href="#s8">Severity, routing, and paging</a>
+<a href="#s9">Writing an alert and its runbook</a>
+<a href="#s10">Ownership and on-call</a>
+<a href="#s11">Alert fatigue and noise control</a>
+<a href="#s12">Dashboards, telemetry, and the feedback loop</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Monitoring records what the system is doing; alerting decides which of those facts is worth waking a human for. A good alerting system fires quickly when something important breaks and stays quiet the rest of the time.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Monitoring</dt><dd>Continuous collection, storage, and querying of metrics, logs, and traces so you can understand system behavior over time.</dd></div><div class="term"><dt>Alerting</dt><dd>Rules evaluated against monitored data that turn a condition into a notification routed to a responsible human.</dd></div><div class="term"><dt>SLI</dt><dd>Service level indicator: a measured ratio of good events to valid events, such as successful requests or fast requests.</dd></div><div class="term"><dt>SLO</dt><dd>Service level objective: the target range for an SLI over a window, for example 99.9% of requests succeeding over 30 days.</dd></div><div class="term"><dt>Error budget</dt><dd>The unreliability an SLO permits (100% minus the SLO), spent by incidents and used to balance reliability work against feature work.</dd></div><div class="term"><dt>Golden signals</dt><dd>Latency, traffic, errors, and saturation — the four signals that describe the health of most request-serving systems.</dd></div><div class="term"><dt>Symptom-based alert</dt><dd>An alert on user-visible pain such as failed checkouts or slow search, rather than on an internal component metric.</dd></div><div class="term"><dt>Alert fatigue</dt><dd>Desensitization caused by too many low-value alerts, so responders start ignoring the pager and miss the real one.</dd></div><div class="term"><dt>Runbook</dt><dd>The documented steps an on-call responder follows for a specific alert: verify, mitigate, escalate, communicate.</dd></div><div class="term"><dt>Burn rate</dt><dd>How quickly the error budget is being consumed relative to the SLO window; fast burn means page now, slow burn means a ticket.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Two ways alerting fails</h2>
+<p class="lede">Alerting can go wrong in two opposite directions. Both end with the same result: nobody responds when it matters.</p>
+<ul><li><strong>Too few alerts:</strong> the payment service starts failing on a Saturday night, nothing fires, and the team learns about it from customer complaints and a revenue drop.</li><li><strong>Too many alerts:</strong> on-call receives dozens of pages a night for brief CPU spikes and disks at 70% that resolve themselves, so the engineer starts ignoring the pager.</li><li>Once ignoring becomes a habit, a real outage alert arrives and gets ignored with the rest.</li><li>Both failures come from the same root cause: alerts were not designed around what a human can and should act on.</li><li>The target is not maximum coverage or minimum noise; it is fast notification for important breakage and silence otherwise.</li><li>Every alert spends attention and credibility. A page that leads nowhere makes the next page less likely to be read.</li><li>Track alert quality — how many pages were actionable, how many led to a change — rather than raw alert volume.</li></ul>
+
+
+<div class="note">An alert is a request for human action. If no action follows, it should not have paged anyone.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Monitoring vs alerting</h2>
+<p class="lede">Monitoring is the data layer. Alerting is the decision layer built on top of it. Confusing the two produces dashboards nobody reads and alerts nobody trusts.</p>
+<ul><li>Monitoring is continuous collection and exploration: metrics, logs, traces, dashboards, and ad-hoc queries.</li><li>Alerting evaluates rules against that data and routes the outcome to a person or to automation.</li><li>Monitoring answers <em>what is happening</em>; alerting answers <em>does a human need to act now</em>.</li><li>Dashboards support investigation; they are not a notification mechanism, because nobody watches them during an incident they do not know about.</li><li>You can monitor without alerting (capacity trends, cost analysis) and alert without good dashboards — the second is how responders end up blind.</li><li>Every alert should link to the dashboard or query that explains it, so context is one click away.</li><li>Monitoring data also has a cost: cardinality, retention, and storage. Keep high-cardinality detail in logs and traces, not metric labels.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Monitoring</th><th>Alerting</th></tr></thead><tbody><tr><td>Question answered</td><td>What is the system doing?</td><td>Does someone need to act now?</td></tr>
+<tr><td>Output</td><td>Metrics, logs, traces, dashboards</td><td>Notification with severity and context</td></tr>
+<tr><td>Audience</td><td>Anyone investigating</td><td>The owning on-call responder</td></tr>
+<tr><td>Timing</td><td>Continuous, pull-based</td><td>Event-driven, push-based</td></tr>
+<tr><td>Failure mode</td><td>Data nobody looks at</td><td>Noise that gets ignored</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What makes an alert worth sending</h2>
+<ul><li><strong>Actionable:</strong> there is a documented action that changes the outcome. If the only response is to watch it, it is not an alert.</li><li><strong>Urgent:</strong> it cannot wait until business hours. If it can, it belongs in a ticket queue, not a pager.</li><li><strong>Relevant:</strong> it reflects user-visible pain, or a condition that will cause that pain soon.</li><li><strong>Owned:</strong> a specific team is responsible and has the access to fix it. Unowned alerts decay into noise.</li><li><strong>Novel:</strong> it adds information beyond what is already firing. Duplicate alerts on the same failure train the responder to ignore both.</li><li><strong>Human-required:</strong> if automation can safely resolve it, automate it instead of waking someone.</li><li><strong>Accurate enough:</strong> a high false-positive rate destroys trust faster than a missed edge case; both matter, but trust is harder to rebuild.</li></ul>
+
+<div class="flow"><span class="flow-step">Detect the condition</span><span class="flow-arrow">→</span><span class="flow-step">Decide it needs a human</span><span class="flow-arrow">→</span><span class="flow-step">Route to the owner</span><span class="flow-arrow">→</span><span class="flow-step">Act using the runbook</span><span class="flow-arrow">→</span><span class="flow-step">Record and review</span></div>
+<div class="note">A useful filter: <em>who</em> should act, <em>what</em> should they do, and <em>what happens</em> if nobody does? If any answer is missing, the alert is not ready.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The four golden signals</h2>
+<p class="lede">For a request-serving system, four signals cover most of what users experience. They work as a checklist when instrumenting a new service.</p>
+<ul><li><strong>Latency:</strong> track the distribution, not the average. Report p95 and p99, because the tail is what users remember.</li><li>Separate latency of successful requests from failed ones; a fast 500 pulls the average down and hides the problem.</li><li><strong>Traffic:</strong> demand on the system — requests per second, concurrent connections, queue publishes. It explains movement in every other signal.</li><li><strong>Errors:</strong> explicit failures such as 5xx responses, and implicit ones such as wrong content, policy violations, or silently dropped work.</li><li><strong>Saturation:</strong> how full the most constrained resource is — CPU, memory, connection pool, disk, queue depth. Saturation predicts failures before they appear as errors.</li><li>Golden signals describe the service from the user's side; internal resource metrics explain why they moved.</li><li>RED (rate, errors, duration) and USE (utilization, saturation, errors) are naming conventions for the same reasoning; pick one and be consistent.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Signal</th><th>Question</th><th>Example measurement</th><th>Typical alert</th></tr></thead><tbody><tr><td>Latency</td><td>How long do requests take?</td><td>p95 / p99 request duration</td><td>Latency above the SLO for a sustained window</td></tr>
+<tr><td>Traffic</td><td>How much demand is there?</td><td>Requests per second, active connections</td><td>Sharp drop or spike against the expected baseline</td></tr>
+<tr><td>Errors</td><td>How often do requests fail?</td><td>5xx rate, failed background jobs</td><td>Error rate consuming the error budget</td></tr>
+<tr><td>Saturation</td><td>What is closest to its limit?</td><td>Pool usage, queue depth, CPU, disk</td><td>Predicted exhaustion, not 100% reached</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Symptoms vs causes</h2>
+<p class="lede">A symptom is what the user feels. A cause is why it happens. The distinction decides how many pages one incident produces.</p>
+<ul><li>Symptom: checkout fails, search is slow, logins time out. Cause: one pod is CPU-throttled, a cache is evicting, a dependency is slow.</li><li>Paging on causes produces many alerts for one incident, because every component notices the same failure.</li><li>Paging on symptoms produces roughly one alert per incident, which is what the responder can actually handle.</li><li>Cause metrics still matter — attached as context to the symptom alert, and visible on the dashboard used to diagnose it.</li><li>Some causes deserve proactive alerts when they reliably precede impact: certificate expiry, disk filling, replication lag, queue backlog growth.</li><li>Rule of thumb: page on symptoms, file tickets on slow-burning causes, and graph everything else.</li><li>When you find a cause that always precedes a symptom, encode it as a leading indicator rather than another page.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Symptom alert</th><th>Cause alert</th></tr></thead><tbody><tr><td>Example</td><td>Error rate above SLO</td><td>CPU above 90% on one pod</td></tr>
+<tr><td>User impact</td><td>Directly visible</td><td>None yet, may never be</td></tr>
+<tr><td>Pages per incident</td><td>One</td><td>One per affected component</td></tr>
+<tr><td>Best use</td><td>Paging</td><td>Dashboards, diagnosis, leading indicators</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Thresholds, baselines, and anomalies</h2>
+<ul><li><strong>Static thresholds</strong> are simple and explainable: an error rate above a limit for a duration. Everyone can reason about why it fired.</li><li>Thresholds need a duration. A single spike that self-heals is not an incident, and a rule with no <code>for</code> window pages on every blip.</li><li>Static thresholds break under traffic patterns: a value that is normal at peak is alarming at 3 a.m., and gradual growth silently crosses the line.</li><li><strong>Baseline or relative alerts</strong> compare against the same time last week or a moving window. They adapt, but they can hide an absolute failure when the baseline is also broken.</li><li><strong>Anomaly detection</strong> finds patterns nobody wrote a rule for, but it produces alerts that are hard to explain and require data to tune. Use it for investigation before trusting it to page.</li><li><strong>Multi-window conditions</strong> combine a short window (is it burning now?) with a long window (is it real?) to cut both false positives and slow detection.</li><li>Always put the current value, the threshold, and the window in the alert text; otherwise the responder starts by re-deriving the rule.</li><li>Choose thresholds from what users need (the SLO), not from what the graph usually looks like.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Strength</th><th>Weakness</th><th>Best use</th></tr></thead><tbody><tr><td>Static threshold</td><td>Explainable, predictable</td><td>Brittle to traffic patterns</td><td>Hard limits: disk, cert expiry, error budget</td></tr>
+<tr><td>Baseline / relative</td><td>Adapts to daily and weekly cycles</td><td>Hides absolute failure, needs history</td><td>Traffic and throughput shifts</td></tr>
+<tr><td>Anomaly detection</td><td>Finds unknown patterns</td><td>Unexplainable, needs tuning</td><td>Investigation, capacity signals</td></tr>
+<tr><td>Multi-window burn rate</td><td>Fast and stable at once</td><td>More complex to configure</td><td>SLO paging</td></tr></tbody></table></div>
+
+<div class="note">Every rule should have an owner, a duration, a severity, and a runbook link. A rule without those is a graph with a notification attached.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>SLOs and error budgets</h2>
+<p class="lede">SLOs turn reliability from an opinion into a measurement, and give alerting a definition of <em>broken enough to act on</em>.</p>
+<ul><li>An <strong>SLI</strong> is a ratio of good events to valid events: successful requests, fast requests, fresh data, correct results.</li><li>An <strong>SLO</strong> is a target for that SLI over a window. It states what <em>reliable enough</em> means for this service and its users.</li><li>The <strong>error budget</strong> is 1 minus the SLO. It makes unreliability finite and shared between feature velocity and operational work.</li><li>Alert on <strong>burn rate</strong>, not raw error rate: how fast the budget is being consumed relative to the window.</li><li>Fast burn (budget disappearing in hours) pages immediately; slow burn (budget drifting over days) creates a ticket.</li><li>When the budget is exhausted, freeze risky changes and spend engineering time on reliability until it recovers.</li><li>Keep the number of SLOs small and user-centric. Internal component SLOs exist to explain, not to page.</li><li>An SLA is a contract with consequences and is usually looser than the internal SLO; do not use it as your operating target.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>SLI type</th><th>Measures</th><th>Why it matters</th></tr></thead><tbody><tr><td>Availability</td><td>Share of requests that succeed</td><td>Catches outages and dependency failures</td></tr>
+<tr><td>Latency</td><td>Share of requests faster than a threshold</td><td>Averages hide the slow tail users feel</td></tr>
+<tr><td>Freshness</td><td>How current the data is</td><td>Critical for feeds, search, and analytics</td></tr>
+<tr><td>Correctness</td><td>Share of results that are right</td><td>Silent data bugs are invisible to uptime checks</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Define the SLI</span><span class="flow-arrow">→</span><span class="flow-step">Set the SLO and window</span><span class="flow-arrow">→</span><span class="flow-step">Compute the error budget</span><span class="flow-arrow">→</span><span class="flow-step">Alert on burn rate</span><span class="flow-arrow">→</span><span class="flow-step">Review monthly</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Severity, routing, and paging</h2>
+<ul><li>Severity should reflect user impact and urgency, not which metric fired or how alarming the graph looks.</li><li>Typical tiers: <strong>page</strong> (wake someone), <strong>ticket</strong> (next business day), <strong>log/dashboard</strong> (no notification).</li><li>Routing sends each severity to the right owner: an on-call rotation for pages, a team queue for tickets.</li><li>Escalation must be time-based. An unacknowledged page should reach a secondary responder without the first one having to ask.</li><li>Deduplicate and group related alerts into one notification per incident; otherwise twenty components page for one broken dependency.</li><li>Inhibit downstream alerts when an upstream dependency is known to be down, so the responder sees the cause, not its echoes.</li><li>Silence during planned maintenance with an automatic expiry, so a forgotten silence cannot hide the next real outage.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Severity</th><th>Response</th><th>Example</th></tr></thead><tbody><tr><td>Page</td><td>Immediate, 24/7</td><td>Checkout failures, data loss risk, security exposure</td></tr>
+<tr><td>Ticket</td><td>Next business day</td><td>Slow budget burn, capacity trend, expiring certificate</td></tr>
+<tr><td>Info</td><td>No notification</td><td>Deploy completed, autoscaling event</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Writing an alert and its runbook</h2>
+<ul><li>An alert should say what broke, who is affected, since when, the current value, and link to the dashboard and runbook.</li><li>A runbook starts with verification: how to confirm the alert is real and not a monitoring artifact.</li><li>Then containment and mitigation: roll back, fail over, scale out, disable a feature flag. Restore service before root-causing.</li><li>Include the exact queries and commands, because a responder at 3 a.m. should not have to rediscover them.</li><li>Name the owner and the escalation path in the runbook, not only in the alert payload.</li><li>Review runbooks after every incident; a stale runbook is worse than none because it actively misleads.</li><li>Keep the runbook short enough to follow under pressure and link to deeper docs rather than inlining everything.</li></ul>
+
+<div class="flow"><span class="flow-step">Alert fires</span><span class="flow-arrow">→</span><span class="flow-step">Acknowledge</span><span class="flow-arrow">→</span><span class="flow-step">Verify with the runbook</span><span class="flow-arrow">→</span><span class="flow-step">Mitigate</span><span class="flow-arrow">→</span><span class="flow-step">Communicate status</span><span class="flow-arrow">→</span><span class="flow-step">Postmortem and tune</span></div>
+<pre class="code"><code>alert: CheckoutErrorBudgetFastBurn
+severity: page
+owner: payments-oncall
+condition: burn_rate{service=&quot;checkout&quot;,window=&quot;1h&quot;} &gt; 14.4
+summary: Checkout is failing fast; error budget burning
+runbook: https://runbooks.example/checkout-errors
+dashboard: https://dash.example/checkout
+links: [traces, recent deploys]</code></pre>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Ownership and on-call</h2>
+<ul><li>Every alert needs an owning team and a service catalog entry. An alert owned by <em>everyone</em> is owned by no one.</li><li>The team that builds and operates the service owns its SLOs, alerts, and runbooks — not a separate monitoring team.</li><li>Rotations need a primary, a secondary, a documented handoff, and an escalation policy that works without the primary.</li><li>On-call load is a design constraint: a team paged constantly has no capacity left to fix the causes.</li><li>New alert rules should be reviewed by the owning team before they are allowed to page anyone.</li><li>Track pages per shift, after-hours pages, and the share that led to action; these are team health metrics, not vanity metrics.</li><li>Compensation, follow-the-sun rotations, and an explicit no-heroics norm affect alert quality more than most tooling choices.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Alert fatigue and noise control</h2>
+<ul><li>Fatigue is cumulative. Each ignored alert lowers the response to the next one, including the one that matters.</li><li>Common causes: paging on causes, thresholds that are too tight, missing durations, duplicate alerts, and alerts nobody can act on.</li><li>Fix in order: delete it, downgrade it, group it, or automate it. Adding another dashboard does not fix noise.</li><li>Audit every page: did it need a human? If not, change or remove the rule that produced it.</li><li>Use hysteresis and <code>for</code> durations so flapping conditions fire once instead of dozens of times.</li><li>Review the noisiest rules weekly and the missed incidents after every postmortem; both directions of error need attention.</li><li>Missing alerts are found with game days, synthetic checks, and incident review — not by waiting for customers to report them.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Dashboards, telemetry, and the feedback loop</h2>
+<ul><li>Metrics answer <em>how much and how often</em>, logs answer <em>what exactly happened</em>, traces answer <em>where the time went</em>. They are complementary, not interchangeable.</li><li>Organize dashboards by service and by user journey, with golden signals first and resource detail below.</li><li>Instrument consistently: the same metric names, labels, and units across services, or cross-service comparison breaks.</li><li>High-cardinality labels such as user ID or request ID belong in logs and traces, not in metric dimensions.</li><li>Synthetic checks catch failures that internal metrics cannot see: DNS, routing, certificates, and third-party dependencies.</li><li>Every incident should produce a timeline, action items, and changes to alerts or runbooks — otherwise the same page returns next month.</li><li>Review SLO performance and alert rules on a schedule, and delete rules that no longer earn their noise.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Telemetry</th><th>Best for</th><th>Cost driver</th></tr></thead><tbody><tr><td>Metrics</td><td>Trends, alerting, aggregation</td><td>Cardinality and retention</td></tr>
+<tr><td>Logs</td><td>Detail, debugging, audit</td><td>Volume and retention</td></tr>
+<tr><td>Traces</td><td>Request flow, dependency latency</td><td>Sampling and storage</td></tr>
+<tr><td>Synthetic checks</td><td>Availability from the user's path</td><td>Check frequency and locations</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Fewer alerts</strong> reduce fatigue and protect trust but risk missing real failures; close the gap with symptom-based SLO alerts and synthetic checks.</li><li><strong>Symptom-based paging</strong> gives one alert per incident but detects later than alerting on a known cause that reliably precedes impact.</li><li><strong>Static thresholds</strong> are explainable and easy to audit but brittle to traffic patterns; baselines adapt but can normalize a broken state.</li><li><strong>Anomaly detection</strong> catches unknown patterns but produces alerts responders cannot explain, so it is safer for investigation than for paging.</li><li><strong>Short detection windows</strong> page faster but flap; long windows are stable but let users suffer longer. Multi-window burn rates trade configuration complexity for both.</li><li><strong>Tight SLOs</strong> improve the user experience but consume budget quickly and force operational work; loose SLOs hide degradation until it is severe.</li><li><strong>Aggressive grouping and inhibition</strong> reduce pages but can suppress a distinct second incident hidden inside the first.</li><li><strong>Automated remediation</strong> removes pages but adds a new failure mode; it needs guardrails, audit, and a human path when it fails.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the difference between monitoring and alerting?</summary><div class="answer"><p>Monitoring is the collection and exploration of telemetry — metrics, logs, traces, dashboards. Alerting evaluates rules over that telemetry and notifies a human when action is needed. Monitoring tells you what the system is doing; alerting decides whether it is bad enough to interrupt someone.</p></div></details>
+<details><summary>2. What are the four golden signals?</summary><div class="answer"><p><strong>Latency</strong> (especially p95/p99, separated by success and failure), <strong>traffic</strong> (demand), <strong>errors</strong> (explicit failures and implicit wrong results), and <strong>saturation</strong> (how full the most constrained resource is). They are a checklist for instrumenting any request-serving service.</p></div></details>
+<details><summary>3. Should you alert on symptoms or causes?</summary><div class="answer"><p>Page on symptoms, because they map one-to-one with user impact and produce one page per incident. Use cause metrics as context on the dashboard and as leading indicators for failure modes that reliably precede impact, such as certificate expiry or a filling disk.</p></div></details>
+<details><summary>4. What makes an alert good?</summary><div class="answer"><p>It is actionable, urgent, tied to user impact, owned by a specific team, non-duplicative, and ideally something automation cannot safely handle. It includes the current value, threshold, window, dashboard link, and runbook. If the correct response is to ignore it, it should not exist.</p></div></details>
+<details><summary>5. How do SLOs improve alerting?</summary><div class="answer"><p>An SLO defines what <em>reliable enough</em> means, so alerts fire on user-relevant thresholds instead of arbitrary metric limits. The error budget turns unreliability into a finite resource, and burn-rate alerting detects both fast outages and slow degradation with one consistent rule.</p></div></details>
+<details><summary>6. What is an error budget and how do you use it?</summary><div class="answer"><p>It is 100% minus the SLO — the amount of unreliability the service is allowed over the window. Spend it on releases and risk; when it is exhausted, freeze risky changes and prioritize reliability work. It turns reliability debates into a shared, measurable decision.</p></div></details>
+<details><summary>7. What is burn-rate alerting?</summary><div class="answer"><p>Instead of alerting on an instantaneous error rate, you measure how fast the error budget is being consumed relative to the SLO window. A high burn rate over a short window pages immediately; a low burn rate over a long window opens a ticket. Multi-window rules combine both to catch fast and slow incidents without excess noise.</p></div></details>
+<details><summary>8. When would you use a static threshold versus anomaly detection?</summary><div class="answer"><p>Use static thresholds for hard limits and SLO-derived conditions where explainability matters: disk space, certificate expiry, error-budget burn. Use anomaly detection for exploration and capacity signals where no clear limit exists, but avoid paging on it until the alerts are proven explainable and accurate.</p></div></details>
+<details><summary>9. How do you reduce alert fatigue?</summary><div class="answer"><p>Delete non-actionable alerts, downgrade slow-burn conditions to tickets, add durations and hysteresis, deduplicate and group by incident, inhibit downstream alerts, and automate remediation where it is safe. Then audit pages regularly against the question: did this need a human?</p></div></details>
+<details><summary>10. What belongs in a runbook?</summary><div class="answer"><p>How to verify the alert is real, how to contain and mitigate, how to escalate, how to communicate status, and links to dashboards, queries, and deeper docs. Mitigation comes before root cause. The runbook names its owner and is updated after incidents.</p></div></details>
+<details><summary>11. Who should own an alert?</summary><div class="answer"><p>The team that builds and operates the service, with a named rotation and an escalation policy. Ownership must be recorded in a service catalog, not implied. Unowned alerts either get ignored or get routed to a team that cannot fix them.</p></div></details>
+<details><summary>12. How do you catch failures that never fire an alert?</summary><div class="answer"><p>Use synthetic checks from the user's path, game days that inject failures, SLO review, and postmortems that ask what monitoring should have caught. Also alert on the absence of expected signals — a service that stops reporting is itself a failure.</p></div></details>
+<details><summary>13. What would you alert on for a payment service?</summary><div class="answer"><p>Symptoms first: payment success rate and latency against the SLO, error-budget burn, and a drop in successful transactions versus the expected baseline. Then leading indicators as tickets or context: dependency error rates, queue backlog, expiring certificates, and reconciliation mismatches. Each page links to a runbook that starts with verifying real payment impact.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Alerting on every CPU spike or a disk at 70%, which trains responders to ignore the pager.</li><li>Paging on causes so a single incident produces twenty pages across components.</li><li>Setting thresholds with no duration, so every brief spike becomes an incident.</li><li>Treating dashboards as alerting and assuming someone is watching them.</li><li>Leaving alerts unowned or routed to a team without the access to fix the problem.</li><li>Never deleting or downgrading alerts; the rule set only grows.</li><li>Assuming silence means health when the user journey is not actually monitored.</li><li>Using the SLA as the operating target instead of a tighter internal SLO.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="logging.html"><span>← Previous</span><strong>Logging</strong></a><a class="next" href="jwt.html"><span>Next →</span><strong>JWT</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/alert-monitoring">AlgoMaster — Alert &amp; Monitoring</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

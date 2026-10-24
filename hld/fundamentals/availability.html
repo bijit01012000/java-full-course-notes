@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Availability — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 04 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Availability</h1>
+    <p class="dek">Core Concepts · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/availability">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">What availability means</a>
+<a href="#s3">Measuring availability</a>
+<a href="#s4">The nines of availability</a>
+<a href="#s5">Components in series</a>
+<a href="#s6">Components in parallel</a>
+<a href="#s7">Why independence matters</a>
+<a href="#s8">Active-passive redundancy</a>
+<a href="#s9">Active-active redundancy</a>
+<a href="#s10">Spreading across locations</a>
+<a href="#s11">Handling overload with queues</a>
+<a href="#s12">Containing cascading failures</a>
+<a href="#s13">Putting it together</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Availability is how often users can actually reach and use the system — engineered by removing single points of failure, adding redundancy that survives correlated failures, and containing the blast radius when a dependency breaks.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Availability</dt><dd>The fraction of time, or the fraction of requests, for which users can successfully access and use the system.</dd></div><div class="term"><dt>Reliability</dt><dd>Whether the system continues to behave correctly over time, without wrong results, lost data, or duplication.</dd></div><div class="term"><dt>Nines</dt><dd>A shorthand for availability targets: 99.9% is three nines, 99.99% is four, and each additional nine cuts allowed downtime by about ten times.</dd></div><div class="term"><dt>Series dependency</dt><dd>A component that every request must pass through; if it fails, the request fails, so availability multiplies downward.</dd></div><div class="term"><dt>Redundancy</dt><dd>A spare component or path that can take over when the primary fails, converting a single failure into a survivable one.</dd></div><div class="term"><dt>Failover</dt><dd>The process of detecting a failed primary, promoting a standby, and redirecting traffic to it.</dd></div><div class="term"><dt>Split-brain</dt><dd>A failure mode where two nodes both believe they are primary and accept writes, risking divergent data.</dd></div><div class="term"><dt>Active-active</dt><dd>A redundant setup where multiple nodes serve traffic simultaneously behind a load balancer.</dd></div><div class="term"><dt>Health check</dt><dd>A probe that tests whether an instance can actually serve requests, used by a load balancer to remove unhealthy nodes.</dd></div><div class="term"><dt>Circuit breaker</dt><dd>A protection that stops calling a failing dependency after a threshold, then probes cautiously for recovery.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">An online store runs on one application server connected to one database. Browsing, carts, and checkout work until the application server crashes.</p>
+<ul><li>The database is still healthy, but customers cannot reach the store because the only path to it is gone.</li><li>A system can be fast and scalable and still fail users if one required component takes the whole thing down.</li><li>Handling more load and staying online during failures are related but separate problems.</li><li>Availability is about the second problem: keeping the service present when users need it.</li><li>The fix is not simply <em>more servers</em>; it is removing single points of failure and ensuring a usable path remains.</li><li>Every required component in the request path is another opportunity for the whole request to fail.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What availability means</h2>
+<p class="lede">Availability measures how often users can access and use the system. It is narrower than general quality and broader than a single server being powered on.</p>
+<ul><li><strong>Scalability</strong> asks whether the system can handle more load; <strong>availability</strong> asks whether users can reach it at all.</li><li><strong>Reliability</strong> asks whether it behaves correctly over time; a store can be available while a bug computes wrong order totals.</li><li>A system that processes ten thousand orders per minute but goes offline for an hour after one crash has solved scalability, not availability.</li><li>Availability is experienced per operation: browsing may work while checkout is completely broken.</li><li>It is usually expressed as a percentage over a stated window, not as a vague claim that the system is <em>up</em>.</li><li>Users judge availability by whether their task succeeds, not by whether every internal component is healthy.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Property</th><th>Question it answers</th><th>Store example</th></tr></thead><tbody><tr><td>Scalability</td><td>Can it handle more load?</td><td>Ten times more orders during a sale</td></tr>
+<tr><td>Availability</td><td>Can users reach and use it?</td><td>Checkout still works when a server crashes</td></tr>
+<tr><td>Reliability</td><td>Does it behave correctly over time?</td><td>Every order total is calculated correctly</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Measuring availability</h2>
+<p class="lede">The basic formula is uptime divided by total time, where total time is uptime plus downtime.</p>
+<ul><li><code>Availability = Uptime / (Uptime + Downtime)</code>, usually multiplied by 100 for a percentage.</li><li>Being available for 364 of 365 days gives roughly <strong>99.73%</strong> availability.</li><li>A single number is meaningless without a stated <strong>scope</strong> (which operation or component) and <strong>window</strong> (month, quarter, year).</li><li>Measure per operation: a store this month might show 99.99% browsing, 99.95% add-to-cart, and 99.5% checkout.</li><li>The averaged whole-store figure can hide the checkout outage that the business actually cares about.</li><li>Track availability from the user's side with success rate and latency, not only from internal infrastructure health.</li><li>Report both the aggregate and the worst important operation; the worst one drives user trust and revenue.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Operation</th><th>Availability this month</th><th>What users experienced</th></tr></thead><tbody><tr><td>Browse products</td><td>99.99%</td><td>A few minutes of errors</td></tr>
+<tr><td>Add to cart</td><td>99.95%</td><td>About 20 minutes of errors</td></tr>
+<tr><td>Checkout</td><td>99.5%</td><td>Over 3 hours of failed orders</td></tr>
+<tr><td>Whole store (averaged)</td><td>99.8%</td><td>Hides the checkout outage</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The nines of availability</h2>
+<p class="lede">Availability targets are described in nines. Each additional nine cuts the allowed downtime by roughly a factor of ten.</p>
+<ul><li>Two nines allow days of downtime per year; three nines allow hours; four nines allow under an hour.</li><li>At four nines, a single one-hour incident can consume the entire year's downtime budget.</li><li>Less allowed downtime also means less time to detect, diagnose, and recover.</li><li>Higher targets require more redundancy, spare capacity, automation, monitoring, testing, and faster recovery.</li><li>The target should come from the business cost of downtime, not from a desire to sound impressive.</li><li>A useful design question: which operations truly need five nines, and which can tolerate minutes of unavailability?</li></ul>
+<h3>What each target demands</h3>
+<ul><li>Three nines: a second server, basic monitoring, and a person who can respond within hours.</li><li>Four nines: automatic failover, health checks, an on-call rotation, and tested recovery procedures.</li><li>Five nines: redundancy at every layer, multiple locations, and automated recovery with no human in the loop.</li><li>The cost grows sharply with each nine, so apply the highest target only to the operations that justify it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Target</th><th>Typical requirements</th></tr></thead><tbody><tr><td>99.9%</td><td>Second server, basic monitoring, hours-long response</td></tr>
+<tr><td>99.99%</td><td>Automatic failover, health checks, on-call, tested recovery</td></tr>
+<tr><td>99.999%</td><td>Redundancy everywhere, multiple locations, automated recovery</td></tr></tbody></table></div>
+
+<div class="table-wrap"><table><thead><tr><th>Availability</th><th>Downtime per year</th><th>Downtime per month</th><th>Downtime per week</th></tr></thead><tbody><tr><td>99% (two nines)</td><td>3.65 days</td><td>7.3 hours</td><td>1.68 hours</td></tr>
+<tr><td>99.9% (three nines)</td><td>8.76 hours</td><td>43.8 minutes</td><td>10.1 minutes</td></tr>
+<tr><td>99.99% (four nines)</td><td>52.6 minutes</td><td>4.38 minutes</td><td>1.01 minutes</td></tr>
+<tr><td>99.999% (five nines)</td><td>5.26 minutes</td><td>26.3 seconds</td><td>6.05 seconds</td></tr>
+<tr><td>99.9999% (six nines)</td><td>31.5 seconds</td><td>2.63 seconds</td><td>0.6 seconds</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Components in series</h2>
+<p class="lede">A request that must pass through a web server, an application server, and a database has a series dependency: all three must be available for the request to succeed.</p>
+<ul><li>For independent failures, multiply the component availabilities: <code>0.999 × 0.999 × 0.999 ≈ 0.997</code>, or about <strong>99.7%</strong>.</li><li>The combined availability is lower than the weakest single component, not equal to it.</li><li>Five components at 99.9% each combine to about <strong>99.5%</strong>, nearly 44 hours of downtime per year instead of under 9.</li><li>Every required component is another point of failure, even when each one is individually well built.</li><li>Adding a synchronous dependency to the critical path makes the whole path less available.</li><li>Reduce the number of required hops, make non-critical hops optional, or put redundancy in parallel at each layer.</li><li>This is why an architecture with many mandatory chained services can be less available than a simpler one.</li></ul>
+
+<div class="flow"><span class="flow-step">Request arrives</span><span class="flow-arrow">→</span><span class="flow-step">Web server must be available</span><span class="flow-arrow">→</span><span class="flow-step">Application server must be available</span><span class="flow-arrow">→</span><span class="flow-step">Database must be available</span><span class="flow-arrow">→</span><span class="flow-step">All three succeed for the request to succeed</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Components in parallel</h2>
+<p class="lede">With two application servers where either can handle the request, the servers are redundant rather than serial. The system fails only if both fail at once.</p>
+<ul><li>If each server is 99.9% available, each is down 0.1% of the time.</li><li>Assuming independent failures, both are down with probability <code>0.1% × 0.1% = 0.0001%</code>.</li><li>That gives the pair a theoretical availability of <strong>99.9999%</strong>, or six nines.</li><li>The math assumes traffic can actually reach the healthy server, so the load balancer and network must also be available.</li><li>It also assumes the survivor has enough spare capacity to absorb the failed server's load.</li><li>The figure covers only those two servers; the database and other required components still multiply into the request path.</li><li>Series and parallel are mirror images: series fails if any part fails, parallel fails only if every redundant part fails.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Why independence matters</h2>
+<p class="lede">The parallel calculation collapses if failures are correlated. Two servers are not truly redundant when the same cause can take both down.</p>
+<ul><li><strong>Hardware:</strong> servers sharing a rack, power feed, or switch can fail together.</li><li><strong>Software:</strong> the same buggy release, memory leak, or deadlock can hit every instance running it.</li><li><strong>Network:</strong> a shared path, DNS entry, or partition can make all replicas unreachable at once.</li><li><strong>Human error:</strong> one bad configuration or accidental deletion applied to the fleet hits everything.</li><li>At small scale a server failure feels rare; across thousands of machines, drive and power failures are routine.</li><li>Redundancy must be placed in separate failure domains — different racks, zones, or regions — to be meaningful.</li><li>Adding machines without separating their dependencies provides capacity but not real availability.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Failure category</th><th>Examples</th><th>Hits both servers when</th></tr></thead><tbody><tr><td>Hardware</td><td>Drive, server, switch, power supply</td><td>They share a rack, power feed, or switch</td></tr>
+<tr><td>Software</td><td>Bug, leak, deadlock, cascading failure</td><td>They run the same faulty release</td></tr>
+<tr><td>Network</td><td>Packet loss, latency, partition, DNS</td><td>They share a path or DNS entry</td></tr>
+<tr><td>Human error</td><td>Bad config, bad deploy, deletion</td><td>The same change is applied to both</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Active-passive redundancy</h2>
+<p class="lede">In active-passive, one component handles traffic while another stays ready as a standby. A common example is a primary database replicating to a standby.</p>
+<ul><li>The primary accepts writes and replicates changes to the standby.</li><li>If the primary fails, a monitor detects it, promotes the standby, and redirects application connections.</li><li>One active writer makes data changes easier to coordinate: there is a single authority for the latest state.</li><li>The cost is a brief interruption while detection, promotion, and reconnection complete.</li><li>A standby that never serves traffic can be untested and may fail under real production load.</li><li>If the monitor promotes the standby while the old primary is still alive, both may accept writes — split-brain.</li><li>Fencing, quorum, or a single coordination service is needed to prevent two writers.</li></ul>
+<h3>Pros and cons</h3>
+<ul><li><strong>Pro:</strong> one clear writer, so coordination is simple and the latest copy is unambiguous.</li><li><strong>Pro:</strong> lower resource use, because the standby does not serve production traffic.</li><li><strong>Con:</strong> failover takes time and users see a brief interruption.</li><li><strong>Con:</strong> the standby may be stale, misconfigured, or too small to carry the load.</li><li><strong>Con:</strong> split-brain risk if the old primary is still accepting writes.</li></ul>
+
+
+<h3>Standby readiness</h3>
+<ul><li>A <strong>cold standby</strong> is not running and may need data restored; failover takes minutes.</li><li>A <strong>warm standby</strong> is running and configured but needs to catch up and be promoted; failover takes seconds to minutes.</li><li>A <strong>hot standby</strong> is running, in sync, and ready to serve; failover takes seconds.</li><li>The faster the standby, the higher the cost, because more infrastructure sits ready.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Standby type</th><th>State</th><th>Failover time</th><th>Cost</th></tr></thead><tbody><tr><td>Cold</td><td>Not running, may need restore</td><td>Minutes</td><td>Lowest</td></tr>
+<tr><td>Warm</td><td>Running and configured, not serving</td><td>Seconds to minutes</td><td>Medium</td></tr>
+<tr><td>Hot</td><td>Running, in sync, ready</td><td>Seconds</td><td>Highest</td></tr></tbody></table></div>
+
+
+<div class="flow"><span class="flow-step">Primary stops responding</span><span class="flow-arrow">→</span><span class="flow-step">Monitor detects the failure</span><span class="flow-arrow">→</span><span class="flow-step">Standby is promoted to primary</span><span class="flow-arrow">→</span><span class="flow-step">Application connections are redirected</span><span class="flow-arrow">→</span><span class="flow-step">Writes resume on the new primary</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Active-active redundancy</h2>
+<p class="lede">In active-active, multiple nodes serve traffic simultaneously through a load balancer. If one fails, the others are already running and continue immediately.</p>
+<ul><li>There is no promotion step, so there is no failover delay for application servers.</li><li>Every node is exercised under real production load, so there is no untested backup.</li><li>Hardware is used more efficiently because no machine sits idle.</li><li>Each surviving node must have enough spare capacity to absorb the failed node's share.</li><li>Any node must be able to handle any request, so cart and session state must live in a shared store.</li><li>Stateless application servers are the natural fit for active-active.</li><li>Databases are harder: multiple active writers must coordinate, which reintroduces consistency trade-offs.</li></ul>
+<h3>Health checks and the load balancer</h3>
+<ul><li>The load balancer removes a server from rotation when its health check fails.</li><li>Detection is not instant: checks run every few seconds, and a server is usually marked unhealthy after several consecutive failures.</li><li>Requests already in progress, or sent during that window, may still fail.</li><li>A good health check verifies the ability to serve requests, not merely that the process is alive.</li><li>The load balancer itself needs redundancy; otherwise it becomes the single point of failure for every healthy server.</li><li>Managed cloud load balancers are built redundantly; self-managed setups often share a virtual IP between two instances.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Spreading across locations</h2>
+<p class="lede">Redundant components in the same building still share a facility-wide power or network failure. Spreading them across locations creates independent failure domains.</p>
+<ul><li><strong>Availability zones</strong> are separate data centers in one region, connected by fast links; they protect against one data center failing.</li><li><strong>Regions</strong> are separate geographic areas; they protect against regional disasters but add tens of milliseconds or more between copies.</li><li><strong>Multiple cloud providers</strong> protect against a provider-wide outage but multiply operational complexity and tooling differences.</li><li>Wider separation introduces a replication trade-off between write latency and potential data loss.</li><li>The right level depends on which failures must be survived and how much cost and complexity are acceptable.</li><li>For most applications, two or more availability zones is the sensible default; multi-region is for when a regional outage is unacceptable.</li><li>Redundancy is not free: every standby, replica, and location costs money and adds something to operate.</li></ul>
+<h3>Synchronous vs asynchronous replication</h3>
+<ul><li><strong>Synchronous:</strong> the write succeeds only after the remote replica confirms it; no data loss on failover, but every write waits for the round trip.</li><li><strong>Asynchronous:</strong> the write is confirmed immediately and the replica catches up later; no added write latency, but recent changes may be lost.</li><li>Choose synchronous for the data whose loss is unacceptable, and asynchronous where write latency matters more.</li><li>A mixed strategy is common: synchronous within a region and asynchronous across regions.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Replication</th><th>How it works</th><th>Data loss on failover</th><th>Effect on writes</th></tr></thead><tbody><tr><td>Synchronous</td><td>Wait for the remote replica to confirm</td><td>None</td><td>Every write waits for the round trip</td></tr>
+<tr><td>Asynchronous</td><td>Confirm locally, replicate later</td><td>Possible recent changes</td><td>No added latency</td></tr></tbody></table></div>
+
+<div class="table-wrap"><table><thead><tr><th>Level</th><th>What it is</th><th>Protects against</th><th>Latency between copies</th></tr></thead><tbody><tr><td>Availability zones</td><td>Separate data centers in one region</td><td>One data center losing power or network</td><td>A few milliseconds</td></tr>
+<tr><td>Regions</td><td>Separate geographic areas</td><td>Regional disasters and region-wide outages</td><td>Tens of milliseconds or more</td></tr>
+<tr><td>Multiple providers</td><td>Different cloud vendors</td><td>A provider-wide outage</td><td>Variable</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Handling overload with queues</h2>
+<p class="lede">Availability can fail from overload rather than breakage. A sale spike can make confirmation emails slow enough to slow checkout itself.</p>
+<ul><li>If checkout waits for the email provider, the provider's latency becomes checkout's latency.</li><li>Save the order first, then place an email job in a durable queue.</li><li>Background workers process the job separately, so customers see confirmation without waiting for email delivery.</li><li>If a worker crashes mid-job, the queue holds the message until another worker confirms completion.</li><li>Queues absorb bursts and let producers and consumers scale independently.</li><li>The user gets eventual completion rather than immediate completion; that must be acceptable for the work being deferred.</li><li>Monitor queue depth, message age, retries, and dead-letter messages; a growing backlog is an availability warning.</li></ul>
+
+<div class="flow"><span class="flow-step">Customer places an order</span><span class="flow-arrow">→</span><span class="flow-step">App server saves the order</span><span class="flow-arrow">→</span><span class="flow-step">App server enqueues an email job</span><span class="flow-arrow">→</span><span class="flow-step">Customer receives confirmation</span><span class="flow-arrow">→</span><span class="flow-step">Workers deliver email at their own pace</span></div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Containing cascading failures</h2>
+<p class="lede">A slow recommendation service can exhaust application threads and connections, spreading the slowdown to checkout, which never needed recommendations. This is a cascading failure.</p>
+<ul><li><strong>Timeouts</strong> stop a request from waiting indefinitely on a slow dependency.</li><li><strong>Circuit breakers</strong> stop calling a dependency that keeps failing, then probe cautiously for recovery.</li><li><strong>Fallbacks</strong> return a reduced but usable response, such as a product page without recommendations.</li><li><strong>Bulkheads</strong> isolate resources so one dependency cannot consume every thread or connection.</li><li><strong>Load shedding</strong> rejects low-priority work early when capacity is exhausted, preserving critical paths.</li><li>The goal is not to keep every feature working; it is to keep the critical user journey working.</li><li>A dependency that is down should look contained, not contagious.</li></ul>
+<h3>Circuit breaker states</h3>
+<ul><li><strong>Closed:</strong> calls pass through and failures are counted.</li><li><strong>Open:</strong> failures crossed the threshold, so calls are rejected immediately without waiting.</li><li><strong>Half-open:</strong> after a cooldown, a few test requests are allowed through.</li><li>Success in half-open closes the circuit; failure reopens it.</li></ul>
+
+<div class="flow"><span class="flow-step">Closed</span><span class="flow-arrow">→</span><span class="flow-step">Failure threshold exceeded</span><span class="flow-arrow">→</span><span class="flow-step">Open</span><span class="flow-arrow">→</span><span class="flow-step">Cooldown expires</span><span class="flow-arrow">→</span><span class="flow-step">Half-open test</span><span class="flow-arrow">→</span><span class="flow-step">Closed on success or Open on failure</span></div>
+<h3>Protection mechanisms</h3>
+<div class="table-wrap"><table><thead><tr><th>Protection</th><th>What it does</th><th>Store example</th></tr></thead><tbody><tr><td>Timeout</td><td>Gives up after a fixed wait</td><td>Stop waiting for recommendations after 200 ms</td></tr>
+<tr><td>Circuit breaker</td><td>Stops calling a repeatedly failing dependency</td><td>Skip the recommendation call entirely</td></tr>
+<tr><td>Fallback</td><td>Returns a reduced but usable response</td><td>Show the product page without recommendations</td></tr></tbody></table></div>
+
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Putting it together</h2>
+<ul><li>Measure availability per operation, over a stated window, weighted toward the operations users and the business care about.</li><li>Remove single points of failure from the critical path, then add redundancy in independent failure domains.</li><li>Use active-passive with tested failover for stateful primaries; use active-active behind a load balancer for stateless application servers.</li><li>Spread across availability zones by default; add regions when a regional outage is unacceptable.</li><li>Move deferrable work to durable queues so overload in a secondary feature does not slow the critical path.</li><li>Add timeouts, circuit breakers, and fallbacks so a slow dependency stays contained.</li><li>Test the failure paths under realistic load; an untested standby or failover script is an assumption, not a control.</li><li>Higher availability is bought with redundancy, spare capacity, automation, and operational discipline — not with a slogan.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Technique</th><th>Failure it handles</th><th>Store example</th></tr></thead><tbody><tr><td>Per-operation measurement</td><td>A single number hiding a real outage</td><td>Track checkout separately from browsing</td></tr>
+<tr><td>Active-passive with failover</td><td>Primary database going down</td><td>Standby promoted to primary</td></tr>
+<tr><td>Active-active behind a load balancer</td><td>Application server going down</td><td>The other server keeps serving</td></tr>
+<tr><td>Health checks</td><td>Traffic sent to a broken server</td><td>Unhealthy servers removed from rotation</td></tr>
+<tr><td>Multiple zones or regions</td><td>A facility or region going down</td><td>Store runs in more than one location</td></tr>
+<tr><td>Durable queues</td><td>Overload from slow background work</td><td>Confirmation emails sent by workers</td></tr>
+<tr><td>Timeouts, circuit breakers, fallbacks</td><td>A slow dependency dragging everything down</td><td>Product pages without recommendations</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Active-passive</strong> keeps one clear writer and is simpler to reason about, but failover causes an interruption and the standby may be untested.</li><li><strong>Active-active</strong> removes failover delay and exercises every node, but requires spare capacity in each node and shared state outside the servers.</li><li><strong>A hot standby</strong> recovers fastest but costs the most, because a full copy sits ready and idle.</li><li><strong>Multi-region deployment</strong> survives regional outages but adds replication latency, duplicate infrastructure, and operational complexity.</li><li><strong>Synchronous replication</strong> avoids data loss on failover but makes every write pay the remote round trip.</li><li><strong>Asynchronous replication</strong> keeps writes fast but risks losing recent changes when a region fails.</li><li><strong>Durable queues</strong> absorb overload and survive worker crashes but introduce eventual completion, duplicates, and backlog monitoring.</li><li><strong>Circuit breakers and fallbacks</strong> contain cascading failure but may reject otherwise valid requests and show users a reduced experience.</li><li><strong>Higher nines</strong> reduce downtime but demand more redundancy, automation, testing, and on-call effort at sharply rising cost.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is availability, and how is it different from reliability and scalability?</summary><div class="answer"><p>Availability is how often users can reach and use the system. Scalability is the ability to handle more load, and reliability is whether the system behaves correctly over time. A store can be available but unreliable if it accepts orders and calculates the wrong total.</p></div></details>
+<details><summary>2. How do you calculate availability?</summary><div class="answer"><p>Divide uptime by total time: <code>Uptime / (Uptime + Downtime)</code>. Being up 364 of 365 days gives about 99.73%. The number is only meaningful when you state which operation and which time window you are measuring.</p></div></details>
+<details><summary>3. Why measure availability per operation?</summary><div class="answer"><p>An aggregate can hide a serious outage. Browsing might be 99.99% available while checkout is 99.5%, yet the whole-store average looks acceptable. Per-operation measurement shows where users actually fail and lets you apply the highest targets to the operations that matter most.</p></div></details>
+<details><summary>4. What does four nines mean in practice?</summary><div class="answer"><p>99.99% allows about 52.6 minutes of downtime per year, 4.38 minutes per month, or about a minute per week. A single hour-long incident would exhaust the annual budget, so four nines requires automatic failover, health checks, on-call response, and tested recovery.</p></div></details>
+<details><summary>5. How does availability combine for components in series?</summary><div class="answer"><p>Multiply the independent availabilities. Three components at 99.9% give roughly 99.7%, and five give about 99.5%. The system is less available than any single component because every required hop is another chance for the request to fail.</p></div></details>
+<details><summary>6. How does availability combine for components in parallel?</summary><div class="answer"><p>Multiply the failure probabilities. Two 99.9% servers each fail 0.1% of the time, so both fail together only 0.0001% of the time, giving a theoretical 99.9999%. This assumes independent failures, reachable healthy nodes, and enough spare capacity in the survivor.</p></div></details>
+<details><summary>7. Why is independence important in redundancy calculations?</summary><div class="answer"><p>If both servers share a rack, power feed, network path, deployment pipeline, or configuration, one cause can take both down. The parallel math then overstates availability. Redundancy only helps when the copies sit in separate failure domains.</p></div></details>
+<details><summary>8. Explain active-passive and its main risks.</summary><div class="answer"><p>One node serves traffic while a standby stays ready. On failure, a monitor promotes the standby and redirects connections. The main risks are failover interruption, an untested or undersized standby, and split-brain if the old primary is still accepting writes while the new one is promoted.</p></div></details>
+<details><summary>9. What are cold, warm, and hot standbys?</summary><div class="answer"><p>A cold standby is not running and may need data restored, so recovery takes minutes. A warm standby is running and configured but needs to catch up and be promoted, taking seconds to minutes. A hot standby is in sync and ready, taking seconds, at the highest cost.</p></div></details>
+<details><summary>10. What does active-active require that active-passive does not?</summary><div class="answer"><p>Every node must be able to serve any request, so session and cart state must be shared outside the servers. Each node also needs spare capacity to absorb the others' load. For databases, multiple active writers must coordinate, which is considerably harder than a single primary.</p></div></details>
+<details><summary>11. How do availability zones and regions differ?</summary><div class="answer"><p>Availability zones are separate data centers within one region with low-latency links, protecting against a single facility failure. Regions are geographic separations that protect against regional disasters but add tens of milliseconds or more between replicas. Multi-region is justified when a regional outage is unacceptable.</p></div></details>
+<details><summary>12. Synchronous or asynchronous replication for availability?</summary><div class="answer"><p>Synchronous replication waits for the remote copy, so failover loses no data but every write pays the round trip. Asynchronous confirms locally and replicates later, keeping writes fast but risking loss of recent changes. Many systems use synchronous within a region and asynchronous across regions.</p></div></details>
+<details><summary>13. How do queues improve availability?</summary><div class="answer"><p>They remove slow work from the request path and absorb bursts, so a slow email provider or worker crash does not fail checkout. Messages persist until processed and can be retried. The cost is eventual completion, possible duplicates, and the need to monitor backlog and dead-letter queues.</p></div></details>
+<details><summary>14. How do you stop a cascading failure?</summary><div class="answer"><p>Put timeouts on every network call, use circuit breakers to stop calling a failing dependency, provide fallbacks for non-critical features, isolate resources with bulkheads, and shed low-priority load when saturated. The objective is to keep the critical user journey working while the dependency recovers.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Reporting one availability number for the whole product and hiding a broken checkout path.</li><li>Multiplying component availability without checking whether their failures are actually independent.</li><li>Assuming two servers in the same rack or behind the same deployment are redundant.</li><li>Treating failover as instantaneous and forgetting detection, promotion, and reconnection time.</li><li>Keeping a standby that has never been tested under production-like load or cannot handle the traffic.</li><li>Running active-active without shared session state, so a surviving server cannot serve the user's request.</li><li>Choosing synchronous replication everywhere without accounting for the write-latency cost.</li><li>Adding a queue or circuit breaker without idempotency, fallback behavior, or backlog monitoring.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="scalability.html"><span>← Previous</span><strong>Scalability</strong></a><a class="next" href="cap-theorem.html"><span>Next →</span><strong>CAP Theorem</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/availability">AlgoMaster — Availability</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

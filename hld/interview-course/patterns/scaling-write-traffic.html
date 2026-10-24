@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scaling Write Traffic — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 02 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Scaling Write Traffic</h1>
+    <p class="dek">Interview Patterns · Scaling Under Load</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/high-write-traffic">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Where this pattern shows up</a>
+<a href="#s2">Why writes are harder to scale than reads</a>
+<a href="#s3">Start with the database itself</a>
+<a href="#s4">Batching writes</a>
+<a href="#s5">Using a queue to absorb writes</a>
+<a href="#s6">Sharding</a>
+<a href="#s7">Hot shards and hot keys</a>
+<a href="#s8">Reducing the number of writes</a>
+<a href="#s9">Deciding which writes can be lost</a>
+<a href="#s10">Putting it all together</a>
+<a href="#s11">Discussing high write traffic in an interview</a>
+<a href="#s12">Key takeaways</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Writes are harder to scale than reads because every write must be durably stored, applied to indexes, and replayed to replicas — so the fix is to make each write cheaper, write fewer of them, absorb bursts, and eventually spread them across shards.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Write amplification</dt><dd>The extra work one logical write causes: the log record, the table update, every index update, and replication.</dd></div><div class="term"><dt>B-tree</dt><dd>A storage structure used by databases like PostgreSQL and MySQL that updates pages in place, giving fast reads but scattered writes.</dd></div><div class="term"><dt>LSM tree</dt><dd>A log-structured merge tree that appends writes to memory and a log, then flushes sorted files sequentially, favoring write throughput.</dd></div><div class="term"><dt>Batching</dt><dd>Grouping many rows or events into one round trip and one commit instead of paying the fixed cost per row.</dd></div><div class="term"><dt>Consumer lag</dt><dd>The number of messages produced but not yet processed; a rising value means consumers cannot keep up with producers.</dd></div><div class="term"><dt>Backpressure</dt><dd>A bounded buffer or signal that tells producers to slow down or retry later instead of accepting unbounded work.</dd></div><div class="term"><dt>Sharding</dt><dd>Partitioning data across multiple databases so each shard stores and writes only part of the dataset.</dd></div><div class="term"><dt>Shard key</dt><dd>The value whose hash or range decides which shard owns a record; it controls write spread and query locality.</dd></div><div class="term"><dt>Consistent hashing</dt><dd>A ring-based assignment where adding a shard moves only roughly 1/N of keys instead of remapping almost everything.</dd></div><div class="term"><dt>Idempotency</dt><dd>Making the same write safe to apply twice, usually with a unique event ID, so at-least-once delivery causes no double effect.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Where this pattern shows up</h2>
+<p class="lede">Some systems generate new data continuously at a very high rate. Every update becomes a write, and the database must keep up with all of it.</p>
+<ul><li><strong>Uber</strong>: every active driver's phone sends a location update every few seconds.</li><li><strong>WhatsApp</strong>: every message is a new write, adding up to billions of messages per day.</li><li><strong>YouTube</strong>: every view increments a count and every like updates a like count.</li><li><strong>Ad click tracking</strong>: every click must be recorded because advertisers are billed from it.</li><li><strong>Metrics and logging</strong>: thousands of servers emit new data points every few seconds.</li><li>In all of these, new data keeps arriving and the database has to keep up.</li><li>The common interview signal is a write rate that exceeds what one well-tuned database can absorb.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Problem</th><th>What gets written</th></tr></thead><tbody><tr><td>Design Uber</td><td>Every active driver's location every few seconds</td></tr>
+<tr><td>Design WhatsApp</td><td>Every message, billions per day</td></tr>
+<tr><td>Design YouTube</td><td>View counts and like counts on every interaction</td></tr>
+<tr><td>Ad click tracking</td><td>Every click, because advertisers are billed per click</td></tr>
+<tr><td>Metrics or logging</td><td>Data points from thousands of servers every few seconds</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why writes are harder to scale than reads</h2>
+<p class="lede">Reads had many escape routes: cache results, add replicas, push content to a CDN. Those tools do not reduce the work of storing new data.</p>
+<ul><li>A cache can serve the same result to many readers, but <strong>every write carries new data</strong> that must be stored.</li><li>Read replicas do not help: every write still goes to the primary and then must be applied by every replica.</li><li>Each write does more work than it appears: append to a log on disk, update the table, update <strong>every index</strong>, and sometimes lock rows.</li><li>That hidden work is <strong>write amplification</strong>, and it grows with every index and every replica.</li><li>Relational databases handle writes in place, which becomes scattered disk I/O as data grows.</li><li>A write also has to be durable, so it must survive a crash before you can confirm it.</li><li>Losing an acknowledged write is a correctness failure, while losing a cache entry is only a performance failure.</li></ul>
+
+<div class="flow"><span class="flow-step">One INSERT</span><span class="flow-arrow">→</span><span class="flow-step">Append to log on disk</span><span class="flow-arrow">→</span><span class="flow-step">Update the table</span><span class="flow-arrow">→</span><span class="flow-step">Update every index</span><span class="flow-arrow">→</span><span class="flow-step">Lock rows if needed</span><span class="flow-arrow">→</span><span class="flow-step">Replicate to replicas</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Start with the database itself</h2>
+<p class="lede">The first step is to make each write cheaper before spreading writes across more machines.</p>
+<ul><li>Every index on a table must be updated on every insert, so five indexes cost far more per write than one.</li><li>In a read-heavy system extra indexes are worth it; in a write-heavy system keep only the indexes the queries use.</li><li>Choose a storage engine that fits the write pattern rather than forcing a B-tree database to absorb append-only volume.</li><li>Match the data model to the access pattern so common writes touch a single row and a single shard.</li><li>Avoid unnecessary uniqueness constraints, triggers, and synchronous secondary work in the hot write path.</li><li>Measure writes per second achievable with your indexes and durability settings before assuming one database is enough.</li></ul>
+<h3>Keep only the indexes you need</h3>
+<ul><li>Audit which indexes are actually used by queries; unused indexes are pure write overhead.</li><li>Composite indexes multiply the cost of each insert, not just the number of indexes.</li><li>Removing an index can improve write throughput while degrading a read path, so check both sides.</li></ul>
+
+
+<h3>Choose a write-friendly database</h3>
+<ul><li><strong>B-tree</strong> databases update pages in place, giving fast point and range reads but scattered writes.</li><li><strong>LSM-tree</strong> databases append to memory and a log, then flush sorted files sequentially, which is much faster for high write volume.</li><li>LSM reads can be slower because a value may live in several files; Bloom filters and compaction reduce that cost.</li><li>Compaction uses disk and CPU in the background, so it is a real operational cost rather than free throughput.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>B-Tree (PostgreSQL, MySQL)</th><th>LSM Tree (Cassandra, ScyllaDB, RocksDB)</th></tr></thead><tbody><tr><td>Write path</td><td>Updates pages in place, scattered on disk</td><td>Appends to memory and a log, flushes sorted files sequentially</td></tr>
+<tr><td>Read path</td><td>Fast point and range reads</td><td>May check several files to find a value</td></tr>
+<tr><td>Background work</td><td>Little</td><td>Compaction merges files over time</td></tr>
+<tr><td>Good fit</td><td>Mixed workloads, transactions</td><td>High volumes of append-only data</td></tr></tbody></table></div>
+
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Batching writes</h2>
+<p class="lede">Each write to a database has a fixed cost: a network round trip, a transaction, and a log write. Batching pays that cost once for many rows.</p>
+<ul><li>Inserting 1,000 rows one at a time pays the fixed cost 1,000 times; one multi-row insert pays it once.</li><li>A batch buffer flushes on whichever comes first: the batch reaching a <strong>size limit</strong> or a <strong>time limit</strong> passing.</li><li>The size limit keeps batches efficient under heavy traffic; the time limit stops data sitting in the buffer when traffic is light.</li><li>Typical tools are a multi-row <code>INSERT ... VALUES (...), (...)</code>, PostgreSQL's <code>COPY</code>, or a Cassandra batch statement.</li><li>Batching adds delay because data waits in the buffer before it is written.</li><li>Buffered data can be lost if the process crashes before the flush, so batching suits metrics and logs more than payments.</li><li>Batching is also useful on the consumer side, where one database write can represent many queued events.</li></ul>
+
+<div class="flow"><span class="flow-step">Collect events in memory</span><span class="flow-arrow">→</span><span class="flow-step">Flush on size limit or time limit</span><span class="flow-arrow">→</span><span class="flow-step">One round trip, one commit</span><span class="flow-arrow">→</span><span class="flow-step">Repeat</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Using a queue to absorb writes</h2>
+<p class="lede">Write traffic is rarely steady. A flash sale, a big match, or a viral post can multiply traffic for a short period, and sending all of it straight to the database overloads it.</p>
+<ul><li>Put a message queue such as <strong>Kafka</strong> between the application and the database.</li><li>The application appends the write to the queue and can respond to the client immediately.</li><li>A group of <strong>consumers</strong> reads from the queue and writes to the database at a rate it can sustain.</li><li>During a spike the queue grows, and consumers catch up once traffic falls.</li><li>Kafka suits this because it appends messages to logs on disk and handles very high write rates.</li><li>A topic is split into <strong>partitions</strong>, and messages with the same key go to the same partition, preserving per-key order.</li><li>Multiple independent consumer groups can read the same topic for different purposes without affecting each other.</li></ul>
+<h3>How the buffer works</h3>
+<ul><li>The producer appends an event and receives an acknowledgement from the broker, not from the database.</li><li>Consumers pull at their own pace, so a short spike becomes a backlog rather than a database outage.</li><li>Ordering is preserved only within a partition, which is why the partition key matters.</li></ul>
+
+<div class="flow"><span class="flow-step">Client write</span><span class="flow-arrow">→</span><span class="flow-step">API server appends to queue</span><span class="flow-arrow">→</span><span class="flow-step">Respond immediately</span><span class="flow-arrow">→</span><span class="flow-step">Consumers read at a steady pace</span><span class="flow-arrow">→</span><span class="flow-step">Database</span></div>
+<h3>Trade-offs</h3>
+<ul><li><strong>Delayed visibility</strong>: the data is not in the database when the client gets a response.</li><li><strong>Duplicates</strong>: most queues deliver at least once, so a worker may process the same message twice.</li><li>Writes should be <strong>idempotent</strong>; a unique event ID lets the database ignore an event it has already stored.</li><li><strong>Backlog growth</strong>: a queue absorbs a short spike, but a permanently slow consumer group falls further behind.</li><li>Watch <strong>consumer lag</strong>; if it keeps rising, add consumers up to the partition count or increase batch size.</li><li>If that is not enough, apply <strong>backpressure</strong> with a bounded buffer that makes producers slow down or retry later.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Sharding</h2>
+<p class="lede">Batching and queues reduce and smooth the load, but at some point one database still cannot keep up. Then the data must be split across multiple databases.</p>
+<ul><li>Each database is a <strong>shard</strong> that stores only part of the data and handles only the writes for that part.</li><li>In the Uber example, location data can be sharded by <strong>driver ID</strong>, with a hash deciding the shard.</li><li>If one shard handles 50,000 writes per second, 1.25 million writes per second needs at least <strong>25 shards</strong>, and in practice more for growth and spikes.</li><li>Sharding adds routing, rebalancing, and operational complexity, so use it after cheaper techniques.</li><li>A write that must update two shards, such as moving money between accounts, needs coordination like a saga or two-phase commit.</li><li>Model data so the common write touches one shard; cross-shard writes are the exception, not the design.</li></ul>
+<h3>Choosing the shard key</h3>
+<ul><li>A good shard key spreads writes evenly across all shards.</li><li>It should also keep data that is read together on the same shard, so most queries touch one shard.</li><li>Driver ID works because writes spread across millions of drivers and one driver's history stays together.</li><li>Timestamp ranges send every new write to the newest shard, leaving older shards idle.</li><li>A random ID spreads writes evenly but scatters related data, so queries fan out to every shard.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Shard key</th><th>Write spread</th><th>Data read together</th><th>Verdict</th></tr></thead><tbody><tr><td>Driver ID (hashed)</td><td>Even across millions of drivers</td><td>A driver's history is on one shard</td><td>Good</td></tr>
+<tr><td>Timestamp (ranges)</td><td>All new writes hit the newest shard</td><td>Time ranges are easy to scan</td><td>Poor for writes</td></tr>
+<tr><td>Random ID</td><td>Even</td><td>Related data is scattered</td><td>Even, but queries touch every shard</td></tr></tbody></table></div>
+
+<h3>Adding shards later</h3>
+<ul><li>With <code>hash(key) % N</code>, changing the number of shards moves almost every key.</li><li><strong>Consistent hashing</strong> places shards on a ring and assigns each key to the next shard around it.</li><li>Adding a shard then moves only the keys in its new range, roughly <strong>1/N</strong> of the data.</li><li>Resharding still needs a plan for dual reads or writes during the move.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Hot shards and hot keys</h2>
+<p class="lede">Even with sharding, writes can concentrate on one place. The cause is either a bad shard key or a single record that receives enormous traffic.</p>
+<ul><li>A hot shard receives most writes while other shards sit idle, so adding shards does not help.</li><li>Monotonically increasing values such as timestamps or auto-incrementing IDs are poor range shard keys.</li><li>A single very popular record becomes a bottleneck because updates to one row cannot run in parallel.</li><li>Sharding spreads data across machines, but it does not split one row.</li><li>You need a different fix for each case: change the key for skew, split the record for a single hot item.</li><li>Detect both by tracking per-shard and per-key write rates rather than only overall throughput.</li></ul>
+<h3>A bad shard key</h3>
+<ul><li>Sharding events by timestamp means every new event has the latest timestamp and hits the newest shard.</li><li>For time-series data, a composite key such as <code>(device_id, day)</code> spreads writes by device and keeps each device's data grouped for range scans.</li><li>Check that the key's distribution matches the actual write pattern, not just the data volume.</li></ul>
+
+
+<h3>A single popular record</h3>
+<ul><li>Suppose a celebrity video receives 100,000 likes per second; every like updates the same counter row on one shard.</li><li>Split the counter into several smaller counters and have each like update one at random.</li><li>The total is the sum of the counters, which spreads writes across rows that can live on different shards.</li><li>The read becomes slightly more expensive, but popular counts are usually cached anyway.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Reducing the number of writes</h2>
+<p class="lede">So far the techniques make writes cheaper and spread them out. Often the best option is to write less data in the first place.</p>
+<ul><li><strong>Aggregate before writing</strong>: count views in memory or a stream processor for a few seconds, then write one update such as "views += 500" instead of 500 updates.</li><li>Metrics agents like StatsD collect counters in memory and write one summary per interval.</li><li>Time-series databases keep recent data at full detail and roll older data into larger buckets.</li><li><strong>Overwrite instead of adding rows</strong>: keep only a driver's latest location in Redis, replacing the previous value.</li><li>Send only a sampled or batched version of history to the permanent database.</li><li><strong>Sample</strong> high-volume streams, for example storing one in every ten location pings for trip history.</li><li>Ask in the interview whether every write truly needs to be stored, or only the latest value.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Technique</th><th>Example</th><th>What you give up</th></tr></thead><tbody><tr><td>Aggregate</td><td>Write "views += 500" every few seconds</td><td>A few seconds of counts if the aggregator crashes</td></tr>
+<tr><td>Overwrite</td><td>Keep only each driver's latest location in Redis</td><td>The full history, unless stored elsewhere</td></tr>
+<tr><td>Sample</td><td>Store one in every ten location pings</td><td>Detail between the stored points</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Deciding which writes can be lost</h2>
+<p class="lede">Many write-scaling techniques are fast because they accept some risk. The design decision is which writes may take that risk.</p>
+<ul><li>Batching in memory can lose buffered data if the server crashes.</li><li>Aggregating view counts in memory can lose a few seconds of counts.</li><li><strong>Write-behind</strong> acknowledges a write after it reaches a fast buffer such as Redis and persists it later, so a buffer failure can lose acknowledged writes.</li><li>Even a queue has a durability setting: Kafka can wait for several brokers (<code>acks=all</code>) or just one (<code>acks=1</code>).</li><li>Writes that must never be lost, such as payments, orders, and chat messages, should be durable and ideally replicated before confirmation.</li><li>Writes where small loss is acceptable, such as view counts, analytics events, and replaceable location pings, can use faster techniques.</li><li>State which group each write belongs to in the interview; it determines which techniques are allowed.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Group</th><th>Examples</th><th>Confirm when</th><th>Techniques that fit</th></tr></thead><tbody><tr><td>Must never be lost</td><td>Payments, orders, chat messages</td><td>The write is durable and replicated</td><td>Replicated database, queue with acks=all, idempotent retries</td></tr>
+<tr><td>Small loss is acceptable</td><td>View counts, analytics events, location pings</td><td>As soon as it is accepted</td><td>In-memory batching, aggregation, overwriting, sampling</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Putting it all together</h2>
+<p class="lede">The Uber location pipeline combines the techniques, with each component solving one specific problem.</p>
+<ul><li>Each driver's phone sends a location update every 4 seconds.</li><li>An API server appends the update to a Kafka topic partitioned by <strong>driver ID</strong>.</li><li>One consumer group overwrites each driver's latest location in <strong>Redis</strong>.</li><li>The matching service reads Redis when it needs nearby drivers.</li><li>Another consumer group batches updates and writes them to a sharded <strong>Cassandra</strong> cluster for history and analytics.</li><li>Because both groups read the same topic, each can fall behind or restart without affecting the other.</li><li>Because Kafka is partitioned by driver ID, each driver's updates are processed in order.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Component</th><th>Problem it solves</th></tr></thead><tbody><tr><td>Kafka</td><td>Absorbs spikes</td></tr>
+<tr><td>Redis</td><td>Keeps only current state, so 1.25 million updates per second overwrite 5 million entries instead of adding rows</td></tr>
+<tr><td>Batching consumers</td><td>Reduce the number of database writes</td></tr>
+<tr><td>Sharded Cassandra</td><td>Spreads remaining writes across machines with an LSM storage engine</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Driver phones (every 4 s)</span><span class="flow-arrow">→</span><span class="flow-step">API servers</span><span class="flow-arrow">→</span><span class="flow-step">Kafka partitioned by driver ID</span><span class="flow-arrow">→</span><span class="flow-step">Consumers: latest location → Redis</span><span class="flow-arrow">→</span><span class="flow-step">Consumers: history → sharded Cassandra</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Discussing high write traffic in an interview</h2>
+<p class="lede">Follow a fixed order so every component is tied to a number or requirement established earlier.</p>
+<ul><li><strong>Clarify requirements</strong>: peak writes per second, how spiky traffic is, and whether writes can be delayed or lost.</li><li><strong>Estimate peak write load</strong> to decide whether one database is enough.</li><li><strong>Reduce the number of writes</strong> with aggregation, overwriting, or batching.</li><li><strong>Choose a database</strong> that fits the write pattern, such as an LSM-based store for append-only volume.</li><li><strong>Add a queue</strong> if traffic is spiky or the client does not need immediate persistence.</li><li><strong>Shard the data</strong>, justify the shard key, and describe how you would handle hot keys.</li><li><strong>Separate durability classes</strong>: say which writes need strong guarantees and which can trade safety for speed.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Question</th><th>Why it matters</th></tr></thead><tbody><tr><td>How many writes per second at peak?</td><td>Tells you whether one database is enough</td></tr>
+<tr><td>Is traffic steady or spiky?</td><td>Tells you whether you need a queue for bursts</td></tr>
+<tr><td>Can any writes be delayed or lost?</td><td>Decides whether batching, aggregation, and async writes are allowed</td></tr>
+<tr><td>Does every write need storing, or only the latest value?</td><td>Tells you whether overwriting or aggregation is possible</td></tr>
+<tr><td>How will the data be read?</td><td>Affects the shard key and the database choice</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Key takeaways</h2>
+<ul><li>Writes do not scale like reads: caches and replicas do not reduce the work of storing new data.</li><li>Make each write cheaper by keeping only necessary indexes and choosing a write-friendly, often LSM-based, database.</li><li>Reduce the number of writes with batching, aggregation, and overwriting the latest value instead of appending rows.</li><li>Use a queue to absorb spikes, and make consumers idempotent because messages can be delivered more than once.</li><li>Use sharding to spread writes, with a key that distributes writes evenly and keeps related data together.</li><li>Watch for hot spots: avoid increasing values as range shard keys, and split counters for a single popular record.</li><li>Decide which writes can tolerate delay or loss; that decision unlocks or forbids most of the fast techniques.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Removing indexes</strong> speeds up writes but can make read queries fall back to scans, so the trade depends on the read path.</li><li><strong>LSM-tree databases</strong> handle high write throughput but can serve slower reads and spend background CPU and disk on compaction.</li><li><strong>Batching</strong> amortizes fixed write cost but adds latency and can lose the buffered batch on a crash.</li><li><strong>Queues</strong> absorb spikes and decouple producers but introduce delayed visibility, duplicate delivery, and a new system to operate.</li><li><strong>Idempotent consumers</strong> make retries safe but require event IDs and deduplication state that must itself be stored and cleaned up.</li><li><strong>Sharding</strong> spreads writes but makes cross-shard queries, transactions, and resharding substantially harder.</li><li><strong>Consistent hashing</strong> limits key movement when adding shards but adds ring management and still requires moving data for the new range.</li><li><strong>Aggregation and sampling</strong> cut write volume but lose fine-grained detail and can lose recent data if the aggregator fails.</li><li><strong>Overwriting current state</strong> is extremely cheap but discards history that analytics or auditing may later need.</li><li><strong>Weaker durability settings</strong> increase throughput but can lose acknowledged writes when a broker or node fails.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why are writes harder to scale than reads?</summary><div class="answer"><p>Reads can be duplicated: a cache or replica can serve the same result many times. A write carries new data that must be stored durably, applied to the table, applied to every index, and replayed to every replica, so more machines do not remove the work.</p></div></details>
+<details><summary>2. What does one insert actually cost?</summary><div class="answer"><p>A log write on disk, a table update, updates to every index on that table, row locks where needed, and replication to each replica. That amplification is why write throughput is often much lower than expected.</p></div></details>
+<details><summary>3. How do indexes affect write throughput?</summary><div class="answer"><p>Every index must be updated on every insert, so a table with five indexes does much more work per write than one with a single index. In a write-heavy system, keep only the indexes the queries actually use.</p></div></details>
+<details><summary>4. B-tree or LSM tree for a write-heavy workload?</summary><div class="answer"><p>LSM trees append to memory and a log and flush sorted files sequentially, which suits high-volume append-only data. B-trees update pages in place and are better for mixed workloads and transactions. The LSM trade-off is slower reads and background compaction cost.</p></div></details>
+<details><summary>5. When is batching appropriate?</summary><div class="answer"><p>When a short delay and the risk of losing the buffer are acceptable, such as metrics, logs, and analytics. It is not appropriate for a payment, where the write must be durable before you confirm it to the user.</p></div></details>
+<details><summary>6. How does a queue help with writes?</summary><div class="answer"><p>It decouples acceptance from persistence. Producers append to the queue and respond quickly, while consumers write to the database at a sustainable rate. During a spike the backlog grows and then drains.</p></div></details>
+<details><summary>7. Why must queue consumers be idempotent?</summary><div class="answer"><p>Most queues deliver at least once. A worker can write to the database and crash before acknowledging, so the message is delivered again. A unique event ID lets the database ignore the duplicate.</p></div></details>
+<details><summary>8. What do you monitor on a queue-based pipeline?</summary><div class="answer"><p>Consumer lag, produce and consume rates, partition skew, retry and dead-letter counts, and database write latency. If lag rises monotonically, consumers are slower than producers and the queue is only hiding the problem.</p></div></details>
+<details><summary>9. What is backpressure and when do you need it?</summary><div class="answer"><p>A bounded buffer that makes producers slow down or retry later instead of accepting work until memory runs out. It is needed when consumers cannot keep up for a sustained period, not just during a short spike.</p></div></details>
+<details><summary>10. How do you choose a shard key?</summary><div class="answer"><p>It should spread writes evenly and keep data that is read together on the same shard. Driver ID works for location data because it distributes across millions of drivers while keeping one driver's history together. Timestamps are poor because all new writes hit the newest shard.</p></div></details>
+<details><summary>11. What breaks when you add shards later?</summary><div class="answer"><p>With hash modulo N, almost every key moves when N changes. Consistent hashing limits movement to roughly 1/N of the data, but you still need dual reads or writes and a migration plan during the move.</p></div></details>
+<details><summary>12. How do you handle a single record that gets enormous write traffic?</summary><div class="answer"><p>Split the record. For a like counter, keep several counters and have each write update one at random, then sum them on read. This trades a slightly more expensive read for parallel writes.</p></div></details>
+<details><summary>13. Which writes can you make asynchronous?</summary><div class="answer"><p>Only those where a small delay or loss is acceptable, such as view counts, analytics, and replaceable location pings. Payments, orders, and chat messages must be durable and ideally replicated before you confirm them.</p></div></details>
+<details><summary>14. Walk through a high-write architecture end to end.</summary><div class="answer"><p>API servers append events to a partitioned log, one consumer group overwrites the latest state in an in-memory store, and another batches events into a sharded LSM database for history. The log absorbs spikes, each consumer group scales independently, and per-key ordering is preserved by the partition key.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Trying to fix write throughput by adding read replicas or caches.</li><li>Keeping many unused indexes on a write-heavy table.</li><li>Claiming a queue solves sustained overload rather than only smoothing a burst.</li><li>Building consumers that are not idempotent, then being surprised by duplicates.</li><li>Choosing a timestamp or auto-increment column as a range shard key.</li><li>Sharding a single hot counter instead of splitting the counter.</li><li>Acknowledging a write after placing it in a volatile buffer and calling it durable.</li><li>Ignoring consumer lag until the backlog is hours deep.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="scaling-read-traffic.html"><span>← Previous</span><strong>Scaling Read Traffic</strong></a><a class="next" href="handling-hot-keys.html"><span>Next →</span><strong>Handling Hot Keys</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/high-write-traffic">AlgoMaster — Scaling Write Traffic</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

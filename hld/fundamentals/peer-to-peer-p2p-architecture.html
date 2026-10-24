@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Peer-to-Peer (P2P) Architecture — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 44 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Peer-to-Peer (P2P) Architecture</h1>
+    <p class="dek">Architectural Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/peer-to-peer-p2p-architecture">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with one central server</a>
+<a href="#s2">What peer-to-peer architecture is</a>
+<a href="#s3">Pure, hybrid, structured, unstructured</a>
+<a href="#s4">Overlay networks and routing</a>
+<a href="#s5">Discovery: trackers, DHTs, and gossip</a>
+<a href="#s6">DHT mechanics</a>
+<a href="#s7">Gossip and epidemic dissemination</a>
+<a href="#s8">Churn</a>
+<a href="#s9">NAT traversal and connectivity</a>
+<a href="#s10">Trust, identity, and attack surface</a>
+<a href="#s11">Integrity, incentives, and fairness</a>
+<a href="#s12">Where P2P fits</a>
+<a href="#s13">Trade-offs and when to use it</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Peer-to-peer architecture spreads bandwidth, storage, and compute across the participants themselves, so capacity grows with demand — at the price of churn, unreliable connectivity, and having to trust nobody in particular.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Peer</dt><dd>A participant that both requests and serves data, acting as client and server at the same time.</dd></div><div class="term"><dt>Overlay network</dt><dd>A logical graph of peers connected over the internet, used to route requests without a central server.</dd></div><div class="term"><dt>Tracker</dt><dd>A lightweight coordinator that tells peers which other peers hold the content they want, without carrying the data itself.</dd></div><div class="term"><dt>DHT</dt><dd>Distributed hash table: a key-value lookup structure spread across peers, where each peer is responsible for a range of keys.</dd></div><div class="term"><dt>Gossip protocol</dt><dd>An epidemic-style dissemination scheme where each peer forwards updates to a small random set of neighbours.</dd></div><div class="term"><dt>Churn</dt><dd>The continuous arrival and departure of peers, which makes membership and stored data provisional.</dd></div><div class="term"><dt>NAT traversal</dt><dd>Techniques such as hole punching, STUN, and TURN that let peers behind routers connect directly.</dd></div><div class="term"><dt>Sybil attack</dt><dd>One operator creates many fake identities to gain disproportionate influence over routing, storage, or voting.</dd></div><div class="term"><dt>Content addressing</dt><dd>Identifying data by a hash of its content, so any peer can serve it and the receiver can verify it.</dd></div><div class="term"><dt>Merkle tree</dt><dd>A hash tree over data blocks that lets a peer verify individual chunks without downloading the whole file.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with one central server</h2>
+<p class="lede">In a client-server system, every client depends on the same central servers for bandwidth, storage, and compute. For some workloads, that point becomes the limit.</p>
+<ul><li>Distributing a large file to many users means the server's uplink is the ceiling, no matter how many clients want it.</li><li>Capacity must be provisioned for peak demand and paid for even when idle.</li><li>The central server is a single point of failure and a single point of censorship.</li><li>Every byte crosses the operator's infrastructure, which concentrates cost and legal exposure.</li><li>Adding clients adds load rather than capacity — the opposite of what a broadcast workload needs.</li><li>Replicating servers helps, but it is still a small set of well-known endpoints.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What peer-to-peer architecture is</h2>
+<ul><li>Participants, called <strong>peers</strong>, exchange resources directly with each other.</li><li>Each peer is both a <strong>client and a server</strong>: it downloads chunks and uploads chunks it already has.</li><li>Capacity grows with the number of participants, because every new peer brings bandwidth and storage.</li><li>There is no assumption of a reliable always-on node; peers join, leave, and fail constantly.</li><li>The network is defined by a protocol and an overlay topology, not by a fixed set of machines.</li><li>Trust is not assumed: data must be verifiable and peers may be selfish or malicious.</li><li>Most real systems are <strong>hybrids</strong> — a small central service for discovery, signalling, or indexing, with data flowing peer to peer.</li></ul>
+
+<div class="flow"><span class="flow-step">Peer joins</span><span class="flow-arrow">→</span><span class="flow-step">Discovers other peers</span><span class="flow-arrow">→</span><span class="flow-step">Exchanges availability</span><span class="flow-arrow">→</span><span class="flow-step">Transfers chunks directly</span><span class="flow-arrow">→</span><span class="flow-step">Verifies and re-shares</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Pure, hybrid, structured, unstructured</h2>
+<ul><li><strong>Pure P2P:</strong> no central component at all; discovery and data transfer are fully peer driven.</li><li><strong>Hybrid P2P:</strong> a central server handles discovery, indexing, or signalling, while data moves between peers.</li><li><strong>Structured P2P:</strong> peers and keys are arranged by a deterministic rule such as a DHT, giving efficient lookup.</li><li><strong>Unstructured P2P:</strong> peers connect arbitrarily and search by flooding or random walks, which is simple but less efficient.</li><li>Structured networks give predictable lookup but are fragile under churn and harder to build.</li><li>Unstructured networks tolerate churn well but can miss content that exists, or generate heavy query traffic.</li><li>BitTorrent is hybrid and partly structured; early Gnutella was unstructured; Kademlia is structured.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Structured</th><th>Unstructured</th></tr></thead><tbody><tr><td>Placement</td><td>Deterministic by key</td><td>Arbitrary connections</td></tr>
+<tr><td>Lookup</td><td>Route to responsible peer</td><td>Flood or random walk</td></tr>
+<tr><td>Efficiency</td><td>Good at scale</td><td>Query traffic grows</td></tr>
+<tr><td>Churn tolerance</td><td>Needs repair and replication</td><td>Naturally resilient</td></tr>
+<tr><td>Examples</td><td>DHT-based networks</td><td>Broadcast-style file sharing</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Overlay networks and routing</h2>
+<ul><li>The overlay is a logical graph on top of the physical internet; each edge is a connection between peers.</li><li>Routing means forwarding a request hop by hop toward a peer likely to hold the answer.</li><li>The overlay does not control the underlying network, so a logical neighbour can be far away in latency.</li><li>Topology choice trades lookup efficiency against resilience: more neighbours means more state but faster failure recovery.</li><li>Peers must maintain neighbour lists and detect dead connections, because the graph changes constantly.</li><li>Routing loops and stale entries are normal, so protocols need hop limits and fallbacks.</li><li>Good designs keep neighbour sets diverse to avoid partitioning when a well-connected peer disappears.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Discovery: trackers, DHTs, and gossip</h2>
+<ul><li>Before exchanging data, a peer must find others who have it — discovery is the first hard problem.</li><li><strong>Trackers</strong> are simple and fast but centralize metadata and become a dependency and a failure point.</li><li><strong>DHTs</strong> distribute the index across peers so no single node knows everything.</li><li><strong>Gossip</strong> spreads membership and updates epidemically without any central directory.</li><li>Peer exchange lets connected peers share their own lists, reducing tracker dependence.</li><li>Many systems bootstrap from a small known list or a central service, then switch to distributed discovery.</li><li>Discovery metadata is often more sensitive than the data itself, because it reveals who is interested in what.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>DHT mechanics</h2>
+<ul><li>Keys and peers are mapped into the same identifier space by hashing.</li><li>Each peer is responsible for the keys closest to its own identifier, forming a distributed index.</li><li>Kademlia uses XOR distance and keeps a routing table of peers at exponentially increasing distances.</li><li>A lookup converges in a number of hops that grows logarithmically with network size.</li><li>Each peer stores only a small routing table and a subset of keys, so state per node stays manageable.</li><li>Entries must be republished and replicated because peers leave and their keys would otherwise vanish.</li><li>DHTs give exact-match lookup, not search: you must know the key, which is why content hashes are used.</li></ul>
+
+<div class="flow"><span class="flow-step">Hash the key</span><span class="flow-arrow">→</span><span class="flow-step">Compare with local ID</span><span class="flow-arrow">→</span><span class="flow-step">Forward to a closer peer</span><span class="flow-arrow">→</span><span class="flow-step">Repeat until responsible peer</span><span class="flow-arrow">→</span><span class="flow-step">Return value or peers</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Gossip and epidemic dissemination</h2>
+<ul><li>Each peer periodically picks a small random set of neighbours and exchanges state with them.</li><li>Push sends updates outward; pull asks neighbours for updates; push-pull converges fastest.</li><li>Information spreads exponentially at first and converges in a logarithmic number of rounds.</li><li>Gossip is extremely resilient: no central node, no fixed topology, and lossy delivery still converges.</li><li>The cost is redundant messages, so fanout and interval must be tuned against bandwidth.</li><li>Anti-entropy runs periodically to repair peers that missed updates.</li><li>Gossip is used for membership, failure detection, and eventually consistent state, not for low-latency lookups.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Churn</h2>
+<ul><li>Peers join and leave at any time, often without warning, so availability is probabilistic.</li><li><strong>Replication</strong> is the main defence: store each item on several peers so one departure is not fatal.</li><li>Replication factor and repair rate decide how much data survives steady churn.</li><li>Graceful departure lets a peer hand off its responsibilities before leaving; crashes do not.</li><li>Failure detection uses timeouts, heartbeats, and gossip suspicion rather than a central health check.</li><li>Data may need to be re-replicated when the number of live replicas falls below a threshold.</li><li>Frequent membership changes make strong consistency expensive; most P2P systems choose availability.</li></ul>
+
+
+<div class="note">In P2P, a node being present is an assumption with an expiry time, not a fact.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>NAT traversal and connectivity</h2>
+<ul><li>Most peers sit behind NATs and cannot accept inbound connections directly.</li><li><strong>Hole punching</strong> has both peers attempt outbound connections simultaneously so each router creates a mapping.</li><li><strong>STUN</strong> lets a peer discover its public address and port as seen from outside.</li><li><strong>TURN</strong> relays traffic through a server when direct connection fails; reliable but costly and centralizing.</li><li>Symmetric NATs assign different external ports per destination, which often defeats hole punching.</li><li>A signalling service is needed to exchange candidates and coordinate attempts, even though data flows peer to peer.</li><li>Always design a relay fallback; connectivity is a spectrum, not a binary.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Technique</th><th>Role</th><th>Limitation</th></tr></thead><tbody><tr><td>STUN</td><td>Discover public address</td><td>Does not relay traffic</td></tr>
+<tr><td>Hole punching</td><td>Open a direct path</td><td>Fails on symmetric NAT</td></tr>
+<tr><td>TURN</td><td>Relay as last resort</td><td>Bandwidth cost, central dependency</td></tr>
+<tr><td>Signalling</td><td>Exchange connection info</td><td>Needed even for direct paths</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Trust, identity, and attack surface</h2>
+<ul><li>Peers are anonymous by default, so the protocol must assume some participants are adversarial.</li><li>Encrypt transfers so a relay or network observer cannot read content.</li><li><strong>Content addressing</strong> lets the receiver verify that a chunk matches its hash, regardless of who sent it.</li><li>A <strong>Sybil attack</strong> creates many identities to dominate routing, storage, or voting; identity should be costly or bounded.</li><li>Eclipse attacks surround a victim with malicious peers and cut it off from honest ones; neighbour diversity helps.</li><li>Poisoning and free-riding are handled with verification and incentive schemes, not trust.</li><li>Reputation is local and easy togame, so it complements verification rather than replacing it.</li><li>Legal and abuse concerns are real: an open network can distribute content the operator cannot inspect or remove.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Integrity, incentives, and fairness</h2>
+<ul><li>Split content into chunks so transfers can be parallel, resumable, and verified independently.</li><li>A <strong>Merkle tree</strong> over chunks proves a single chunk belongs to the file without downloading everything.</li><li>BitTorrent-style tit-for-tat rewards peers that upload by giving them better download chances.</li><li>Free-riders consume capacity without contributing; without incentives, the network degrades to client-server.</li><li>Rarest-first chunk selection improves availability of scarce pieces across the swarm.</li><li>Choking algorithms limit the number of active uploads so each peer can manage its own bandwidth.</li><li>Incentives can be tokenized, but that adds economic and regulatory complexity and new attack surfaces.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Where P2P fits</h2>
+<ul><li><strong>File distribution:</strong> large files or software updates served by the swarm rather than one origin.</li><li><strong>Blockchain:</strong> peers replicate and validate a ledger without a central authority.</li><li><strong>Content-addressed storage:</strong> networks that address data by hash and fetch it from any holder.</li><li><strong>Real-time communication:</strong> WebRTC calls send media directly between participants after signalling.</li><li><strong>Collaboration:</strong> local-first apps syncing changes peer to peer and reconciling later.</li><li><strong>Edge and CDN assistance:</strong> nearby devices share cached content to reduce origin load.</li><li>Poor fit: authoritative ledgers with strict consistency, private data requiring access control, and workloads where peers cannot stay online.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Trade-offs and when to use it</h2>
+<ul><li>P2P removes the bandwidth bottleneck and the single point of failure, but replaces them with churn and unreliable peers.</li><li>Capacity grows with popularity, which is exactly when a central server struggles.</li><li>Discovery, NAT traversal, verification, and incentives are substantial engineering work.</li><li>Latency is unpredictable because peers are heterogeneous and topologically distant.</li><li>Observability is harder: there is no single place to see the whole system.</li><li>Regulatory and abuse handling become difficult when the operator cannot inspect traffic.</li><li>Use P2P when the workload is broadcast-heavy, content is verifiable, and peers can contribute resources; otherwise a CDN is simpler.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Client-server</th><th>Peer-to-peer</th></tr></thead><tbody><tr><td>Capacity</td><td>Fixed, provisioned</td><td>Grows with peers</td></tr>
+<tr><td>Cost</td><td>Operator pays</td><td>Participants contribute</td></tr>
+<tr><td>Control</td><td>Central, easy to secure</td><td>Distributed, adversarial</td></tr>
+<tr><td>Consistency</td><td>Easy</td><td>Eventual at best</td></tr>
+<tr><td>Failure</td><td>Single point</td><td>Graceful degradation</td></tr>
+<tr><td>Latency</td><td>Predictable</td><td>Variable</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Scalable capacity</strong> grows with participants but depends on strangers contributing bandwidth and storage.</li><li><strong>No central server</strong> removes a single point of failure but makes discovery, monitoring, and abuse handling much harder.</li><li><strong>Structured DHTs</strong> give efficient exact-match lookup but are complex and need replication under churn.</li><li><strong>Unstructured networks</strong> tolerate churn but waste query traffic and may not find existing content.</li><li><strong>Replication</strong> improves durability under churn but multiplies storage and repair traffic.</li><li><strong>Direct connections</strong> avoid relay costs but fail behind symmetric NATs and restrictive networks.</li><li><strong>Content addressing</strong> makes data verifiable but prevents mutable content without an extra naming layer.</li><li><strong>Incentives</strong> encourage contribution but add complexity and can be gamed.</li><li><strong>Anonymity</strong> protects users but raises abuse, legal, and Sybil-resistance problems.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is peer-to-peer architecture?</summary><div class="answer"><p>A design where participants exchange resources directly instead of through a central server. Each peer acts as both client and server, so capacity grows with the number of participants. The trade-off is churn, unpredictable connectivity, and the need to distrust other peers.</p></div></details>
+<details><summary>2. How is P2P different from client-server?</summary><div class="answer"><p>Client-server concentrates data and control in a small set of servers, giving predictable performance and easy security but a bandwidth ceiling and single point of failure. P2P distributes both capacity and responsibility, gaining scale and resilience at the cost of coordination and trust.</p></div></details>
+<details><summary>3. What is a hybrid P2P system?</summary><div class="answer"><p>One with a small central component for discovery, indexing, or signalling while the actual data flows between peers. Most real systems are hybrids because fully decentralized discovery is hard and a tracker or signalling server is cheap to run.</p></div></details>
+<details><summary>4. How does a DHT work?</summary><div class="answer"><p>Keys and peers are hashed into the same identifier space, and each peer is responsible for keys near its own ID. A lookup hops toward progressively closer peers, converging in logarithmically many steps, while each node stores only a small routing table.</p></div></details>
+<details><summary>5. Why is churn hard?</summary><div class="answer"><p>Peers leave without warning, so stored data and routing entries disappear. Systems need replication, failure detection, and repair to keep availability, and must avoid strong consistency assumptions that a stable membership would allow.</p></div></details>
+<details><summary>6. What is NAT traversal and why is it needed?</summary><div class="answer"><p>Most peers are behind NATs and cannot accept inbound connections. Hole punching, STUN, and TURN establish a path, often with a signalling service to coordinate. Symmetric NATs frequently defeat direct connections, so a relay fallback is required.</p></div></details>
+<details><summary>7. How do you stop peers from sending corrupt data?</summary><div class="answer"><p>Verify content by hash. Content addressing and Merkle trees let a receiver check each chunk independently, so it does not matter who served it. Encryption protects confidentiality, but integrity comes from verification.</p></div></details>
+<details><summary>8. What is a Sybil attack?</summary><div class="answer"><p>One operator creates many fake peer identities to dominate routing, storage, or voting. Defences include making identity costly, limiting influence per identity, ensuring neighbour diversity, and using verifiable work or stake where appropriate.</p></div></details>
+<details><summary>9. How does gossip spread information?</summary><div class="answer"><p>Each peer periodically exchanges state with a small random set of neighbours. Updates spread exponentially and converge in logarithmically many rounds, with redundancy providing resilience. The cost is duplicate messages, so fanout and interval must be tuned.</p></div></details>
+<details><summary>10. What are the main P2P use cases?</summary><div class="answer"><p>File distribution and software updates, blockchain ledgers, content-addressed storage, WebRTC media, local-first collaboration, and edge caching. They share a need for many participants to contribute capacity without a central origin.</p></div></details>
+<details><summary>11. How do you motivate peers to upload?</summary><div class="answer"><p>Use reciprocity such as tit-for-tat, where good uploaders get better download priority, plus rarest-first selection to keep scarce chunks available. Token incentives can work but add economic complexity and new attack surfaces.</p></div></details>
+<details><summary>12. When would you not use P2P?</summary><div class="answer"><p>When you need strict consistency, access control over private data, predictable latency, or simple operations. A CDN or central service is easier to secure, observe, and govern. P2P pays off mainly for broadcast-heavy, verifiable content.</p></div></details>
+<details><summary>13. How do you observe a P2P network?</summary><div class="answer"><p>Instrument peers to emit local metrics and aggregate them, and sample the overlay from several vantage points. Track peer counts, churn rate, replication health, lookup latency, and transfer success. There is no single place that sees everything.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming peers are always online and treating membership as stable.</li><li>Designing discovery as fully decentralized when a small tracker or signalling service would be simpler.</li><li>Forgetting a relay fallback for peers behind symmetric NATs.</li><li>Trusting a peer's data without verifying hashes because the connection is encrypted.</li><li>Ignoring free-riding, so the network degrades into a few peers serving everyone.</li><li>Guaranteeing global ordering or strong consistency across unreliable peers.</li><li>Underestimating legal and abuse handling for content you cannot inspect or delete.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="event-driven-architecture.html"><span>← Previous</span><strong>Event-Driven Architecture</strong></a><a class="next" href="logging.html"><span>Next →</span><strong>Logging</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/peer-to-peer-p2p-architecture">AlgoMaster — Peer-to-Peer (P2P) Architecture</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

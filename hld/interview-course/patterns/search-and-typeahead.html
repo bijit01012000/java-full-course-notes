@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Search and Typeahead — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 17 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Search and Typeahead</h1>
+    <p class="dek">Interview Patterns · Specialized Data</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/search-and-typeahead">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Where this pattern shows up</a>
+<a href="#s3">Why a normal database index is not enough</a>
+<a href="#s4">The inverted index</a>
+<a href="#s5">Building and updating the index</a>
+<a href="#s6">Ranking results</a>
+<a href="#s7">Query understanding and filtering</a>
+<a href="#s8">Typeahead and autocomplete</a>
+<a href="#s9">Scaling the index</a>
+<a href="#s10">Freshness, consistency, and reindexing</a>
+<a href="#s11">Caching and protecting the hot path</a>
+<a href="#s12">Failure modes and graceful degradation</a>
+<a href="#s13">Measuring quality and operations</a>
+<a href="#s14">How to approach it in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Full-text search turns documents into an <strong>inverted index</strong> so matching and ranking happen without scanning every record; typeahead adds a second, much hotter path that predicts queries from a prefix before the user finishes typing.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Inverted index</dt><dd>A mapping from each term to the documents (and positions) that contain it, so a query looks up terms instead of scanning rows.</dd></div><div class="term"><dt>Analyzer</dt><dd>The pipeline that normalizes text before indexing and querying: character filtering, tokenization, lowercasing, stemming, stop words, and synonyms.</dd></div><div class="term"><dt>Posting list</dt><dd>The ordered list of document IDs, term frequencies, and positions stored for one term in an inverted index.</dd></div><div class="term"><dt>Relevance score</dt><dd>A numeric ranking of how well a document matches a query, usually from BM25 or a learned ranking model.</dd></div><div class="term"><dt>BM25</dt><dd>A probabilistic ranking function that rewards term frequency but saturates it and normalizes for document length.</dd></div><div class="term"><dt>Typeahead</dt><dd>Query suggestions computed from a partial prefix, ranked by popularity, recency, or personalization and returned with very low latency.</dd></div><div class="term"><dt>Trie / prefix index</dt><dd>A data structure or index that stores strings by prefix so all completions of a prefix can be enumerated efficiently.</dd></div><div class="term"><dt>Facet</dt><dd>A filterable dimension such as category, brand, or price range, usually computed as counts over the current result set.</dd></div><div class="term"><dt>Index lag</dt><dd>The delay between a source-of-truth write and that change becoming searchable, caused by ingestion, refresh, or segment merges.</dd></div><div class="term"><dt>NDCG</dt><dd>Normalized Discounted Cumulative Gain, an offline ranking metric that rewards relevant results appearing near the top.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">A search box looks trivial from the client side: send a few words, get a ranked list back in milliseconds. Behind it, the system must match free text against a large corpus, ignore spelling and morphology differences, respect filters, and order results by a blend of relevance and business value.</p>
+<ul><li>The corpus may contain far more documents than fit comfortably in memory, and it changes continuously.</li><li>Users type short, ambiguous, often misspelled queries, so exact string matching produces poor results.</li><li>Ranking matters as much as matching: the best answer on page three is effectively a failure.</li><li>Typeahead adds a second workload with a much tighter latency budget and a much higher request rate.</li><li>Requirements differ by product: exact lookup, relevance-ranked discovery, prefix suggestion, and filtering are not the same problem.</li><li>The system must stay useful while the index is catching up, partially unavailable, or under a traffic spike.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Where this pattern shows up</h2>
+<ul><li>E-commerce catalog search with facets, price filters, and business-boosted placements.</li><li>Documentation, support, and code search where exact terms and phrase matching matter.</li><li>Social and content platforms searching posts, creators, hashtags, and comments.</li><li>Local and maps search combining text relevance with distance and opening hours.</li><li>Log and observability search over high-volume, time-partitioned event data.</li><li>Autocomplete for products, places, users, and previous queries in a search bar.</li><li>Any interview problem with a search box, a feed filter, or a 'find the best match' requirement.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Why a normal database index is not enough</h2>
+<ul><li>A B-tree index accelerates exact matches and range scans on a column, not relevance ranking across free text.</li><li><code>LIKE '%term%'</code> cannot use a normal index and degrades into scanning or a full-text side index.</li><li>Relational engines do not tokenize, stem, apply synonyms, or score by term frequency out of the box.</li><li>Multi-word queries need AND/OR semantics, phrase proximity, and per-field boosts that a simple column predicate cannot express.</li><li>Facet counts, highlighting, spell correction, and fuzzy matching are separate concerns that a transactional database handles poorly.</li><li>The source of truth should remain the transactional database; search is a derived, eventually consistent read model.</li></ul>
+
+
+<div class="note">Do not replace the primary database with a search engine. Treat the search index as a derived view that can be rebuilt from the source of truth.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The inverted index</h2>
+<p class="lede">Instead of asking which terms a document contains at query time, the indexer precomputes the reverse mapping once and updates it as documents change.</p>
+<ul><li>Each document is passed through an <strong>analyzer</strong> that emits normalized terms in order.</li><li>The index stores a <strong>posting list</strong> per term: document IDs, term frequencies, and token positions.</li><li>Query terms are analyzed the same way, then their posting lists are intersected, unioned, or proximity-checked.</li><li>Positions enable phrase queries and highlighting; frequencies feed relevance scoring.</li><li>Skip pointers or compressed blocks let the engine jump through long posting lists without reading every entry.</li><li>Term-level sharding is possible in theory but document-level sharding is the usual choice because multi-term queries stay local to a shard.</li></ul>
+<h3>Analysis choices change results</h3>
+<ul><li>Lowercasing and Unicode normalization make matching case- and accent-insensitive.</li><li>Stemming conflates related forms but can create surprising matches; lemmatization is more precise and more expensive.</li><li>Stop-word removal shrinks the index but can break phrase queries and exact titles.</li><li>Synonyms expand recall but may dilute precision if applied at query time without care.</li><li>The same analyzer must be used consistently at index time and query time, or terms will not line up.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Building and updating the index</h2>
+<p class="lede">The index is a pipeline, not a single write. Correctness depends on every stage being retryable and idempotent.</p>
+<ul><li>The transactional database remains the source of truth; a change stream or outbox publishes inserts, updates, and deletes.</li><li>Indexing workers transform records into search documents, enrich them with denormalized fields, and write them to the index.</li><li>Each document carries a stable ID and a version so out-of-order updates can be rejected or overwritten safely.</li><li>Deletes are represented as tombstones or versioned updates, then physically removed during segment merges.</li><li>Bulk indexing is far more efficient than one document per request, but it increases the visibility delay.</li><li>A full reindex builds a new index in parallel, then swaps an alias so readers never see a half-built index.</li><li>Backfills and schema changes must be replayable from the source of truth, not from the old index.</li></ul>
+
+<div class="flow"><span class="flow-step">Source database write</span><span class="flow-arrow">→</span><span class="flow-step">Change event / outbox</span><span class="flow-arrow">→</span><span class="flow-step">Indexing worker</span><span class="flow-arrow">→</span><span class="flow-step">Analyzer and enrichment</span><span class="flow-arrow">→</span><span class="flow-step">Index segment</span><span class="flow-arrow">→</span><span class="flow-step">Refresh and alias swap</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Ranking results</h2>
+<ul><li>Retrieve a candidate set cheaply with the inverted index, then rerank the top candidates with more expensive signals.</li><li><strong>BM25</strong> or TF-IDF provides a strong lexical baseline and handles term saturation better than raw term counts.</li><li>Field boosts let a title match outrank a body match; phrase and exact matches usually deserve an extra boost.</li><li>Popularity, recency, conversion rate, and business rules are combined with lexical relevance, often through a weighted score.</li><li>Learning-to-rank models can improve quality but need training data, feature pipelines, and careful online evaluation.</li><li>Diversity and deduplication prevent ten near-identical results from occupying the first page.</li><li>Ranking is product-specific: an e-commerce query and a documentation query should not share the same default weights.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Signal</th><th>Why it helps</th><th>Risk</th></tr></thead><tbody><tr><td>Lexical score (BM25)</td><td>Matches query terms and rewards rare terms</td><td>Ignores intent and synonyms</td></tr>
+<tr><td>Popularity / CTR</td><td>Promotes results users actually choose</td><td>Feedback loops entrench winners</td></tr>
+<tr><td>Recency</td><td>Keeps news and inventory fresh</td><td>Buries evergreen content</td></tr>
+<tr><td>Personalization</td><td>Adapts to user history and location</td><td>Privacy cost and filter bubbles</td></tr>
+<tr><td>Business boost</td><td>Supports revenue or policy goals</td><td>Can overwhelm relevance if unbounded</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Query understanding and filtering</h2>
+<ul><li>Spell correction and did-you-mean suggestions recover from typos, but should not silently rewrite high-confidence queries.</li><li>Synonym and query expansion increase recall; they must be curated to avoid nonsense matches.</li><li>Intent classification can route navigational queries to an exact page and exploratory queries to ranked results.</li><li>Filters and facets are applied alongside relevance, not after pagination, or result counts and pages become inconsistent.</li><li>Facet counts are aggregations over the matching set and can be expensive; cache or approximate them when the corpus is large.</li><li>Prefix matching, wildcard matching, and fuzzy matching have very different cost profiles and should be opt-in.</li><li>Multi-language search needs per-language analyzers and possibly separate fields or indexes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Typeahead and autocomplete</h2>
+<p class="lede">Typeahead answers a different question from search: not 'which documents match' but 'which queries are other people likely to complete this prefix with'.</p>
+<ul><li>A prefix index, trie, or finite-state transducer enumerates completions; precomputed top-k lists per prefix avoid traversal at request time.</li><li>Suggestions are ranked by popularity, recency, trending signals, and personalization, with unsafe or low-quality terms filtered out.</li><li>The client should debounce keystrokes, require a minimum prefix length, and cancel stale in-flight requests.</li><li>The server should cap the suggestion count and the work per prefix; typeahead traffic often dwarfs full search traffic.</li><li>New or rare queries may have no history, so fall back to lexical completions from the document index.</li><li>Trending suggestions need a short cache TTL and a way to evict abusive or spammy terms quickly.</li><li>Prefixes that cross word boundaries and non-Latin scripts need explicit handling; naive character splits behave badly.</li></ul>
+
+<div class="flow"><span class="flow-step">User types prefix</span><span class="flow-arrow">→</span><span class="flow-step">Debounce and cancel stale request</span><span class="flow-arrow">→</span><span class="flow-step">Prefix lookup or cache</span><span class="flow-arrow">→</span><span class="flow-step">Filter and rank suggestions</span><span class="flow-arrow">→</span><span class="flow-step">Return top-k</span><span class="flow-arrow">→</span><span class="flow-step">Log impression for evaluation</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Scaling the index</h2>
+<ul><li>Document-partitioned shards each hold a subset of the corpus; a query fans out to every shard and merges the top results.</li><li>Replicas increase query throughput and availability but multiply indexing work and storage.</li><li>The scatter-gather tail is the limiting factor: one slow shard delays the whole response, so hedge or time out slow shards.</li><li>Shard count should be chosen for future growth; resharding a large index is slow and operationally risky.</li><li>Index size is driven by stored fields, positions, doc values, and replicas, not just the raw text.</li><li>Segment merges consume CPU and I/O; they must be throttled so search latency does not collapse during heavy indexing.</li><li>Routing by tenant or category can reduce fan-out for common queries but risks hot shards.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Freshness, consistency, and reindexing</h2>
+<ul><li>Most search engines refresh near-real-time rather than per document, so a just-written record may not be immediately searchable.</li><li>Users usually accept eventual consistency for discovery, but the author of a new listing often expects to see it immediately.</li><li>Read-your-writes can be handled by pinning that user to a fresh view, showing an optimistic placeholder, or querying the source of truth for their own records.</li><li>Deletes and permission changes must propagate as fast as creates; a stale index can leak content that should no longer be visible.</li><li>Index aliases enable blue-green reindexing: build the new index, verify counts and quality, then switch traffic atomically.</li><li>A reconcile job compares source-of-truth records with index documents and repairs drift.</li><li>Schema and analyzer changes require a full rebuild because existing terms were analyzed differently.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Caching and protecting the hot path</h2>
+<ul><li>Cache popular query results and top prefixes at the edge or in a shared cache; the head of the query distribution is extremely repetitive.</li><li>Normalize cache keys carefully: filters, locale, page, and personalization change the correct result.</li><li>Use short TTLs for trending or inventory-sensitive results and longer TTLs for stable reference content.</li><li>Request coalescing prevents a cache miss on a hot key from stampeding the search cluster.</li><li>Negative caching avoids repeatedly searching for queries that reliably return nothing, but must expire quickly.</li><li>Circuit breakers and concurrency limits protect the cluster from typeahead retry storms.</li><li>Serve a safe fallback, such as popular items or cached results, when the search cluster is degraded.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Failure modes and graceful degradation</h2>
+<ul><li>If a shard is unavailable, return partial results with a clear signal rather than failing the entire query.</li><li>If the search cluster is down, fall back to database-backed exact lookup, curated popular results, or a cached page.</li><li>If indexing lags, search results become stale; monitor lag and alert before users notice missing content.</li><li>If ranking features are unavailable, fall back to lexical scoring instead of returning an arbitrary order.</li><li>If typeahead is slow, return fewer suggestions or nothing; never block the search box.</li><li>Retry only idempotent reads, with jitter and a strict budget; aggressive retries turn a slowdown into an outage.</li><li>Protect against abusive queries with complexity limits, timeouts, and rate limits per client.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Measuring quality and operations</h2>
+<ul><li>Track p50, p95, and p99 latency separately for full search and typeahead; they have different budgets.</li><li>Track zero-result rate, query volume, click-through rate, and the rank of the first click.</li><li>Use offline judgments and metrics such as NDCG or mean reciprocal rank to compare ranking changes before launch.</li><li>Run online A/B tests because offline relevance metrics do not capture business or user behavior fully.</li><li>Monitor index lag, document count drift, failed indexing events, and dead-letter queues.</li><li>Watch shard skew, segment count, merge pressure, cache hit ratio, and CPU during reindexing.</li><li>Sample slow queries and log their shard timings to find the tail-latency source.</li></ul>
+
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>How to approach it in an interview</h2>
+<ul><li>Clarify corpus size, document shape, query types, freshness needs, languages, and whether typeahead is in scope.</li><li>Define the API and response shape first: results, scores, facets, suggestions, cursor, and total count.</li><li>Separate the source of truth from the derived index, and describe the ingestion and reindex path.</li><li>Explain the inverted index and analyzer choices before naming a product; the mechanism is what is being tested.</li><li>Describe ranking as retrieval plus reranking, with explicit signals and a fallback.</li><li>Treat typeahead as a separate low-latency service with prefix indexes, caching, and debouncing.</li><li>Finish with scaling, freshness, failure handling, and the metrics you would watch.</li></ul>
+
+
+<div class="note">A strong answer explains why search is not a database query, how the index is kept fresh, and what degrades when the cluster is unhealthy.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Dedicated search index</strong> gives relevance, facets, and fast text matching but adds a second data store to operate and keep in sync.</li><li><strong>Near-real-time indexing</strong> improves freshness but increases merge pressure and reduces indexing throughput.</li><li><strong>More shards</strong> improve parallelism and isolation but increase fan-out, tail latency, and reindex cost.</li><li><strong>More replicas</strong> improve query availability and throughput but multiply storage and indexing work.</li><li><strong>Richer analysis</strong> (stemming, synonyms, fuzzy matching) improves recall but can hurt precision and increase query cost.</li><li><strong>Precomputed typeahead lists</strong> are fast but consume memory and become stale as query popularity shifts.</li><li><strong>Personalization and business boosts</strong> improve engagement but complicate evaluation, caching, and fairness.</li><li><strong>Aggressive caching</strong> protects the cluster but serves stale results and risks incorrect invalidation.</li><li><strong>Partial results on shard failure</strong> preserve availability but can silently hide relevant documents.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why not just use a SQL LIKE query for search?</summary><div class="answer"><p>A leading-wildcard <code>LIKE</code> cannot use a normal B-tree index, so it scans rows and cannot rank by relevance. It also lacks tokenization, stemming, synonyms, phrase proximity, and facet aggregation. A search index is a derived read model built for those operations.</p></div></details>
+<details><summary>2. What is an inverted index and why is it fast?</summary><div class="answer"><p>It maps each analyzed term to a posting list of documents and positions. A query looks up only the terms it contains and intersects their lists, instead of scanning every document. Positions support phrase queries and highlighting.</p></div></details>
+<details><summary>3. How do you keep the search index in sync with the database?</summary><div class="answer"><p>Write to the database as the source of truth, publish changes through an outbox or change stream, and have idempotent indexing workers apply versioned updates. Use a full reindex plus alias swap for rebuilds, and a reconcile job to repair drift.</p></div></details>
+<details><summary>4. How do you handle a document update arriving out of order?</summary><div class="answer"><p>Attach a monotonically increasing version or timestamp to each document and reject or overwrite older versions. The index operation must be idempotent so retries do not create duplicates.</p></div></details>
+<details><summary>5. How does ranking work?</summary><div class="answer"><p>Retrieve candidates with the inverted index, score them with a lexical model such as BM25, then rerank the top candidates using popularity, recency, personalization, and business rules. Keep the signals explicit and evaluate changes offline and online.</p></div></details>
+<details><summary>6. Why is search eventually consistent, and is that acceptable?</summary><div class="answer"><p>Indexing is asynchronous and search engines refresh in batches, so new writes appear after a delay. Discovery usually tolerates this. Cases that do not, such as the author viewing their own new listing or a permission revocation, need a targeted read from the source of truth or a faster path.</p></div></details>
+<details><summary>7. How would you design typeahead?</summary><div class="answer"><p>Build a prefix index or precompute top-k completions per prefix, rank by popularity and context, filter unsafe terms, cache hot prefixes, and debounce on the client. Keep the service independent from full search so a search outage does not break the search box.</p></div></details>
+<details><summary>8. How do you scale a search index?</summary><div class="answer"><p>Partition documents across shards, add replicas for query throughput, route queries to all shards, and merge top results. Control fan-out, hedge slow shards, throttle merges, and plan shard count for growth because resharding is expensive.</p></div></details>
+<details><summary>9. What is the tail-latency problem in search?</summary><div class="answer"><p>A query must wait for every shard, so the slowest shard sets the latency. With many shards, the chance that at least one is slow rises. Mitigate with hedged requests, timeouts, partial results, and fewer or better-balanced shards.</p></div></details>
+<details><summary>10. How do you deploy a new analyzer or schema?</summary><div class="answer"><p>Build a new index with the new mapping, backfill from the source of truth, verify document counts and relevance, then switch an alias atomically. Old and new indexes cannot share analyzed terms reliably.</p></div></details>
+<details><summary>11. How do you prevent a stale index from leaking deleted content?</summary><div class="answer"><p>Propagate deletes and permission changes with high priority, keep tombstones until physically removed, and verify authorization at read time for sensitive documents. Do not rely on index freshness as the only access control.</p></div></details>
+<details><summary>12. What would you monitor in production?</summary><div class="answer"><p>Latency percentiles for search and typeahead, error and timeout rates, zero-result rate, click metrics, index lag, indexing failures, shard skew, segment and merge pressure, cache hit ratio, and reindex progress.</p></div></details>
+<details><summary>13. When would you not use a dedicated search engine?</summary><div class="answer"><p>When the corpus is small, queries are exact or simple prefix matches, and the database can serve them within budget. Adding a search cluster brings synchronization, operations, and consistency costs that are not justified for a simple lookup.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating the search index as the source of truth and losing data when it is rebuilt.</li><li>Using a leading-wildcard SQL query and calling it search.</li><li>Forgetting that the analyzer used at index time must match the analyzer used at query time.</li><li>Ignoring index lag and then wondering why newly created records are missing.</li><li>Building typeahead on the full search path without caching, debouncing, or a separate latency budget.</li><li>Letting one slow shard determine the latency of every query through unbounded scatter-gather.</li><li>Optimizing offline relevance metrics without checking clicks and business outcomes online.</li><li>Assuming deletes and permission changes propagate as quickly as they should.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="scheduling-jobs.html"><span>← Previous</span><strong>Scheduling Delayed and Recurring Jobs</strong></a><a class="next" href="finding-tracking-locations.html"><span>Next →</span><strong>Finding and Tracking Locations</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/search-and-typeahead">AlgoMaster — Search and Typeahead</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

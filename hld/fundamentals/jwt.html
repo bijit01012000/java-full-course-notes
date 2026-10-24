@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JWT — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 47 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>JWT</h1>
+    <p class="dek">Security · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/jwt">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: HTTP has no memory</a>
+<a href="#s2">Why JWTs are useful — and what they are not</a>
+<a href="#s3">The structure of a JWT</a>
+<a href="#s4">The header</a>
+<a href="#s5">The payload and its claims</a>
+<a href="#s6">The signature</a>
+<a href="#s7">The authentication flow</a>
+<a href="#s8">JWTs across services, JWKS, and key rotation</a>
+<a href="#s9">Access, refresh, and ID tokens</a>
+<a href="#s10">Storing tokens in browsers and elsewhere</a>
+<a href="#s11">Revocation</a>
+<a href="#s12">Trade-offs and when not to use JWTs</a>
+<a href="#s13">Security checklist and common mistakes</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A JWT is a signed, self-contained token that lets any service holding the issuer's public key verify who the user is without a session lookup — at the cost of revocation and exposure.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>JWT</dt><dd>JSON Web Token: a compact, URL-safe token format carrying claims, defined by RFC 7519. It is a format, not an authentication protocol.</dd></div><div class="term"><dt>Claim</dt><dd>A piece of information inside the payload, such as subject, issuer, audience, expiry, role, or tenant.</dd></div><div class="term"><dt>JWS</dt><dd>JSON Web Signature: a signed JWT. This is what almost all access tokens are.</dd></div><div class="term"><dt>JWE</dt><dd>JSON Web Encryption: an encrypted JWT, where the payload is unreadable without the decryption key.</dd></div><div class="term"><dt>kid</dt><dd>Key ID in the header that tells the verifier which key in the issuer's key set signed this token.</dd></div><div class="term"><dt>JWKS</dt><dd>JSON Web Key Set: an endpoint publishing the issuer's current public keys so services can verify tokens and rotate keys.</dd></div><div class="term"><dt>Bearer token</dt><dd>A credential where possession alone grants access; anyone who holds it can use it until it expires.</dd></div><div class="term"><dt>Access token</dt><dd>Short-lived credential sent to APIs that grants access to specific resources or scopes.</dd></div><div class="term"><dt>Refresh token</dt><dd>Longer-lived credential sent only to the auth server to obtain new access tokens; usually opaque and server-tracked.</dd></div><div class="term"><dt>Algorithm confusion</dt><dd>An attack where a verifier trusts the token's <code>alg</code> header and accepts a token signed with the wrong algorithm or a public key used as an HMAC secret.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: HTTP has no memory</h2>
+<p class="lede">HTTP is stateless: every request must carry proof of who is calling. The classic answer is a server-side session.</p>
+<ul><li>On login, the server verifies credentials, creates a session, and stores it in a database or in Redis.</li><li>The client receives an opaque session ID — usually in a cookie — and sends it with every request.</li><li>The server looks up the session, resolves the user, and processes the request.</li><li>This is simple, centrally revocable, and still the right default for many applications.</li><li>In a distributed system, every service must either query the session store or call the auth service, adding latency and a shared dependency on the critical path.</li><li>Caching session data locally helps latency but reintroduces staleness and cache invalidation.</li><li>The alternative is to put signed claims in the credential itself so each service can verify locally.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Server-side session</th><th>Signed JWT</th></tr></thead><tbody><tr><td>Client holds</td><td>Opaque session ID</td><td>Signed token with claims</td></tr>
+<tr><td>Server identifies user by</td><td>Looking up the session store</td><td>Verifying the signature and reading claims</td></tr>
+<tr><td>Revocation</td><td>Delete the session</td><td>Wait for expiry or add extra checks</td></tr>
+<tr><td>Best fit</td><td>Single app, first-party web</td><td>Many services verifying one token</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">POST /login with credentials</span><span class="flow-arrow">→</span><span class="flow-step">Server verifies and creates a session</span><span class="flow-arrow">→</span><span class="flow-step">Set-Cookie: session_id</span><span class="flow-arrow">→</span><span class="flow-step">Client sends cookie</span><span class="flow-arrow">→</span><span class="flow-step">Server looks up the session</span><span class="flow-arrow">→</span><span class="flow-step">Response</span></div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why JWTs are useful — and what they are not</h2>
+<ul><li>A signed JWT lets a service verify that the token came from a trusted issuer and was not modified, without contacting the issuer.</li><li>That removes the session lookup from every request and keeps the auth service off the hot path.</li><li>A JWT is a <strong>token format</strong>, not an authentication protocol. OAuth 2.0 and OpenID Connect decide when tokens are issued, to whom, with which scopes, and how refresh works.</li><li>A signed JWT is formally a <strong>JWS</strong>. Encrypted JWTs exist (<strong>JWE</strong>) but are less common for API access tokens because they add key-management work.</li><li>JWTs are also used for service-to-service auth, short-lived signed URLs, and passing verified identity between internal services.</li><li>They do not automatically make a system faster, more secure, or more scalable; they move trust into a signing key and a claims contract.</li><li>Statelessness is partial: revocation, refresh tracking, and high-risk checks still need server-side state.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The structure of a JWT</h2>
+<p class="lede">A JWT is three Base64URL-encoded sections joined by dots: <code>header.payload.signature</code>.</p>
+<ul><li>The <strong>header</strong> describes how the token was signed: algorithm, type, and key ID.</li><li>The <strong>payload</strong> carries the claims: who the subject is, who issued it, when it expires, and application data such as roles or tenant.</li><li>The <strong>signature</strong> is computed over the encoded header and payload and lets the receiver detect tampering.</li><li>Base64URL is an encoding, not encryption. Anyone holding the token can decode the first two parts.</li><li>The signature covers <code>base64url(header) + '.' + base64url(payload)</code>, so changing either part invalidates it.</li><li>Tokens are compact enough to travel in an <code>Authorization</code> header, which is why the format spread.</li><li>Decoding without verifying is always possible and often useful for debugging — never for trust decisions.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Part</th><th>Contains</th><th>Readable by anyone?</th></tr></thead><tbody><tr><td>Header</td><td>alg, typ, kid</td><td>Yes — it is only encoded</td></tr>
+<tr><td>Payload</td><td>Registered and custom claims</td><td>Yes — it is only encoded</td></tr>
+<tr><td>Signature</td><td>MAC or asymmetric signature bytes</td><td>Yes, but not forgeable without the key</td></tr></tbody></table></div>
+
+<pre class="code"><code>eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI2LTEwIn0
+.
+eyJzdWIiOiJ1c2VyXzEyMyIsImlzcyI6Imh0dHBzOi8vYXV0aC5leGFtcGxlIiw
+.
+&lt;signature bytes, base64url&gt;</code></pre>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The header</h2>
+<ul><li><code>alg</code> names the signing algorithm: <code>HS256</code> (HMAC-SHA256), <code>RS256</code> (RSA + SHA-256), or <code>ES256</code> (ECDSA + SHA-256).</li><li><code>typ</code> is normally <code>JWT</code> and identifies the token type.</li><li><code>kid</code> is the key ID; it tells the verifier which key in a set to use, which is what makes rotation possible.</li><li>The header is attacker-controlled until verification succeeds. It is a hint, not an instruction.</li><li>The server must enforce its own allowlist of algorithms and its own trusted key set; it must never let <code>alg</code> decide how to verify.</li><li><code>kid</code> is also attacker-controlled: never use it to build a file path or database query directly (path traversal and injection risks).</li><li>During rotation, old and new keys coexist, and <code>kid</code> selects the right one for each token.</li></ul>
+
+
+<pre class="code"><code>{
+  &#x27;alg&#x27;: &#x27;RS256&#x27;,
+  &#x27;typ&#x27;: &#x27;JWT&#x27;,
+  &#x27;kid&#x27;: &#x27;key-2026-10&#x27;
+}</code></pre>
+<div class="note">The header carries no user information. It describes how the signature should be checked, and the verifier decides which of those descriptions it accepts.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The payload and its claims</h2>
+<ul><li>Registered claims are standardized and understood by libraries: <code>sub</code>, <code>iss</code>, <code>aud</code>, <code>iat</code>, <code>exp</code>, <code>nbf</code>, <code>jti</code>.</li><li><code>sub</code> identifies the subject; <code>iss</code> the issuer; <code>aud</code> the intended audience; <code>exp</code> and <code>nbf</code> bound validity in time.</li><li><code>jti</code> is a unique token ID, useful for replay detection and deny lists.</li><li>Custom claims carry roles, permissions, tenant ID, plan, or scopes — whatever the API needs to make a decision.</li><li>The payload is <strong>not encrypted</strong> by default. Never put passwords, API keys, secrets, or sensitive personal data in it.</li><li>Claims are a snapshot taken at issuance: changing a user's role does not change tokens already issued until they expire.</li><li>Keep claims small and stable. They travel on every request and oversized tokens hit gateway header limits.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Claim</th><th>Meaning</th></tr></thead><tbody><tr><td>sub</td><td>Subject: the user or entity the token belongs to</td></tr>
+<tr><td>iss</td><td>Issuer: who created and signed the token</td></tr>
+<tr><td>aud</td><td>Audience: which service or application may accept it</td></tr>
+<tr><td>iat</td><td>Issued at: when the token was created</td></tr>
+<tr><td>exp</td><td>Expiration: when the token stops being valid</td></tr>
+<tr><td>nbf</td><td>Not before: the token is invalid before this time (optional)</td></tr>
+<tr><td>jti</td><td>JWT ID: a unique identifier for this token (optional)</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>The signature</h2>
+<p class="lede">The signature is what turns readable JSON into a trustworthy credential. It proves integrity and origin — not secrecy.</p>
+<ul><li>The issuer computes a MAC or digital signature over the encoded header and payload using its signing key.</li><li>The verifier recomputes or checks it with the corresponding key; a mismatch means the token was altered or signed by someone else.</li><li>If an attacker flips a role from <code>user</code> to <code>admin</code>, the encoded payload changes and the old signature no longer matches.</li><li>Without the signing key, the attacker cannot produce a valid signature for the modified payload.</li><li><strong>HS256</strong> uses one shared secret to sign and verify, so every verifier can also mint tokens.</li><li><strong>RS256/ES256</strong> use a private key to sign and a public key to verify, so verifiers can check but not create tokens.</li><li>Use constant-time comparison (libraries do this) and never implement signature checks by hand.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>Algorithms</th><th>How it works</th><th>Good fit</th></tr></thead><tbody><tr><td>Symmetric</td><td>HS256</td><td>One shared secret signs and verifies</td><td>One issuer and a small set of fully trusted verifiers</td></tr>
+<tr><td>Asymmetric</td><td>RS256, ES256</td><td>Issuer signs with a private key; others verify with the public key</td><td>Many services verifying tokens from one issuer</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The authentication flow</h2>
+<ul><li>The client sends credentials to the authentication server, which verifies them.</li><li>The server builds a payload with subject, issuer, audience, expiry, and needed claims, then signs it.</li><li>The client stores the token and sends it as <code>Authorization: Bearer &lt;token&gt;</code>.</li><li>The API verifies the signature, then checks <code>exp</code>, <code>iss</code>, <code>aud</code>, and required scopes or permissions.</li><li>Return <strong>401 Unauthorized</strong> when authentication fails; return <strong>403 Forbidden</strong> when the token is valid but lacks permission.</li><li>A JWT is a bearer credential: whoever holds it can use it. HTTPS is mandatory, and tokens must never appear in URLs.</li><li>With OAuth 2.0 and OIDC, the app redirects to an identity provider and never handles the user's password; the API-side verification is the same.</li></ul>
+
+<div class="flow"><span class="flow-step">Credentials to auth server</span><span class="flow-arrow">→</span><span class="flow-step">Verify and sign JWT</span><span class="flow-arrow">→</span><span class="flow-step">Client stores token</span><span class="flow-arrow">→</span><span class="flow-step">Bearer token on API calls</span><span class="flow-arrow">→</span><span class="flow-step">Verify signature + claims</span><span class="flow-arrow">→</span><span class="flow-step">200, 401, or 403</span></div>
+<pre class="code"><code>GET /orders HTTP/1.1
+Host: api.example.com
+Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI2LTEwIn0...</code></pre>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>JWTs across services, JWKS, and key rotation</h2>
+<ul><li>The auth service signs with its private key; each downstream service verifies with the matching public key.</li><li>Public keys are published at a <strong>JWKS endpoint</strong> — a URL returning a JSON Web Key Set.</li><li>Services fetch and cache the key set, then use <code>kid</code> from the header to pick the right key.</li><li>The JWKS URL and expected issuer must come from the service's own configuration, never from the token.</li><li>Rotation: publish the new public key, start signing with the new private key, keep the old public key until all tokens signed with it expire, then remove it.</li><li>Emergency rotation after a key compromise needs a shorter overlap and usually forced re-authentication, because old tokens cannot be trusted.</li><li>Cache refresh needs care: an unknown <code>kid</code> should trigger a rate-limited JWKS refresh, not an unbounded fetch per request.</li></ul>
+
+<div class="flow"><span class="flow-step">Publish new public key in JWKS</span><span class="flow-arrow">→</span><span class="flow-step">Sign new tokens with the new key</span><span class="flow-arrow">→</span><span class="flow-step">Verifiers pick keys by kid</span><span class="flow-arrow">→</span><span class="flow-step">Keep old key until old tokens expire</span><span class="flow-arrow">→</span><span class="flow-step">Remove the old key</span></div>
+<pre class="code"><code>{
+  &#x27;keys&#x27;: [
+    {&#x27;kty&#x27;: &#x27;RSA&#x27;, &#x27;kid&#x27;: &#x27;key-2026-10&#x27;, &#x27;use&#x27;: &#x27;sig&#x27;, &#x27;alg&#x27;: &#x27;RS256&#x27;, &#x27;n&#x27;: &#x27;...&#x27;, &#x27;e&#x27;: &#x27;AQAB&#x27;},
+    {&#x27;kty&#x27;: &#x27;RSA&#x27;, &#x27;kid&#x27;: &#x27;key-2026-04&#x27;, &#x27;use&#x27;: &#x27;sig&#x27;, &#x27;alg&#x27;: &#x27;RS256&#x27;, &#x27;n&#x27;: &#x27;...&#x27;, &#x27;e&#x27;: &#x27;AQAB&#x27;}
+  ]
+}</code></pre>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Access, refresh, and ID tokens</h2>
+<ul><li>The <strong>access token</strong> is short-lived and sent to APIs; if it is a JWT, APIs verify it locally and read its scopes.</li><li>The <strong>refresh token</strong> is longer-lived, sent only to the auth server, and is often an opaque random value rather than a JWT.</li><li>Splitting them limits blast radius: a stolen access token dies quickly, while the user stays signed in via refresh.</li><li>Refresh token rotation issues a new refresh token on each use and invalidates the old one; reuse of an old token signals theft and can revoke the whole family.</li><li>The <strong>ID token</strong> in OIDC tells the client who signed in. It is not an API credential, and APIs should reject it as an access token.</li><li>Scope tokens to an audience: a token minted for <code>billing-api</code> must not be accepted by <code>orders-api</code>.</li><li>Refresh tokens are typically tracked server-side so they can be revoked, rotated, or bound to a device.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Token</th><th>Sent to</th><th>Lifetime</th><th>Purpose</th></tr></thead><tbody><tr><td>Access token</td><td>APIs</td><td>Minutes to an hour</td><td>Grants access to APIs</td></tr>
+<tr><td>Refresh token</td><td>Auth server only</td><td>Days to weeks</td><td>Obtains new access tokens</td></tr>
+<tr><td>ID token (OIDC)</td><td>Read by the client app</td><td>Short</td><td>Tells the client who signed in</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Storing tokens in browsers and elsewhere</h2>
+<ul><li><strong>Local storage</strong> is easy to use with an <code>Authorization</code> header, but JavaScript can read it, so any XSS bug becomes token theft.</li><li><strong>HTTP-only cookies</strong> are unreadable from JavaScript, reducing XSS impact, but the browser sends them automatically, which creates CSRF exposure.</li><li>Mitigate cookie risk with <code>SameSite</code>, CSRF tokens, the <code>Secure</code> flag, and narrowly scoped <code>Path</code> and <code>Domain</code>.</li><li>A common pattern is a short-lived access token in memory plus a refresh token in an HTTP-only, SameSite cookie.</li><li>Mobile apps should use the iOS Keychain or Android Keystore; backend services should use a secrets manager or workload identity.</li><li>Public clients (SPAs, mobile apps) cannot keep a client secret; use PKCE in the authorization code flow.</li><li>Never store tokens in URLs, analytics events, crash reports, or logs — all of them leak.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Storage</th><th>Main risk</th><th>How to reduce it</th></tr></thead><tbody><tr><td>Local storage</td><td>JavaScript can read the token after an XSS bug</td><td>Prevent XSS, strict CSP, short lifetimes</td></tr>
+<tr><td>HTTP-only cookie</td><td>Sent automatically, so CSRF is possible</td><td>SameSite, CSRF tokens, Secure flag</td></tr>
+<tr><td>In memory</td><td>Lost on refresh, needs silent renewal</td><td>Refresh token in a secure cookie</td></tr>
+<tr><td>Mobile secure storage</td><td>Backup or rooted-device exposure</td><td>Keychain / Keystore, no plain files</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Revocation</h2>
+<p class="lede">Revocation is the hardest operational problem with JWTs: a self-contained token can be verified without the issuer, so the issuer cannot pull it back.</p>
+<ul><li>Logout, password change, lost device, role change, and suspected compromise all require some form of invalidation.</li><li>Strategy 1 — <strong>short access-token lifetime</strong>: stolen tokens stop working soon, but they still work until they expire.</li><li>Strategy 2 — <strong>refresh token rotation</strong>: routine logout revokes the refresh token, and the access token dies shortly after.</li><li>Strategy 3 — <strong>deny list</strong>: store revoked <code>jti</code> values until natural expiry and check them on each request, which adds a lookup.</li><li>Strategy 4 — <strong>token version</strong>: embed a version and compare it with the user's current version; bumping it invalidates all their tokens at once.</li><li>High-risk actions (payout changes, API key creation, permission grants) should re-check current server-side state even when the JWT is valid.</li><li>The revocation store must be highly available; for high-risk operations, a failed check should fail closed.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Strategy</th><th>How it works</th><th>Trade-off</th></tr></thead><tbody><tr><td>Short lifetime</td><td>Access tokens expire in minutes</td><td>A stolen token still works until expiry</td></tr>
+<tr><td>Refresh rotation</td><td>Each refresh returns a new refresh token; the old one dies</td><td>Auth server must track refresh tokens</td></tr>
+<tr><td>Deny list</td><td>Revoked jti values are checked per request</td><td>Adds a lookup on every request</td></tr>
+<tr><td>Token version</td><td>Token version compared with the user's current version</td><td>Adds a lookup, often only for sensitive actions</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Trade-offs and when not to use JWTs</h2>
+<ul><li>For a simple monolith or first-party web app, server-side sessions are often easier to implement, reason about, and revoke.</li><li>JWTs earn their complexity when many services or parties must verify the same identity without a shared lookup.</li><li>They are a poor fit when immediate revocation is a hard requirement, because you end up rebuilding session state through deny lists or version checks.</li><li>Other costs: key management and rotation, claim staleness, token size on every request, and a larger validation attack surface.</li><li>Do not adopt JWTs because they sound modern or scalable; adopt them because portable verification solves a real problem you have.</li><li>A hybrid is common and sensible: opaque session or refresh token server-side, short-lived JWT access token at the edge.</li><li>Whichever you choose, the security properties come from correct validation and key handling, not from the format itself.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Server-side sessions</th><th>JWTs</th></tr></thead><tbody><tr><td>Client holds</td><td>Opaque session ID</td><td>Signed token with claims</td></tr>
+<tr><td>How the server identifies the user</td><td>Looks up the session in a store</td><td>Verifies the signature and reads claims</td></tr>
+<tr><td>Revocation</td><td>Delete the session</td><td>Wait for expiry, or add deny list / version checks</td></tr>
+<tr><td>Works best for</td><td>Single apps and first-party web apps</td><td>Many services verifying the same token</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Security checklist and common mistakes</h2>
+<ul><li>Validate more than the signature: check <code>exp</code>, <code>nbf</code>, <code>iss</code>, <code>aud</code>, and then enforce the required permissions.</li><li>Allowlist algorithms server-side. Reject <code>alg: none</code>, and never let the token choose the verification method.</li><li>Prevent RS256-to-HS256 confusion: an attacker signs a forged token with HMAC using the issuer's <em>public</em> key as the secret, so never use a public key as an HMAC secret.</li><li>Allow a small clock skew (tens of seconds) on <code>exp</code> and <code>nbf</code>; do not stretch it into minutes.</li><li>Keep access tokens short-lived, rotate refresh tokens, and store refresh tokens server-side.</li><li>Put nothing sensitive in the payload and no frequently changing values you need to be instantly accurate.</li><li>Redact <code>Authorization</code> headers in proxy logs, error logs, traces, analytics, and crash reports.</li><li>Use separate issuers, audiences, and signing keys per environment so a staging token can never work in production.</li></ul>
+
+
+<pre class="code"><code>verify(token, key):
+  header = decode(token.header)
+  if header.alg not in ALLOWED_ALGS: reject
+  key = keyset.get(header.kid) or refresh_jwks_once()
+  if not signature_valid(token, key): reject
+  if now &gt; exp + leeway: reject
+  if nbf and now &lt; nbf - leeway: reject
+  if iss != EXPECTED_ISS: reject
+  if aud not in EXPECTED_AUDS: reject
+  return claims</code></pre>
+<div class="note">A JWT is a signed token format, not a complete authentication system. Keep access tokens short-lived, pair them with refresh tokens, validate issuer/audience/expiry, and store them carefully.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Stateless verification</strong> removes a session lookup from every request but makes revocation expensive, because the issuer cannot reach tokens already issued.</li><li><strong>Short access-token lifetimes</strong> limit the damage of theft but increase refresh traffic and add a dependency on the auth server for renewal.</li><li><strong>Asymmetric signing (RS256/ES256)</strong> lets many services verify without being able to mint tokens, but costs more CPU and requires JWKS and key-rotation machinery.</li><li><strong>Symmetric signing (HS256)</strong> is simple and fast but every verifier holds the signing secret, so one compromised service can forge tokens for all.</li><li><strong>Rich claims</strong> let services authorize locally but make tokens large and stale; minimal claims stay small but force extra lookups.</li><li><strong>HTTP-only cookies</strong> resist XSS token theft but reopen CSRF risk; local storage avoids CSRF but turns any XSS into full account takeover.</li><li><strong>Deny lists and token version checks</strong> restore revocation but reintroduce the per-request state lookup that JWTs were meant to remove.</li><li><strong>Self-contained tokens</strong> improve availability and latency across services but mean a signing-key compromise has a blast radius measured in token lifetimes.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a JWT and what problem does it solve?</summary><div class="answer"><p>A compact, signed token format carrying claims about a subject. It solves distributed authentication: any service with the issuer's public key can verify the token locally instead of looking up a central session on every request. It is a format, not a protocol.</p></div></details>
+<details><summary>2. What are the three parts of a JWT?</summary><div class="answer"><p><code>header.payload.signature</code>, each Base64URL-encoded and joined by dots. The header describes the signing algorithm and key ID, the payload carries claims, and the signature proves the first two parts were not modified.</p></div></details>
+<details><summary>3. Is a JWT encrypted?</summary><div class="answer"><p>Normally no. A signed JWT (JWS) is only encoded, so anyone holding it can read the header and payload. Encrypted JWTs (JWE) exist but are uncommon for API access tokens. Never put secrets or sensitive personal data in a normal JWT payload.</p></div></details>
+<details><summary>4. What does the signature actually guarantee?</summary><div class="answer"><p>Integrity and origin — that the header and payload have not changed since signing and that whoever signed held the key. It does not hide the contents, and it only proves origin if the verifier trusts the right key and issuer.</p></div></details>
+<details><summary>5. When would you use HS256 versus RS256?</summary><div class="answer"><p>HS256 when one issuer and a small set of fully trusted verifiers share a secret and you want simplicity. RS256/ES256 when many services must verify tokens from one issuer: they get the public key and cannot mint tokens, which is the usual microservice and third-party pattern.</p></div></details>
+<details><summary>6. How does a service verify a token from another service?</summary><div class="answer"><p>It fetches the issuer's JWKS, caches it, reads <code>kid</code> from the token header, and verifies the signature with the matching public key. It then validates <code>exp</code>, <code>iss</code>, and <code>aud</code>. The JWKS URL and expected issuer come from local configuration, not the token.</p></div></details>
+<details><summary>7. How does key rotation work without breaking clients?</summary><div class="answer"><p>Publish the new public key in JWKS first, start signing new tokens with the new private key, keep the old public key available until every token signed with it has expired, then remove it. The <code>kid</code> header lets verifiers select the correct key during the overlap.</p></div></details>
+<details><summary>8. Why split access and refresh tokens?</summary><div class="answer"><p>The access token is short-lived and widely exposed, so theft has a small window. The refresh token is long-lived but sent only to the auth server and can be tracked, rotated, and revoked. Together they balance security with not forcing users to log in constantly.</p></div></details>
+<details><summary>9. Where should a browser store a JWT?</summary><div class="answer"><p>There is no universally correct answer. Local storage is exposed to XSS; HTTP-only cookies resist XSS but need SameSite and CSRF protection. A common pattern is a short-lived access token in memory plus a refresh token in a Secure, HTTP-only, SameSite cookie.</p></div></details>
+<details><summary>10. How do you revoke a JWT before it expires?</summary><div class="answer"><p>You cannot reach a token already issued. Use short lifetimes plus refresh-token revocation for routine logout, and add a deny list of <code>jti</code> values or a per-user token version for immediate cases. High-risk actions should re-check current server state anyway.</p></div></details>
+<details><summary>11. What claims must an API validate?</summary><div class="answer"><p>Signature first, then <code>exp</code> (and <code>nbf</code> if present) with a small clock skew, <code>iss</code> against the expected issuer, and <code>aud</code> against this API. Then enforce the scopes or permissions the operation needs. Signature validation alone is not authentication.</p></div></details>
+<details><summary>12. What is the algorithm-confusion attack?</summary><div class="answer"><p>The attacker sets <code>alg</code> to HS256 and signs a forged token using the issuer's RSA public key as the HMAC secret. If the verifier trusts the header and uses that public key as a secret, the forgery passes. The fix is to allowlist algorithms server-side and never use a public key as an HMAC key. Rejecting <code>alg: none</code> is the same class of fix.</p></div></details>
+<details><summary>13. When would you choose sessions over JWTs?</summary><div class="answer"><p>For a single application or first-party web app where immediate revocation matters and there is no need for third parties to verify tokens. Sessions are simpler to reason about and revoke. JWTs pay off when many services need portable, locally verifiable identity.</p></div></details>
+<details><summary>14. A user's role changed but their token still says admin. What do you do?</summary><div class="answer"><p>Accept that claims are a snapshot, keep access-token lifetimes short, and bump a token version or revoke refresh tokens on role change. For privileged actions, check current authorization server-side rather than trusting the claim. Long-lived tokens with authorization claims are the underlying design error.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating a signed JWT as encrypted and putting secrets or sensitive personal data in the payload.</li><li>Validating only the signature and skipping <code>iss</code>, <code>aud</code>, and expiry checks.</li><li>Trusting the <code>alg</code> header, or accepting <code>alg: none</code> and RS256-to-HS256 confusion.</li><li>Issuing long-lived access tokens, so a stolen token stays usable for days.</li><li>Accepting an OIDC ID token as an API access token.</li><li>Logging or tracing full <code>Authorization</code> headers and leaking tokens into observability systems.</li><li>Putting roles in the token and expecting permission changes to take effect immediately.</li><li>Claiming JWTs are fully stateless while relying on deny lists, refresh tracking, and session-like checks.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="alert-monitoring.html"><span>← Previous</span><strong>Alert &amp; Monitoring</strong></a><a class="next" href="ssl-tls.html"><span>Next →</span><strong>SSL/TLS</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/jwt">AlgoMaster — JWT</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Latency vs Throughput — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 07 / 49</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Latency vs Throughput</h1>
+    <p class="dek">Core Concepts · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/latency-vs-throughput">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Three metrics, one highway</a>
+<a href="#s2">Latency</a>
+<a href="#s3">Where network latency comes from</a>
+<a href="#s4">What a full request pays</a>
+<a href="#s5">Measuring latency with percentiles</a>
+<a href="#s6">Bandwidth and bits vs bytes</a>
+<a href="#s7">Throughput and the bottleneck</a>
+<a href="#s8">Latency vs bandwidth: which dominates</a>
+<a href="#s9">The TCP window and the bandwidth-delay product</a>
+<a href="#s10">Little's Law inside a service</a>
+<a href="#s11">Trade-offs: batching and utilization</a>
+<a href="#s12">Improving latency</a>
+<a href="#s13">Improving throughput and using bandwidth well</a>
+<a href="#s14">Which metric matters for your system</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 49 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Latency is how long one request takes, throughput is how much work finishes per second, and bandwidth is the ceiling a connection could reach — improving one does not automatically improve the others.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Latency</dt><dd>The time for one unit of work to travel end to end, usually measured as round-trip time in milliseconds or microseconds.</dd></div><div class="term"><dt>Throughput</dt><dd>The amount of work actually completed per unit of time: requests per second, transactions per second, or bytes per second.</dd></div><div class="term"><dt>Bandwidth</dt><dd>The maximum amount of data a link can carry per unit of time, measured in bits per second. A ceiling, not an achievement.</dd></div><div class="term"><dt>Propagation delay</dt><dd>Time for a signal to physically traverse the medium, bounded by distance and the speed of light in fiber.</dd></div><div class="term"><dt>Tail latency</dt><dd>The slow end of the latency distribution — P95, P99, P999 — where user-visible stalls and timeouts live.</dd></div><div class="term"><dt>Bandwidth-delay product</dt><dd>Bandwidth multiplied by round-trip time: the amount of data that must be in flight to fill the link.</dd></div><div class="term"><dt>TCP window</dt><dd>The limit on unacknowledged data a sender may have in flight; it caps throughput on high-latency links.</dd></div><div class="term"><dt>Little&#x27;s Law</dt><dd>Concurrency equals throughput multiplied by latency: <code>L = λ × W</code>.</dd></div><div class="term"><dt>Utilization</dt><dd>The fraction of a server's capacity in use. Latency rises non-linearly as utilization approaches 100%.</dd></div><div class="term"><dt>Batching</dt><dd>Grouping work to amortize per-item overhead, trading higher throughput for higher per-item latency.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Three metrics, one highway</h2>
+<p class="lede">Latency, throughput, and bandwidth are often used interchangeably, but they measure different things. A highway analogy separates them cleanly.</p>
+<ul><li><strong>Bandwidth</strong> is the number of lanes: how many cars the road can carry at once.</li><li><strong>Throughput</strong> is the number of cars that actually arrive per hour; congestion, accidents, or roadwork can push it well below capacity.</li><li><strong>Latency</strong> is how long one car takes to travel between the two cities.</li><li>Adding lanes raises capacity but does not make any single car arrive sooner; distance and speed limit are unchanged.</li><li>Improving one metric therefore does not imply the others improve, so a performance requirement must name the metric it constrains.</li><li>The same three ideas exist inside a machine: memory bandwidth, disk throughput, and per-query latency.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Metric</th><th>Question it answers</th><th>Typical unit</th><th>Highway analogy</th></tr></thead><tbody><tr><td>Latency</td><td>How long does one request take?</td><td>ms, µs</td><td>Trip time for one car</td></tr>
+<tr><td>Throughput</td><td>How much work completes per second?</td><td>RPS, TPS, MB/s</td><td>Cars arriving per hour</td></tr>
+<tr><td>Bandwidth</td><td>What is the maximum the link can carry?</td><td>Mbps, Gbps</td><td>Number of lanes</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Latency</h2>
+<p class="lede">Latency measures how long something takes to get from one point to another. For a network it is packet travel time; for an application it is the gap between sending a request and receiving the response.</p>
+<ul><li>At the network level this is usually <strong>round-trip time</strong> (RTT), which includes both directions.</li><li>For an application, total latency includes network time plus queueing, server processing, database queries, and response assembly.</li><li>Latency is measured in units of time, usually milliseconds or microseconds — never in requests per second.</li><li>A single request's latency is a sum of stages, so the slowest stage usually dominates the total.</li><li>Latency is a distribution, not a number: two systems with the same average can feel completely different.</li><li>Propagation delay is bounded by physics, so the only fix for distance is to move the data or the computation closer.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends request</span><span class="flow-arrow">→</span><span class="flow-step">Network transit</span><span class="flow-arrow">→</span><span class="flow-step">Server processing</span><span class="flow-arrow">→</span><span class="flow-step">Database or dependency calls</span><span class="flow-arrow">→</span><span class="flow-step">Response assembly</span><span class="flow-arrow">→</span><span class="flow-step">Network transit back</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Where network latency comes from</h2>
+<p class="lede">Four delays add up on every hop. Knowing which one dominates tells you which fix is worth doing.</p>
+<ul><li><strong>Propagation delay:</strong> time for the signal to physically travel the medium. Light in fiber moves at roughly two-thirds of its vacuum speed, so distance sets a hard floor.</li><li><strong>Transmission delay:</strong> time to push all the bits onto the link. Larger messages and slower links take longer.</li><li><strong>Queuing delay:</strong> time packets wait in a router buffer because the outgoing link is busy. This is the part that grows under load.</li><li><strong>Processing delay:</strong> time devices spend inspecting, decrypting, and forwarding packets.</li><li>Real paths are not straight lines and include many hops, so measured RTT is always worse than the theoretical minimum.</li><li>Because propagation is physics-bound, caching, CDNs, and multi-region deployment are the only real levers for it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Component</th><th>Caused by</th><th>Reduced by</th></tr></thead><tbody><tr><td>Propagation</td><td>Physical distance through fiber</td><td>CDN, edge regions, placing compute near users</td></tr>
+<tr><td>Transmission</td><td>Message size and link rate</td><td>Smaller payloads, compression, faster links</td></tr>
+<tr><td>Queuing</td><td>Congested links and buffers</td><td>More capacity, admission control, traffic shaping</td></tr>
+<tr><td>Processing</td><td>Per-hop device work</td><td>Fewer hops, hardware forwarding, connection reuse</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>What a full request pays</h2>
+<ul><li>Before any data is sent, a new connection pays setup costs that are pure latency.</li><li>A <strong>DNS lookup</strong> resolves the hostname and may itself require a round trip if not cached.</li><li>A <strong>TCP handshake</strong> costs one round trip before the first byte of the request can flow.</li><li>A <strong>TLS handshake</strong> adds further round trips for HTTPS; TLS 1.3 and session resumption reduce them.</li><li>Server-side processing then adds parsing, authorization, database queries, and downstream service calls.</li><li>Reusing connections removes most of the setup cost from subsequent requests, which is why connection pools matter.</li><li>Fan-out multiplies latency: a request that waits on several sequential dependencies pays their sum, not their maximum.</li></ul>
+
+<div class="flow"><span class="flow-step">DNS resolution</span><span class="flow-arrow">→</span><span class="flow-step">TCP handshake</span><span class="flow-arrow">→</span><span class="flow-step">TLS handshake</span><span class="flow-arrow">→</span><span class="flow-step">Send request</span><span class="flow-arrow">→</span><span class="flow-step">Server processing and dependencies</span><span class="flow-arrow">→</span><span class="flow-step">Response returns</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Measuring latency with percentiles</h2>
+<p class="lede">Averages hide the experience of slow users. If 98 requests take 50 ms and 2 take 2 seconds, the average is about 89 ms — which sounds fine and describes nobody.</p>
+<ul><li><strong>P50</strong> (median) is the typical experience: half of requests are faster than this.</li><li><strong>P95</strong> shows the boundary for the slowest twentieth of traffic.</li><li><strong>P99</strong> captures the worst 1%; in the example above, 50 ms at P50 but 2 seconds at P99.</li><li>Report percentiles per endpoint and per dependency, not just for the whole service.</li><li>Alert on the tail, not the mean; a rising P99 is an early signal of saturation or a slow dependency.</li><li>Percentiles cannot be averaged across instances — aggregate the underlying distributions or use histogram buckets.</li></ul>
+<h3>Tail latency</h3>
+<ul><li>A page that makes 20 backend calls in parallel finishes only when the slowest call completes.</li><li>If each call independently has a 1% chance of being slow, the chance that at least one is slow across 20 calls is roughly one in five.</li><li>So a 1% backend tail can affect a large share of page loads; fan-out amplifies the tail.</li><li>Reduce fan-out, hedge slow requests, set per-dependency timeouts, and cache to keep the tail short.</li><li>Garbage collection pauses, retries, and lock contention are common hidden tail producers.</li></ul>
+
+
+<div class="table-wrap"><table><thead><tr><th>Metric</th><th>Meaning</th><th>Source example</th></tr></thead><tbody><tr><td>P50</td><td>50% of requests finish within this time</td><td>50 ms</td></tr>
+<tr><td>P95</td><td>95% of requests finish within this time</td><td>50 ms</td></tr>
+<tr><td>P99</td><td>99% of requests finish within this time</td><td>2 s</td></tr>
+<tr><td>Average</td><td>Total time divided by request count</td><td>About 89 ms</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Bandwidth and bits vs bytes</h2>
+<p class="lede">Bandwidth is the maximum data a connection can carry per unit time. It is a capacity, not a measurement of what is currently flowing.</p>
+<ul><li>Network bandwidth is quoted in <strong>bits</strong> per second: Mbps or Gbps.</li><li>File sizes and memory are quoted in <strong>bytes</strong>, and one byte is eight bits.</li><li>A 1 Gbps link can theoretically carry about 125 megabytes per second; divide by eight to convert.</li><li>That number is a ceiling. Protocol overhead, retransmissions, and congestion control keep real throughput below it.</li><li>Internal components have bandwidth too: disks, memory buses, and network interfaces each impose their own ceiling.</li><li>A fast NIC in front of a slow disk does not make writes faster; the smallest ceiling wins.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Component</th><th>Rough capacity</th><th>Notes</th></tr></thead><tbody><tr><td>Server network</td><td>1 to 100 Gbps</td><td>Shared with all traffic on the host</td></tr>
+<tr><td>SATA SSD</td><td>~500 MB/s</td><td>Bytes, not bits</td></tr>
+<tr><td>NVMe SSD</td><td>Several GB/s</td><td>Higher parallelism, still finite</td></tr>
+<tr><td>Memory (RAM)</td><td>Tens of GB/s</td><td>Usually not the bottleneck</td></tr>
+<tr><td>1 Gbps link</td><td>~125 MB/s</td><td>Theoretical maximum after dividing by 8</td></tr></tbody></table></div>
+
+<div class="note">Mixing up bits and bytes produces an eight-times error — the most common bandwidth arithmetic mistake in interviews.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Throughput and the bottleneck</h2>
+<ul><li>Throughput is work actually completed per unit time: bytes delivered, requests served, transactions committed.</li><li>Network throughput can never exceed bandwidth, and in practice is lower.</li><li><strong>Protocol overhead:</strong> headers from Ethernet, IP, and TCP consume capacity without delivering payload.</li><li><strong>Retransmissions:</strong> lost packets are sent again, using bandwidth without delivering new data.</li><li><strong>Congestion control:</strong> TCP deliberately slows down when it detects loss, so a connection may not fill the link.</li><li>The system limit is the <strong>largest bottleneck</strong>, not the network: CPU, memory, disk I/O, connection pools, or lock contention.</li><li>A 10 Gbps network writing to a disk that sustains only 200 MB/s yields a 200 MB/s system, not a 1.25 GB/s system.</li><li>Improving a non-bottleneck resource changes nothing, which is why profiling precedes optimization.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Bottleneck</th><th>Symptom</th><th>Typical fix</th></tr></thead><tbody><tr><td>CPU</td><td>High CPU, rising queue depth on compute-bound work</td><td>Scale out, optimize hot code, offload work</td></tr>
+<tr><td>Memory</td><td>Paging, GC pressure, cache misses</td><td>More RAM, smaller working set, better locality</td></tr>
+<tr><td>Disk or network I/O</td><td>High await, saturated NIC, slow writes</td><td>Faster storage, sharding, compression, batching</td></tr>
+<tr><td>Connections</td><td>Pool exhaustion, requests waiting for a connection</td><td>Pool sizing, shorter transactions, async I/O</td></tr>
+<tr><td>Contention</td><td>Lock waits, serialized critical sections</td><td>Partitioning, finer locks, queueing</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Latency vs bandwidth: which dominates</h2>
+<p class="lede">A useful estimate is: total time ≈ latency + (data size / bandwidth). The relative size of the two terms tells you what to optimize.</p>
+<ul><li><strong>Small requests are latency-bound.</strong> A 1 KB API call takes about 8 microseconds to transmit at 1 Gbps, while a 50 ms round trip dominates completely.</li><li>Upgrading that connection to 10 Gbps would barely change the response time.</li><li><strong>Large transfers are bandwidth-bound.</strong> A 10 GB backup at 1 Gbps takes roughly 80 seconds to transmit; 50 ms of latency is noise.</li><li>For small-request workloads, cut round trips, reuse connections, and move servers closer.</li><li>For bulk transfer, raise bandwidth, compress data, and parallelize streams.</li><li>Many real systems are mixed: a small metadata call plus a large payload, so both terms matter.</li><li>The same logic applies to database calls: many tiny queries are latency-bound, one huge scan is throughput-bound.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Workload</th><th>Data time at 1 Gbps</th><th>Latency</th><th>What to improve</th></tr></thead><tbody><tr><td>1 KB API call</td><td>~8 µs</td><td>50 ms</td><td>Latency and round trips</td></tr>
+<tr><td>10 GB backup</td><td>~80 s</td><td>50 ms</td><td>Bandwidth and throughput</td></tr>
+<tr><td>Many parallel small calls</td><td>Negligible per call</td><td>Adds per call</td><td>Connection reuse, fan-out reduction</td></tr>
+<tr><td>Large media upload</td><td>Minutes</td><td>Negligible</td><td>Bandwidth, compression, parallelism</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>The TCP window and the bandwidth-delay product</h2>
+<ul><li>TCP limits how much unacknowledged data can be in flight; that limit is the <strong>window</strong>.</li><li>Throughput is bounded by roughly <code>window size / round-trip time</code>.</li><li>A 64 KB window with a 100 ms RTT caps throughput near 640 KB/s — roughly 5 Mbps — even on a 1 Gbps link.</li><li>The connection is not slow because of bandwidth; it is slow because acknowledgements arrive too slowly to keep the pipe full.</li><li>The <strong>bandwidth-delay product</strong> (<code>bandwidth × RTT</code>) is how much data must be in flight to fill the link: 1 Gbps at 100 ms needs about 12.5 MB.</li><li>Modern TCP supports much larger and dynamically adjusted windows, which mitigates but does not eliminate the problem.</li><li>For high-latency paths, use multiple parallel connections, larger buffers, or a protocol with better flow control.</li><li>This is why long-haul transfers often need tuning that a LAN never does.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Bandwidth</th><th>RTT</th><th>BDP (data in flight to fill link)</th></tr></thead><tbody><tr><td>1 Gbps</td><td>100 ms</td><td>~12.5 MB</td></tr>
+<tr><td>1 Gbps</td><td>10 ms</td><td>~1.25 MB</td></tr>
+<tr><td>100 Mbps</td><td>100 ms</td><td>~1.25 MB</td></tr></tbody></table></div>
+
+<div class="note">A window smaller than the BDP leaves bandwidth idle, no matter how fast the link is.</div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Little's Law inside a service</h2>
+<p class="lede">Inside a server, latency and throughput are tied together by Little's Law: <code>concurrency = throughput × latency</code>.</p>
+<ul><li>If a service handles 1,000 requests per second and each takes 200 ms, then <code>1,000 × 0.2 = 200</code> requests are in progress on average.</li><li>If a dependency slows requests to 1 second, sustaining 1,000 RPS would require 1,000 concurrent requests.</li><li>If only 200 threads or database connections exist, throughput cannot be sustained and requests queue.</li><li>Queueing raises latency further, which raises required concurrency again — a feedback loop that ends in an outage.</li><li>For capacity planning, invert the formula: required concurrency = target RPS × per-request latency.</li><li>A service targeting 5,000 RPS at 20 ms needs about 100 requests in flight, so pools and workers must support at least that.</li><li>Little's Law also explains why a small latency regression can force a large capacity increase.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Throughput</th><th>Latency</th><th>Required concurrency</th></tr></thead><tbody><tr><td>1,000 RPS</td><td>200 ms</td><td>200</td></tr>
+<tr><td>1,000 RPS</td><td>1 s</td><td>1,000</td></tr>
+<tr><td>5,000 RPS</td><td>20 ms</td><td>100</td></tr>
+<tr><td>200 RPS</td><td>500 ms</td><td>100</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Trade-offs: batching and utilization</h2>
+<p class="lede">Some of the most effective throughput techniques deliberately add latency. The right choice depends on whether the user is waiting.</p>
+<ul><li><strong>Batching</strong> amortizes per-item overhead: collect messages briefly, then write them together.</li><li>Each item may wait for the batch to fill or the timer to fire, so per-item latency rises while throughput improves.</li><li>Kafka producers expose this directly through <code>linger.ms</code> (how long to wait for more records) and <code>batch.size</code>.</li><li>Databases use <strong>group commit</strong>, sharing one disk flush across several transactions.</li><li>The trade is worthwhile for analytics, logs, and background jobs, and usually wrong for an interactive request.</li><li>Higher <strong>utilization</strong> raises throughput but increases waiting time non-linearly as queues build.</li><li>The last few percent of utilization cost far more latency than the first, so production keeps headroom and scales before saturation.</li><li>Admission control and load shedding protect latency by refusing work rather than queueing it indefinitely.</li></ul>
+<h3>Utilization and queueing</h3>
+<ul><li>At low utilization, requests rarely wait and latency is close to service time.</li><li>Near capacity, arrivals increasingly find the server busy and wait behind other work.</li><li>Latency stays flat for a while, then rises sharply — the classic queueing curve.</li><li>Running at 95% utilization can maximize throughput while producing unpredictable tail latency.</li><li>Keep spare capacity, autoscale ahead of demand, and set timeouts so one saturated dependency does not stall everything.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Utilization</th><th>Typical wait relative to service time</th></tr></thead><tbody><tr><td>50%</td><td>About 1×</td></tr>
+<tr><td>80%</td><td>About 4×</td></tr>
+<tr><td>90%</td><td>About 9×</td></tr>
+<tr><td>95%</td><td>About 19×</td></tr></tbody></table></div>
+
+<div class="note">These figures come from a simple queueing model; real systems differ. The shape — steep rise near saturation — is the lesson.</div>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Improving latency</h2>
+<ul><li><strong>Move data closer:</strong> CDNs and multi-region deployments cut propagation delay, which no amount of code optimization can remove.</li><li><strong>Cache:</strong> memory reads beat a remote database round trip for hot data.</li><li><strong>Cut round trips:</strong> reuse connections, combine small requests, and run independent calls in parallel instead of sequentially.</li><li><strong>Use modern protocols:</strong> TLS 1.3 and HTTP/3 reduce connection setup round trips.</li><li><strong>Get work off the critical path:</strong> send email, generate reports, and update feeds asynchronously through a queue.</li><li><strong>Optimize the work:</strong> add indexes, fix queries, remove unnecessary processing and payload.</li><li><strong>Defend the tail:</strong> set timeouts on every dependency, limit retries, and watch for GC pauses.</li><li>Measure per stage; optimizing a stage that is only 2% of total time is invisible to users.</li></ul>
+
+<div class="flow"><span class="flow-step">Measure per-stage latency</span><span class="flow-arrow">→</span><span class="flow-step">Find the dominant stage</span><span class="flow-arrow">→</span><span class="flow-step">Apply the matching fix</span><span class="flow-arrow">→</span><span class="flow-step">Re-measure P50 and P99</span></div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Improving throughput and using bandwidth well</h2>
+<ul><li><strong>Find the bottleneck first</strong> — adding capacity to a non-bottleneck changes nothing.</li><li><strong>Horizontal scaling:</strong> more servers behind a load balancer, or partitioned data across machines.</li><li><strong>Parallel processing:</strong> split large jobs into independent tasks that run concurrently.</li><li><strong>Batching:</strong> group writes, network calls, or messages when latency requirements permit.</li><li><strong>Queues:</strong> buffer bursts so producers and consumers each run at their own sustainable rate.</li><li><strong>Connection pooling:</strong> avoid paying handshake and setup cost per request.</li><li><strong>Send less data:</strong> compress text responses, drop unnecessary fields, paginate large result sets.</li><li><strong>Offload static content</strong> to a CDN so origin bandwidth goes to dynamic work.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Goal</th><th>Lever</th><th>Cost</th></tr></thead><tbody><tr><td>More throughput</td><td>Scale out, partition, parallelize</td><td>Coordination and operational overhead</td></tr>
+<tr><td>More throughput</td><td>Batch and queue</td><td>Higher per-item latency, more state to manage</td></tr>
+<tr><td>Less bandwidth used</td><td>Compression, pagination, CDN</td><td>CPU for compression, cache invalidation</td></tr>
+<tr><td>Lower latency</td><td>Edge placement, caching, fewer round trips</td><td>Money, consistency complexity</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Which metric matters for your system</h2>
+<p class="lede">Different products optimize different metrics. Naming the priority early prevents arguing about the wrong number later.</p>
+<ul><li><strong>Trading platform or multiplayer game:</strong> latency dominates; a few milliseconds can change the outcome.</li><li><strong>Data pipeline or nightly backup:</strong> throughput dominates; finishing the job on schedule matters more than any single record.</li><li><strong>Video streaming:</strong> bandwidth per viewer plus aggregate throughput at peak.</li><li><strong>Most user-facing apps:</strong> both — fast individual requests and enough capacity for peak traffic.</li><li>A good requirement states both, for example: keep P99 latency below 200 ms while sustaining 10,000 requests per second.</li><li>Ask which factor becomes the bottleneck first and what trade-off you are willing to accept to move it.</li><li>Track the metric you promise; a system that optimizes average latency while P99 degrades has not met its goal.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>System</th><th>Main concern</th><th>Why</th></tr></thead><tbody><tr><td>Trading platform, game</td><td>Latency</td><td>Delay changes the outcome</td></tr>
+<tr><td>Data pipeline, backup</td><td>Throughput</td><td>Total job completion matters</td></tr>
+<tr><td>Video streaming</td><td>Bandwidth and throughput</td><td>Per-viewer rate plus peak aggregate</td></tr>
+<tr><td>Typical web app</td><td>Latency and throughput</td><td>Fast requests plus peak capacity</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Name the user-visible goal</span><span class="flow-arrow">→</span><span class="flow-step">Identify the first bottleneck</span><span class="flow-arrow">→</span><span class="flow-step">Choose the matching metric</span><span class="flow-arrow">→</span><span class="flow-step">Set a budget for the other metrics too</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Batching</strong> raises throughput by amortizing overhead, but every item waits for the batch, so per-item latency rises.</li><li><strong>High utilization</strong> maximizes throughput per dollar, but queueing makes tail latency unpredictable near saturation.</li><li><strong>Adding bandwidth</strong> helps large transfers, but barely changes small-request latency, which is dominated by round trips.</li><li><strong>Moving compute to the edge</strong> cuts propagation delay, but multiplies deployment targets and data-consistency problems.</li><li><strong>Caching</strong> reduces both latency and backend load, but accepts staleness and invalidation complexity.</li><li><strong>Parallel fan-out</strong> lowers latency when calls are independent, but increases load and amplifies tail latency.</li><li><strong>Larger TCP windows and parallel connections</strong> fill high-latency links, but consume memory and can crowd out other flows.</li><li><strong>Asynchronous processing</strong> removes slow work from the request path, but converts an immediate result into eventual completion.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Define latency, throughput, and bandwidth in one sentence each.</summary><div class="answer"><p>Latency is how long one request takes end to end. Throughput is how much work actually completes per second. Bandwidth is the maximum rate a link can carry — a ceiling that throughput never exceeds.</p></div></details>
+<details><summary>2. Why doesn't adding bandwidth always make an application faster?</summary><div class="answer"><p>For small requests, transfer time is negligible and round-trip latency dominates. More bandwidth cannot shorten the distance, the handshakes, or the server processing. It only helps when the workload is actually moving large amounts of data.</p></div></details>
+<details><summary>3. How do you measure latency properly?</summary><div class="answer"><p>Use percentiles — P50, P95, P99 — rather than the average, and report them per endpoint and per dependency. Averages hide the slow requests that users actually notice, and percentile aggregation must be done over distributions, not averaged.</p></div></details>
+<details><summary>4. What is tail latency and why does it matter?</summary><div class="answer"><p>It is the slow end of the distribution where a small fraction of requests take much longer. When one page makes many parallel backend calls, the slowest call gates the response, so a small per-call tail can affect a large share of page loads.</p></div></details>
+<details><summary>5. Where does network latency come from?</summary><div class="answer"><p>Propagation delay from physical distance, transmission delay from putting bits on the link, queuing delay in congested buffers, and processing delay in network devices. Only propagation is truly physics-bound; the others respond to capacity and protocol choices.</p></div></details>
+<details><summary>6. A 1 Gbps link and a 100 ms RTT — why might a single TCP connection only reach a few Mbps?</summary><div class="answer"><p>Throughput is bounded by <code>window / RTT</code>. A 64 KB window at 100 ms allows roughly 640 KB/s. Filling the link requires enough data in flight to cover the bandwidth-delay product, which is about 12.5 MB here.</p></div></details>
+<details><summary>7. State Little's Law and use it for capacity planning.</summary><div class="answer"><p><code>Concurrency = throughput × latency</code>. To serve 5,000 requests per second at 20 ms each, you need about 100 requests in flight, so thread pools, connection pools, and worker counts must support at least that.</p></div></details>
+<details><summary>8. How can a slow dependency cause an outage?</summary><div class="answer"><p>If latency rises and concurrency is capped, throughput falls. Requests queue, which raises latency further and consumes the remaining capacity. This positive feedback explains how one slow database turns into a full-service outage without any increase in traffic.</p></div></details>
+<details><summary>9. What is the trade-off in batching?</summary><div class="answer"><p>Batching amortizes fixed overhead and raises throughput, but each item waits for the batch, so latency increases. Settings like <code>linger.ms</code> and <code>batch.size</code> tune that trade-off; interactive paths usually keep batches small or skip them.</p></div></details>
+<details><summary>10. Why is 100% utilization a bad target?</summary><div class="answer"><p>Queueing delay rises non-linearly as utilization approaches capacity, so the last few percent of throughput cost a large multiple in latency. Production systems keep headroom and autoscale before saturation.</p></div></details>
+<details><summary>11. How would you reduce P99 latency?</summary><div class="answer"><p>Find the dominant stage, add timeouts and retry budgets, reduce fan-out, cache hot paths, and remove GC or lock pauses. Hedged requests and per-dependency circuit breakers keep one slow service from gating the whole response.</p></div></details>
+<details><summary>12. How would you raise throughput?</summary><div class="answer"><p>Identify the bottleneck, then scale out, partition data, parallelize independent work, batch where latency permits, add queues to absorb bursts, and pool connections. Also reduce bytes sent through compression and pagination.</p></div></details>
+<details><summary>13. Which metric matters for a nightly ETL job versus a game?</summary><div class="answer"><p>The ETL job is throughput-bound: finishing the whole job within its window matters more than any single record. A game is latency-bound: a few milliseconds of delay changes the outcome. Most user-facing apps need both and should state a combined budget.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Reporting only average latency and missing the P99 that users actually experience.</li><li>Assuming more bandwidth will fix a latency problem caused by round trips and distance.</li><li>Confusing bits and bytes, producing an eight-times error in capacity estimates.</li><li>Calling a link's bandwidth its throughput; real throughput is lower due to overhead, retransmissions, and congestion control.</li><li>Scaling a tier that is not the bottleneck and concluding scaling does not work.</li><li>Ignoring Little's Law when sizing thread or connection pools, then blaming the database for queueing.</li><li>Running servers at near-100% utilization and treating the resulting tail latency as a mystery.</li><li>Averaging percentiles across instances instead of aggregating the underlying distributions.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="consistent-hashing.html"><span>← Previous</span><strong>Consistent Hashing</strong></a><a class="next" href="load-balancers.html"><span>Next →</span><strong>Load Balancers</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/latency-vs-throughput">AlgoMaster — Latency vs Throughput</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 49 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

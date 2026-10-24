@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generating Unique IDs — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 19 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Generating Unique IDs</h1>
+    <p class="dek">Interview Patterns · Specialized Data</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">13 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/generating-unique-ids">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">Where this pattern shows up</a>
+<a href="#s3">Requirements to pin down first</a>
+<a href="#s4">Auto-increment and why it breaks</a>
+<a href="#s5">UUIDs</a>
+<a href="#s6">Ticket and segment allocation</a>
+<a href="#s7">Snowflake-style IDs</a>
+<a href="#s8">Assigning and protecting worker identities</a>
+<a href="#s9">Time-sortable alternatives: ULID, KSUID, and friends</a>
+<a href="#s10">Hash-based, composite, and custom IDs</a>
+<a href="#s11">Consequences for storage, sharding, and APIs</a>
+<a href="#s12">Failure modes and security</a>
+<a href="#s13">Choosing an approach</a>
+<a href="#s14">How to approach it in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A single database sequence is easy, but it is a bottleneck and a single point of failure. Distributed ID generation trades coordination for uniqueness, and the right design depends on whether you need <strong>sortability</strong>, compactness, unpredictability, or offline generation.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Auto-increment</dt><dd>A database-managed counter that produces the next integer for each insert; simple and compact but tied to one writer.</dd></div><div class="term"><dt>UUID</dt><dd>A 128-bit identifier, commonly random (v4) or time-based (v1/v7), that can be generated without contacting a central service.</dd></div><div class="term"><dt>Snowflake ID</dt><dd>A 64-bit ID composed of a timestamp, a worker or machine identifier, and a per-millisecond sequence.</dd></div><div class="term"><dt>Worker ID</dt><dd>The unique identifier assigned to each ID-generating node so two nodes cannot produce the same timestamp-and-sequence pair.</dd></div><div class="term"><dt>Epoch</dt><dd>The fixed starting time subtracted from the current time when encoding a timestamp, which extends the usable lifetime of the ID.</dd></div><div class="term"><dt>Sequence</dt><dd>A small counter that distinguishes multiple IDs generated within the same timestamp tick.</dd></div><div class="term"><dt>Ticket / segment allocation</dt><dd>A central service hands out blocks of IDs so each node can generate locally without asking for every ID.</dd></div><div class="term"><dt>ULID</dt><dd>A 128-bit, lexicographically sortable identifier combining a timestamp with random bits, usually rendered in base32.</dd></div><div class="term"><dt>Clock skew</dt><dd>A difference between node clocks; it can make time-based IDs non-monotonic or cause collisions if not handled.</dd></div><div class="term"><dt>IDOR</dt><dd>Insecure Direct Object Reference: exposing guessable IDs lets a user access another user's records by changing the identifier.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">Every order, message, user, and event needs an identifier. With one database, an auto-incrementing column solves it. Once multiple services and databases create records concurrently, each generator must produce a unique value without a round trip to a central authority on every write.</p>
+<ul><li>Two servers generating IDs independently must never choose the same value.</li><li>The generator should stay available even when another service or region is unreachable.</li><li>IDs often appear in URLs, logs, and APIs, so size and readability matter.</li><li>Some systems need IDs that sort by creation time; others only need uniqueness.</li><li>A poor ID choice leaks into database layout, sharding, pagination, and security for years.</li><li>The design must survive restarts, clock changes, network partitions, and scale-out.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Where this pattern shows up</h2>
+<ul><li>Orders, payments, and ledger entries, where duplicate IDs mean double charging or lost money.</li><li>Messages, posts, and comments, where IDs are exposed in APIs, links, and pagination cursors.</li><li>User and tenant records, where identifiers appear in URLs and must not be trivially enumerable.</li><li>Event and log pipelines, where every event needs an ID for deduplication and replay.</li><li>File and object storage, where content hashes or generated keys identify blobs.</li><li>Multi-region and active-active systems, where independent writers must not collide.</li><li>Any interview problem that creates records concurrently or asks how to scale a database writer.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Requirements to pin down first</h2>
+<ul><li><strong>Uniqueness:</strong> globally unique across services, regions, and retries, or only unique within a table.</li><li><strong>Ordering:</strong> must IDs sort by creation time, or is random order acceptable?</li><li><strong>Compactness:</strong> 64-bit integers are cheaper to store and index than 128-bit strings.</li><li><strong>Availability:</strong> can generation depend on a central service, or must it work offline?</li><li><strong>Throughput:</strong> how many IDs per second per node and in total, including bursts?</li><li><strong>Unpredictability:</strong> can an attacker enumerate IDs, and does that expose data?</li><li><strong>Operability:</strong> can you assign and recycle worker identities safely, and can you migrate existing IDs?</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Requirement</th><th>Pushes toward</th><th>Pushes away from</th></tr></thead><tbody><tr><td>Strict global uniqueness</td><td>Coordination or enough random bits</td><td>Naive per-node counters</td></tr>
+<tr><td>Time ordering</td><td>Snowflake, ULID, UUID v7</td><td>Random UUID v4</td></tr>
+<tr><td>Small index footprint</td><td>64-bit integer IDs</td><td>Long string UUIDs as primary keys</td></tr>
+<tr><td>Offline generation</td><td>UUID, ULID, local Snowflake</td><td>Central ticket service</td></tr>
+<tr><td>Unguessable public IDs</td><td>Random UUID or signed token</td><td>Sequential integers</td></tr>
+<tr><td>Simple operations</td><td>Database sequence</td><td>Many worker IDs and clock rules</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Auto-increment and why it breaks</h2>
+<ul><li>The database maintains a counter and returns the next value inside the insert transaction.</li><li>It is compact, monotonic, and easy to index, which is why it is the default for a single database.</li><li>Every write depends on one primary, so the sequence becomes a throughput bottleneck and a single point of failure.</li><li>Separate databases each start their own sequence, so IDs collide across shards unless ranges or offsets are assigned.</li><li>Sequential IDs are trivially enumerable, which is dangerous when they are exposed in URLs or APIs.</li><li>Creating a record before its ID is known complicates application flows and distributed transactions.</li><li>A sequence is still a good choice for internal, single-writer tables where none of these constraints apply.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>UUIDs</h2>
+<ul><li>A UUID is 128 bits, so it can be generated locally without coordination and with negligible collision probability when enough random bits are used.</li><li><strong>Version 4</strong> is essentially random; it is simple and safe to generate anywhere, but it has no order.</li><li><strong>Version 1</strong> combines time and a node identifier, which can leak MAC address and creation time.</li><li><strong>Version 7</strong> puts a timestamp first and randomness after it, giving time-ordered UUIDs that still fit the UUID format.</li><li>Random UUIDs scatter B-tree inserts across the index, causing page splits, write amplification, and larger indexes.</li><li>The textual form is long, so storing it as a string is more expensive than storing the 16 raw bytes.</li><li>UUIDs are a strong default when coordination-free generation matters more than compactness or scan locality.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Ticket and segment allocation</h2>
+<p class="lede">A central service can hand out a block of IDs rather than one ID at a time. Each node then serves its own traffic locally from the reserved block.</p>
+<ul><li>The allocator reserves a range, for example a start and a step, and gives each node a disjoint block.</li><li>Nodes generate IDs in memory until the block is exhausted, then request another block.</li><li>This drastically reduces round trips and central load while keeping IDs compact and roughly ordered.</li><li>If a node crashes, the unused tail of its block is lost; that is usually acceptable because gaps do not break uniqueness.</li><li>A single allocator is still a failure domain, so use replication, multiple allocators with disjoint ranges, or a consensus-backed store.</li><li>Range size trades allocation frequency against the size of gaps after crashes and the risk of exhausting a range.</li><li>The allocator must persist the high-water mark durably before returning a block, or a restart can reissue IDs.</li></ul>
+
+<div class="flow"><span class="flow-step">Node requests a block</span><span class="flow-arrow">→</span><span class="flow-step">Allocator reserves and persists range</span><span class="flow-arrow">→</span><span class="flow-step">Node caches range</span><span class="flow-arrow">→</span><span class="flow-step">Node issues IDs locally</span><span class="flow-arrow">→</span><span class="flow-step">Range exhausted</span><span class="flow-arrow">→</span><span class="flow-step">Request next block</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Snowflake-style IDs</h2>
+<p class="lede">Snowflake IDs pack a timestamp, a worker identifier, and a sequence into a 64-bit integer. The timestamp leads, so IDs generated later generally sort later, and each node can generate without coordination.</p>
+<ul><li>The <strong>timestamp</strong> uses a custom epoch and gives coarse time ordering and a bounded lifetime.</li><li>The <strong>worker ID</strong> separates nodes so identical timestamps do not collide.</li><li>The <strong>sequence</strong> distinguishes multiple IDs generated by the same worker in the same time unit.</li><li>When the sequence overflows, the generator waits for the next timestamp tick rather than reusing values.</li><li>IDs are compact integers, which keeps primary keys and indexes small.</li><li>Correctness depends on synchronized clocks and on every worker having a distinct ID.</li><li>A clock that moves backwards can produce duplicate or out-of-order IDs, so the generator must wait, refuse, or use a logical clock.</li></ul>
+<h3>Handling a clock rollback</h3>
+<ul><li>Detect that the current time is behind the last issued timestamp.</li><li>Wait until the clock catches up if the drift is small.</li><li>Refuse to issue IDs and alert if the drift is large.</li><li>Never blindly reuse the previous timestamp with a reset sequence, because that repeats IDs.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Assigning and protecting worker identities</h2>
+<ul><li>Worker IDs must be unique across all live generators, including autoscaled and restarted instances.</li><li>Static configuration is simple but breaks when instances are cloned or replaced.</li><li>A registry backed by ZooKeeper, etcd, or a database can lease an ID to a node and reclaim it after the lease expires.</li><li>A restart must not reuse an ID until the previous lease has definitively expired and its clock state is gone.</li><li>Fencing tokens or generation numbers prevent an old node from continuing to write after losing its lease.</li><li>Running out of worker IDs is a real capacity limit; plan the ID space and reuse policy before scale-out.</li><li>Container orchestration can supply stable ordinals, but they are not automatically a safe global ID without a range check.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Time-sortable alternatives: ULID, KSUID, and friends</h2>
+<ul><li><strong>ULID</strong> uses a timestamp plus random bits and encodes the result in a lexicographically sortable base32 string.</li><li>Sortable string IDs work well in logs and APIs, but their text form is larger than a 64-bit integer.</li><li>Monotonic variants increment the random portion when two IDs are generated in the same millisecond.</li><li>KSUID and similar formats make a different timestamp/randomness trade-off while keeping lexical order.</li><li>Time sortability helps keyset pagination and recent-first queries, but it also reveals approximate creation time.</li><li>These formats need the same clock-rollback thinking as Snowflake, even if collisions remain unlikely.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Hash-based, composite, and custom IDs</h2>
+<ul><li>A content hash gives natural deduplication for immutable blobs, but it is not a good primary key for mutable records.</li><li>Hash collisions must be handled explicitly, and the ID reveals information about the content if the hash is unsalted.</li><li>A composite ID such as shard plus local sequence keeps IDs compact and makes routing explicit.</li><li>Embedding a tenant or region in the ID can simplify sharding, but it makes the ID harder to change later.</li><li>Client-supplied idempotency keys are not record IDs; they should be stored separately to deduplicate retries.</li><li>A random public token can sit alongside an internal integer ID, keeping storage compact while hiding enumerable keys.</li><li>Never encode secrets, personal data, or authorization claims in an ID that clients can read.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Consequences for storage, sharding, and APIs</h2>
+<ul><li>Random IDs hurt B-tree locality: inserts land on many pages, causing splits and more I/O than append-only keys.</li><li>Time-ordered IDs make inserts roughly sequential and improve range scans and recent-first queries.</li><li>A 128-bit ID stored as text can be several times larger than a 64-bit integer, and every secondary index pays that cost.</li><li>Keyset pagination needs a stable, unique sort key; a time-ordered ID is convenient but duplicate timestamps need a tiebreaker.</li><li>If IDs encode the shard, moving data later requires rewriting IDs or maintaining a mapping.</li><li>Exposing sequential IDs invites enumeration; use random public IDs, signed URLs, or authorization checks on every read.</li><li>Changing an ID scheme after launch is a migration across primary keys, foreign keys, caches, and external references, so choose deliberately.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Failure modes and security</h2>
+<ul><li>Clock skew or rollback produces duplicate or non-monotonic IDs; monitor drift and enforce a rollback policy.</li><li>Worker ID collision happens when an instance is cloned, a lease is reclaimed too early, or configuration is copied.</li><li>A restarted node that reuses its previous sequence state can reissue IDs if the timestamp has not advanced.</li><li>An allocator outage blocks new blocks; nodes should have enough reserve to survive a short outage.</li><li>A sequence or worker-ID space that is too small overflows under burst load.</li><li>Retries can create duplicate records if the ID is generated per attempt instead of once per logical operation.</li><li>Guessable IDs enable IDOR and scraping; enforce authorization independent of ID secrecy.</li><li>Monitoring must cover generation rate, clock offset, worker-ID leaks, allocator latency, and duplicate-key errors.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Choosing an approach</h2>
+<ul><li>Single database and simple internal records: auto-increment is still the cheapest correct option.</li><li>Coordination-free public identifiers: UUID v4 or a random token, accepting index locality costs.</li><li>Compact, time-ordered IDs at high throughput: Snowflake or a segment allocator with durable ranges.</li><li>Sortable IDs with simple local generation: ULID or UUID v7, accepting a larger text representation.</li><li>Multi-region active-active: avoid a single global sequence; combine region/worker identity with local generation.</li><li>Legacy systems: add a new ID column, backfill, dual-write, then switch reads and writes rather than rewriting in place.</li><li>Whichever you choose, document the clock, worker-ID, and migration assumptions; they are part of the contract.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Coordination</th><th>Sortable</th><th>Size</th><th>Main risk</th></tr></thead><tbody><tr><td>Auto-increment</td><td>Central database</td><td>Yes</td><td>Small</td><td>Bottleneck and single point of failure</td></tr>
+<tr><td>UUID v4</td><td>None</td><td>No</td><td>Large</td><td>Index locality and unreadable keys</td></tr>
+<tr><td>UUID v7 / ULID</td><td>None</td><td>Approximately</td><td>Large</td><td>Clock assumptions and text size</td></tr>
+<tr><td>Ticket / segment</td><td>Periodic allocator call</td><td>Roughly</td><td>Small</td><td>Allocator availability and gaps</td></tr>
+<tr><td>Snowflake</td><td>Worker ID assignment</td><td>Yes</td><td>Small</td><td>Clock skew and worker collision</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>How to approach it in an interview</h2>
+<ul><li>Ask whether IDs must be globally unique, time-sortable, compact, or unguessable before proposing a scheme.</li><li>State the failure model: what happens on clock rollback, allocator outage, and worker restart?</li><li>Explain how worker identities are assigned and reclaimed, not just how bits are packed.</li><li>Call out the storage and index consequences of 64-bit versus 128-bit IDs.</li><li>Separate internal database IDs from public API identifiers when enumeration is a risk.</li><li>Describe a migration path for an existing table rather than assuming a greenfield system.</li><li>Finish with monitoring for duplicates, clock drift, and generation latency.</li></ul>
+
+
+<div class="note">The strongest answers connect the ID format to the database's write pattern and to the system's security model, not just to uniqueness.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Auto-increment</strong> is compact and ordered but centralizes writes and fails across independent databases.</li><li><strong>Random UUIDs</strong> remove coordination but hurt B-tree locality and consume more index space.</li><li><strong>Time-ordered IDs</strong> improve insert locality and pagination but depend on clock behavior and reveal creation time.</li><li><strong>Segment allocation</strong> reduces central load but creates gaps and requires durable allocator state.</li><li><strong>Snowflake IDs</strong> are compact and sortable but require unique worker IDs and clock discipline.</li><li><strong>Longer random IDs</strong> resist enumeration better but cost storage in every index and foreign key.</li><li><strong>Embedding shard or tenant in the ID</strong> simplifies routing but makes IDs hard to change and can leak structure.</li><li><strong>Client-supplied idempotency keys</strong> simplify retry deduplication but are not a substitute for a record identifier.</li><li><strong>Multiple active generators</strong> improve availability but increase the coordination needed to avoid collisions.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why is auto-increment hard in a distributed system?</summary><div class="answer"><p>It depends on one database writer, so it becomes a throughput bottleneck and a single point of failure. Independent databases each have their own counter and will collide. Sequential values are also easy to enumerate.</p></div></details>
+<details><summary>2. How do UUIDs guarantee uniqueness without coordination?</summary><div class="answer"><p>They use a very large random or time-plus-random space, making collisions negligibly unlikely. Version 4 is effectively random; version 7 puts a timestamp first for sortability. No central service is needed.</p></div></details>
+<details><summary>3. What is the downside of random UUID primary keys?</summary><div class="answer"><p>Random inserts scatter across the B-tree, causing page splits, cache misses, and write amplification. The 128-bit width also makes every index larger than with a 64-bit integer.</p></div></details>
+<details><summary>4. Explain a Snowflake ID.</summary><div class="answer"><p>It packs a timestamp, a worker identifier, and a per-tick sequence into a 64-bit integer. Each worker generates locally, the timestamp gives rough ordering, and the worker ID prevents collisions between nodes.</p></div></details>
+<details><summary>5. What happens if the clock moves backwards on a Snowflake generator?</summary><div class="answer"><p>The node may reissue timestamps it already used. It should wait for the clock to catch up if the drift is small, or refuse to issue and alert if the drift is large. It must never reset the sequence and reuse an old timestamp.</p></div></details>
+<details><summary>6. How do you assign worker IDs?</summary><div class="answer"><p>Use a registry or lease service such as etcd or ZooKeeper, assign a unique ID per live generator, and reclaim it only after the lease expires. Static configuration is fragile under cloning and autoscaling.</p></div></details>
+<details><summary>7. How does a ticket or segment allocator work?</summary><div class="answer"><p>A central service reserves a disjoint block of IDs for a node and persists the high-water mark. The node issues IDs locally until the block runs out, then requests another. It reduces round trips at the cost of gaps and allocator dependency.</p></div></details>
+<details><summary>8. When would you choose ULID over UUID v4?</summary><div class="answer"><p>When you want local generation plus lexical time ordering for pagination, logs, or recent-first queries. The cost is a larger text representation and the same clock considerations as other time-based schemes.</p></div></details>
+<details><summary>9. Can you use a hash as a primary key?</summary><div class="answer"><p>It works for immutable content-addressed data and deduplication, but mutable records need a stable identity independent of content. Hashes also collide in theory and can leak information about the input.</p></div></details>
+<details><summary>10. How do IDs affect sharding?</summary><div class="answer"><p>An ID can embed a shard or region to make routing explicit, or it can be independent and mapped through a directory. Embedding simplifies routing but makes rebalancing and ID changes harder.</p></div></details>
+<details><summary>11. How do you expose IDs safely in a public API?</summary><div class="answer"><p>Use random or signed public identifiers and enforce authorization on every request. Never rely on an ID being hard to guess as the only access control; that is an IDOR vulnerability.</p></div></details>
+<details><summary>12. How would you migrate from integer IDs to UUIDs?</summary><div class="answer"><p>Add a new column, backfill in batches, dual-write both IDs, update foreign keys and caches, switch reads, then retire the old column. Plan for external references and rollback during the transition.</p></div></details>
+<details><summary>13. What would you monitor for an ID service?</summary><div class="answer"><p>Generation rate and latency, duplicate-key errors, clock offset and rollback events, worker-ID lease conflicts, allocator availability, and range exhaustion. Alert on any duplicate detection immediately.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming a UUID is automatically a good database primary key without considering index locality.</li><li>Letting two nodes share a worker ID after cloning or autoscaling.</li><li>Ignoring clock rollback and reusing a timestamp with a reset sequence.</li><li>Using sequential IDs in public URLs and treating secrecy as authorization.</li><li>Making every ID a string because it is convenient, then paying for it in every index.</li><li>Forgetting that retries can generate a second ID for the same logical operation.</li><li>Choosing a scheme without a migration plan for existing primary and foreign keys.</li><li>Believing a central ticket service is highly available just because it is simple.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="finding-tracking-locations.html"><span>← Previous</span><strong>Finding and Tracking Locations</strong></a><a class="next" href="counting-at-scale.html"><span>Next →</span><strong>Counting at Scale</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/generating-unique-ids">AlgoMaster — Generating Unique IDs</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

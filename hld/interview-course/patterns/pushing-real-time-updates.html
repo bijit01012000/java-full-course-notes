@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pushing Real-time Updates — System Design Interviews</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Interviews · Interview Patterns · 05 / 20</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Pushing Real-time Updates</h1>
+    <p class="dek">Interview Patterns · Delivering Content</p>
+    <div class="meta">
+      <span class="pill accent"><strong>14</strong> sections</span>
+      <span class="pill">14 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design-interviews/realtime-updates">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: HTTP cannot push</a>
+<a href="#s2">Where this pattern shows up</a>
+<a href="#s3">The two parts of the problem</a>
+<a href="#s4">Short polling</a>
+<a href="#s5">Long polling</a>
+<a href="#s6">Serving many waiting requests</a>
+<a href="#s7">Server-Sent Events</a>
+<a href="#s8">SSE limitations</a>
+<a href="#s9">WebSockets</a>
+<a href="#s10">Choosing an approach</a>
+<a href="#s11">Connection servers</a>
+<a href="#s12">Routing updates to the right server</a>
+<a href="#s13">Disconnects and missed updates</a>
+<a href="#s14">Reconnection storms and interview framing</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 20 patterns</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>HTTP only lets the client ask, so pushing updates means choosing a transport (polling, SSE, or WebSockets) <strong>and</strong> solving a second problem: routing each update to the server that holds the recipient's connection.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Short polling</dt><dd>The client repeats a normal HTTP request on a fixed interval and usually gets an empty response.</dd></div><div class="term"><dt>Long polling</dt><dd>The server holds an open HTTP request until data arrives or a timeout fires, then the client immediately re-requests.</dd></div><div class="term"><dt>Server-Sent Events (SSE)</dt><dd>A one-way stream over a long-lived HTTP connection using <code>text/event-stream</code>, with browser-managed reconnection.</dd></div><div class="term"><dt>WebSocket</dt><dd>A connection upgraded from HTTP that carries low-overhead messages in both directions.</dd></div><div class="term"><dt>Connection server</dt><dd>A gateway-tier server whose only job is to hold client connections and push messages to them.</dd></div><div class="term"><dt>Connection registry</dt><dd>A fast lookup such as Redis mapping user or device to the connection server that currently holds its socket.</dd></div><div class="term"><dt>Pub/sub</dt><dd>A messaging model where connection servers subscribe to channels and publishers send once without knowing which server holds the user.</dd></div><div class="term"><dt>Sequence number</dt><dd>A monotonically increasing id stored with each update so a reconnecting client can fetch everything it missed.</dd></div><div class="term"><dt>Reconnection storm</dt><dd>A mass simultaneous reconnect after a server or network failure that can cascade into further failures.</dd></div><div class="term"><dt>Heartbeat</dt><dd>A small periodic message that distinguishes a healthy idle connection from a dead one.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: HTTP cannot push</h2>
+<p class="lede">HTTP is a request-response protocol. The client asks, the server answers, and the exchange is over. When something changes later, the server has no open channel to tell anyone.</p>
+<ul><li>A client that already received its response has <strong>no open request</strong>, so the server cannot deliver a new message to it.</li><li>Users now expect chat messages, scores, presence, and collaborative edits to appear <strong>as they happen</strong>, without a refresh.</li><li>The naive fix is to have the client ask again and again, which trades freshness against a large amount of wasted traffic.</li><li>Every technique in this pattern is a different way of keeping a delivery path open between updates.</li><li>The requirement is not really real-time delivery, it is <strong>server-initiated delivery</strong> with an acceptable delay.</li><li>Clarify the acceptable delay early: an update that can be a few seconds late permits much simpler designs than one that must be immediate.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Where this pattern shows up</h2>
+<p class="lede">The same underlying requirement appears across many interview problems, so the transport choice and backend routing are reusable.</p>
+<ul><li><strong>Messaging</strong> (WhatsApp, Slack): messages, typing indicators, read receipts, and online status must appear immediately.</li><li><strong>Location tracking</strong> (Uber, delivery): the driver sends location every few seconds and the rider watches the car move.</li><li><strong>Live feeds and notifications</strong>: comments, sports scores, and badge counts update without a refresh.</li><li><strong>Collaborative editing</strong> (Google Docs, Figma): one user's typing or cursor must reach the others almost immediately.</li><li><strong>Auction bids, stock prices, seat availability</strong>: many viewers watch a value that changes constantly.</li><li><strong>AI chat</strong>: tokens are streamed as they are generated instead of appearing all at once.</li><li>The technique is the same; only the direction, fan-out, and loss tolerance differ.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The two parts of the problem</h2>
+<p class="lede">A complete answer has a client-server transport half and a backend routing half. Most candidates solve only the first.</p>
+<ul><li><strong>Part 1, transport:</strong> how the client and server exchange updates, chosen from polling, SSE, or WebSockets.</li><li><strong>Part 2, routing:</strong> given a new update, how the backend finds the server that holds the recipient's connection.</li><li>With one server, routing is trivial because every user is connected to that same server.</li><li>With hundreds of connection servers, the application does not know where a given user is connected.</li><li>The two halves are independent: you can pair SSE with pub/sub, or WebSockets with a connection registry.</li><li>In an interview, state both halves explicitly before diving into either one.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Question to ask</th><th>Why it matters</th></tr></thead><tbody><tr><td>Which direction does data flow?</td><td>Server-to-client only fits SSE; frequent two-way traffic fits WebSockets</td></tr>
+<tr><td>How quickly must updates arrive?</td><td>A few seconds of delay makes polling acceptable</td></tr>
+<tr><td>How many users are connected at once?</td><td>Sets how many connection servers you need</td></tr>
+<tr><td>Can an update be lost?</td><td>Chat messages cannot be; a typing indicator or a stale price can</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Short polling</h2>
+<p class="lede">The client asks for new data on a fixed interval, for example every two seconds with a cursor such as <code>GET /messages?after=500</code>.</p>
+<ul><li>The server returns new items if any exist, otherwise an <strong>empty response</strong>.</li><li>It needs no special server, proxy, or load-balancer support beyond ordinary HTTP.</li><li>It is wasteful: at one million users polling every two seconds, that is <strong>500,000 requests per second</strong>, and most return nothing.</li><li>Frequent polling also drains phone batteries and keeps radios awake.</li><li>Delay is bounded by the interval: an update arriving just after a poll waits almost the full interval.</li><li>Worst-case delay and request rate trade off directly, so you cannot tune both down at once.</li><li>Short polling is a reasonable choice when updates are rare and a few seconds of staleness is fine, such as checking whether a file export finished.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Every 1 second</th><th>Every 2 seconds</th><th>Every 30 seconds</th></tr></thead><tbody><tr><td>Worst-case delay</td><td>1 second</td><td>2 seconds</td><td>30 seconds</td></tr>
+<tr><td>Requests/sec for 1M users</td><td>1,000,000</td><td>500,000</td><td>~33,000</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Long polling</h2>
+<p class="lede">Long polling keeps the request open. If no data exists, the server holds the request until something arrives or a timeout, commonly around 30 seconds.</p>
+<ul><li>When an update arrives, the server responds immediately and the client opens a new request for the next one.</li><li>Users see updates almost instantly without a stream of empty responses.</li><li>It still uses plain HTTP, so it passes through firewalls, proxies, and older corporate infrastructure.</li><li>Every update still costs a full HTTP request and response, including headers.</li><li>A <strong>gap</strong> exists between the response and the next request; an update created in that gap can be missed unless the client sends its cursor.</li><li>Passing the last received id, such as <code>after=501</code>, makes catch-up correct rather than luck-based.</li><li>Each waiting client occupies a connection and a small amount of server state for up to the timeout.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends request with cursor</span><span class="flow-arrow">→</span><span class="flow-step">Server holds it open</span><span class="flow-arrow">→</span><span class="flow-step">Update arrives or timeout fires</span><span class="flow-arrow">→</span><span class="flow-step">Server responds</span><span class="flow-arrow">→</span><span class="flow-step">Client immediately re-requests</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Serving many waiting requests</h2>
+<p class="lede">A long-polling server cannot afford a dedicated thread per waiting client.</p>
+<ul><li>With a thread per request, 100,000 waiting clients means 100,000 mostly idle threads, each with its own stack memory.</li><li>Real servers use an <strong>async, event-driven</strong> model where a waiting request is just a registered callback.</li><li>When an update is published, often through pub/sub, the server finds matching waiters and responds to them.</li><li>Capacity is then limited by memory, file descriptors, and connection tracking rather than threads.</li><li>Timeouts must be shorter than idle-connection limits in load balancers and proxies, or requests are cut silently.</li><li>The client must reconnect after every timeout, so timeout length and reconnect behavior have to be designed together.</li></ul>
+
+
+<div class="note">This is the same resource shift that appears with SSE and WebSockets: cost moves from CPU per request to memory and file descriptors per connection.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Server-Sent Events</h2>
+<p class="lede">SSE opens one long-lived HTTP connection and lets the server write a stream of small text events over it.</p>
+<ul><li>The server sets the content type to <code>text/event-stream</code> and each event is a small text block with optional id and event type.</li><li>Data flows <strong>only server to client</strong>; when the client needs to send something, such as posting a comment, it uses a normal HTTP request.</li><li>The browser's <code>EventSource</code> API reconnects automatically, which removes a common source of client bugs.</li><li>On reconnect the browser sends <code>Last-Event-ID</code>, so the server can resume from the last event the client saw.</li><li>The server must still store recent events, because the browser only reports the id, not the missed payloads.</li><li>It fits live feeds, notifications, stock tickers, dashboards, and token-by-token AI responses.</li><li>It is simpler to operate than WebSockets because it is still ordinary HTTP.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>SSE limitations</h2>
+<ul><li>SSE carries only <strong>text</strong>; binary payloads must be encoded, for example as Base64, which adds size and CPU.</li><li>On HTTP/1.1 browsers allow only about <strong>six connections per domain</strong>, so many tabs can exhaust the limit.</li><li>HTTP/2 largely removes that constraint because many streams share a single connection.</li><li>The browser's <code>EventSource</code> cannot set custom headers, so auth usually relies on a cookie or a short-lived token in the URL.</li><li>Tokens in URLs can leak through logs and referrers, so they should be short-lived and scoped.</li><li>Proxies and load balancers must not buffer the response, or events arrive in bursts instead of immediately.</li><li>A dead connection can look healthy until a write fails, so heartbeats are still needed.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Short polling</th><th>Long polling</th><th>SSE</th><th>WebSocket</th></tr></thead><tbody><tr><td>Direction</td><td>Client asks</td><td>Client asks, server waits</td><td>Server to client</td><td>Both ways</td></tr>
+<tr><td>Delay</td><td>Up to poll interval</td><td>Near instant</td><td>Near instant</td><td>Near instant</td></tr>
+<tr><td>Overhead per update</td><td>Full HTTP request</td><td>Full HTTP request</td><td>Small text event</td><td>A few bytes</td></tr>
+<tr><td>Reconnection</td><td>Next poll</td><td>Next request</td><td>Automatic in browser</td><td>You build it</td></tr>
+<tr><td>Server state</td><td>None</td><td>Open requests</td><td>Open connections</td><td>Open connections</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>WebSockets</h2>
+<p class="lede">When both sides send data often, a WebSocket is the better fit.</p>
+<ul><li>The connection begins as an HTTP request with an <code>Upgrade: websocket</code> header.</li><li>The server answers <code>101 Switching Protocols</code> and the same TCP connection becomes two-way.</li><li>Either side can send at any time, and per-message overhead is only a few bytes.</li><li>It suits chat, multiplayer games, collaborative editing, and trading, where the client sends as often as it receives.</li><li>Connections are <strong>stateful</strong>: a user stays pinned to one server for the life of the connection.</li><li>The load balancer must pass the upgrade header through, support long-lived connections, and not close idle sockets too early.</li><li>The browser API does not reconnect for you, so client code must implement retry, backoff, and resubscription.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Choosing an approach</h2>
+<p class="lede">Start from direction and freshness, then fall back to what the infrastructure supports.</p>
+<ul><li>Updates rare and seconds of delay acceptable: <strong>short polling</strong>, the simplest option.</li><li>Updates server-to-client only: <strong>SSE</strong>, which gives real-time delivery with less operational work than WebSockets.</li><li>Client and server both send frequently: <strong>WebSockets</strong>.</li><li>Long-lived connections poorly supported by proxies or corporate networks: <strong>long polling</strong> as a fallback.</li><li>Justify the choice against requirements instead of saying a technology is real-time; explain what makes it fit.</li><li>State the cost you accepted: extra connections, statefulness, reconnect logic, or wasted requests.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Use case</th><th>Approach</th><th>Why</th></tr></thead><tbody><tr><td>File export status</td><td>Short polling</td><td>Rare update, a few seconds of delay is fine</td></tr>
+<tr><td>Notifications, live scores, dashboards</td><td>SSE</td><td>Server to client only, automatic reconnection</td></tr>
+<tr><td>AI chat response streaming</td><td>SSE</td><td>One-way stream of tokens</td></tr>
+<tr><td>Chat with typing indicators</td><td>WebSocket</td><td>Both sides send often</td></tr>
+<tr><td>Multiplayer games, collaborative editing</td><td>WebSocket</td><td>Frequent two-way traffic</td></tr>
+<tr><td>Restrictive corporate networks</td><td>Long polling</td><td>Plain HTTP passes through proxies</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Updates rare and delay OK?</span><span class="flow-arrow">→</span><span class="flow-step">Yes: short polling</span><span class="flow-arrow">→</span><span class="flow-step">No: client sends often?</span><span class="flow-arrow">→</span><span class="flow-step">Yes: WebSockets</span><span class="flow-arrow">→</span><span class="flow-step">No: long-lived connections supported?</span><span class="flow-arrow">→</span><span class="flow-step">Yes: SSE</span><span class="flow-arrow">→</span><span class="flow-step">No: long polling</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Connection servers</h2>
+<p class="lede">With polling, any server can handle any request. With SSE and WebSockets, only the server holding the socket can push to that user.</p>
+<ul><li>Split the system into a <strong>connection tier</strong> (a gateway) that holds sockets and an application tier that runs business logic.</li><li>The gateway does not save messages or compute scores; it terminates connections and delivers payloads.</li><li>This separation lets connection capacity and application capacity scale independently.</li><li>A single connection server can typically hold tens of thousands of connections, and with careful tuning some systems reach hundreds of thousands.</li><li>Ten million concurrent users therefore implies a few hundred connection servers, not a handful.</li><li>The limit is usually <strong>memory and open file handles</strong>, not CPU, since each connection holds a socket and buffers.</li><li>Operating-system file-descriptor limits, often 1,024 per process by default, must be raised, and the tier is sized by connections rather than requests per second.</li><li>Connection servers are often the longest-lived and most state-heavy part of the stack, so graceful deploys matter.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Routing updates to the right server</h2>
+<p class="lede">If user B is connected to server 7 and a message arrives on server 1, something must bridge that gap.</p>
+<ul><li>The application service that accepted the write must discover the destination connection server.</li><li>A <strong>connection registry</strong> stores user-to-server mappings in a fast store such as Redis and looks them up per message.</li><li>A <strong>pub/sub</strong> system instead has each connection server subscribe to channels for its connected users or rooms.</li><li>Registry entries usually carry a TTL refreshed by the connection server, so a crashed server's entries expire automatically.</li><li>Registry routing sends each message only where it is needed, but the mapping must be maintained on every connect, disconnect, and move.</li><li>Pub/sub removes that bookkeeping from the sender, but delivery depends on the broker and is typically fire-and-forget.</li><li>For rooms and live matches, one publish to a room channel reaches every server with a member, which is far cheaper than per-member lookups.</li></ul>
+<h3>Registry vs pub/sub</h3>
+<ul><li>The registry tells you exactly where a user is, which helps with targeted delivery, debugging, and very large systems.</li><li>Pub/sub keeps the sender ignorant of topology and scales naturally to groups.</li><li>Pub/sub can waste work if a publish reaches servers with no interested connection, depending on channel design.</li><li>Most interview answers use pub/sub for simplicity; reach for a registry when you need control or per-user routing.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Connection registry</th><th>Pub/sub</th></tr></thead><tbody><tr><td>Sender needs to know the server</td><td>Yes, it looks it up</td><td>No</td></tr>
+<tr><td>Groups and rooms</td><td>One lookup per member</td><td>One publish per room</td></tr>
+<tr><td>What you maintain</td><td>The mapping, as users connect and move</td><td>Subscriptions on each server</td></tr>
+<tr><td>Good fit</td><td>Very large systems that need more control</td><td>Most interview answers</td></tr></tbody></table></div>
+
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Disconnects and missed updates</h2>
+<p class="lede">Phones switch networks, laptops sleep, and servers restart during deploys, so every client will sometimes be disconnected exactly when an update is sent.</p>
+<ul><li>Redis Pub/Sub does not store messages; if no server is subscribed when a message is published, it is lost.</li><li>The fix is <strong>save first, then send</strong>: persist the update with a sequence number before attempting real-time delivery.</li><li>On reconnect the client sends its last sequence number and the server returns everything after it from the database.</li><li>This covers dropped connections, server crashes, and users who were offline for a long time with one mechanism.</li><li>Because an update can arrive both live and from the catch-up query, the client must <strong>deduplicate by sequence number</strong>.</li><li>An idle connection looks like a broken one, so client and server exchange heartbeats roughly every 30 seconds and treat silence as a closed connection.</li><li>Mobile operating systems close background connections to save battery, so those users are reached through APNs or FCM and fetch missed data when the app opens.</li><li>Sequence numbers also give a natural ordering and a resumable cursor for the client.</li></ul>
+
+<div class="flow"><span class="flow-step">Sender writes message with seq 902</span><span class="flow-arrow">→</span><span class="flow-step">Persist to database</span><span class="flow-arrow">→</span><span class="flow-step">Publish seq 902</span><span class="flow-arrow">→</span><span class="flow-step">Delivery fails while offline</span><span class="flow-arrow">→</span><span class="flow-step">Client reconnects after 901</span><span class="flow-arrow">→</span><span class="flow-step">Server queries seq > 901</span><span class="flow-arrow">→</span><span class="flow-step">Client renders and deduplicates</span></div>
+</section>
+<section class="section-block" id="s14">
+<h2><span class="n">14</span>Reconnection storms and interview framing</h2>
+<p class="lede">A failure that disconnects many clients at once creates a second, larger load spike when they all come back.</p>
+<ul><li>If a server holding 50,000 users dies, all 50,000 reconnect simultaneously to the remaining servers.</li><li>Those servers also receive a burst of catch-up queries, so the database can become the next component to fail.</li><li>Failure then cascades: overloaded servers drop more connections, which produce more reconnects.</li><li>Clients should reconnect with <strong>exponential backoff plus random jitter</strong>, for example a random wait between 0 and 1 second, then 0 and 2, then 0 and 4.</li><li>Jitter spreads retries over time so the herd never arrives in one instant.</li><li>Planned deploys should close a server's connections gradually rather than all at once.</li><li>Interview flow: clarify direction, volume, and freshness; choose the transport; explain routing; explain save-first recovery; then discuss connection scaling and reconnect storms.</li><li>Name what you would monitor: concurrent connections, connect/disconnect rate, publish latency, catch-up query load, and reconnect rate per server.</li></ul>
+
+<div class="flow"><span class="flow-step">Clarify requirements</span><span class="flow-arrow">→</span><span class="flow-step">Choose transport</span><span class="flow-arrow">→</span><span class="flow-step">Route to the right server</span><span class="flow-arrow">→</span><span class="flow-step">Persist before publishing</span><span class="flow-arrow">→</span><span class="flow-step">Recover missed updates</span><span class="flow-arrow">→</span><span class="flow-step">Scale and protect reconnects</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Short polling</strong> is trivial to build and needs no special infrastructure, but wastes requests and battery and has delay bounded by the interval.</li><li><strong>Long polling</strong> gives near-instant delivery over plain HTTP, but holds a connection per client and still pays full request overhead per update.</li><li><strong>SSE</strong> is simple, text-only, and reconnects in the browser, but supports one-way flow and is constrained by per-domain connection limits on HTTP/1.1.</li><li><strong>WebSockets</strong> give low-overhead two-way messaging, but connections are stateful, so deploys, load balancers, and client reconnect logic all get harder.</li><li><strong>A separate connection tier</strong> lets connections and business logic scale independently, at the cost of another service to deploy and monitor.</li><li><strong>A connection registry</strong> gives precise targeting, but you must keep mappings correct and expire them when servers die.</li><li><strong>Pub/sub</strong> decouples senders from topology and handles rooms cheaply, but delivery is fire-and-forget and depends on broker health.</li><li><strong>Save-first with sequence numbers</strong> makes delivery recoverable, but adds a database write and a catch-up read path to every update.</li><li><strong>Heartbeats</strong> detect dead connections, but consume bandwidth and battery across millions of idle clients.</li><li><strong>Aggressive reconnects</strong> restore service quickly per client, but synchronized retries can take down the remaining fleet.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why can't the server just push updates over HTTP?</summary><div class="answer"><p>HTTP is request-response: once the response is sent, the exchange is closed and there is no open channel for the server to use later. Every real-time technique either re-opens requests (polling) or keeps a connection open (SSE, WebSockets).</p></div></details>
+<details><summary>2. What are the two parts of a real-time design?</summary><div class="answer"><p>The transport between client and server (polling, SSE, or WebSockets) and the backend routing that finds the connection server holding the recipient. Most candidates cover only the transport.</p></div></details>
+<details><summary>3. When is short polling good enough?</summary><div class="answer"><p>When updates are rare and a few seconds of delay is acceptable, for example checking whether a background export finished. It requires no special infrastructure and is the simplest thing that works.</p></div></details>
+<details><summary>4. How does long polling improve on short polling?</summary><div class="answer"><p>The server holds the request until data exists or a timeout fires, so updates arrive almost instantly and empty responses disappear. The cost is one open request per client and full HTTP overhead per update.</p></div></details>
+<details><summary>5. How do you avoid missing a message between long-poll requests?</summary><div class="answer"><p>Have the client send the id of the last message it received, and have the server return everything after that id. The cursor makes the gap harmless.</p></div></details>
+<details><summary>6. Why do long-polling servers use async I/O?</summary><div class="answer"><p>A thread per waiting client would mean tens of thousands of mostly idle threads and large memory overhead. Event-driven servers register a callback per waiting request and respond when a matching update is published.</p></div></details>
+<details><summary>7. How does SSE reconnect work?</summary><div class="answer"><p>The browser's <code>EventSource</code> reconnects automatically and sends the <code>Last-Event-ID</code> header. The server must have stored recent events so it can replay everything after that id.</p></div></details>
+<details><summary>8. What are the limitations of SSE?</summary><div class="answer"><p>It is server-to-client only, text only, limited to about six connections per domain on HTTP/1.1, and <code>EventSource</code> cannot set custom headers, so auth uses cookies or a short-lived token in the URL.</p></div></details>
+<details><summary>9. When would you choose WebSockets over SSE?</summary><div class="answer"><p>When the client also sends frequently, such as chat, games, or collaborative editing. WebSockets give low overhead in both directions but require you to handle stateful connections and reconnect logic yourself.</p></div></details>
+<details><summary>10. Why split out connection servers?</summary><div class="answer"><p>Only the server holding a socket can push to that user, and holding millions of sockets is a different workload from business logic. A separate gateway tier lets each scale independently and keeps stateful connections away from stateless application servers.</p></div></details>
+<details><summary>11. What limits a single connection server?</summary><div class="answer"><p>Usually memory and open file descriptors rather than CPU, since each connection holds a socket and buffers. File-descriptor limits must be raised, and capacity is measured in connections, not requests per second.</p></div></details>
+<details><summary>12. How does an update reach a user connected to another server?</summary><div class="answer"><p>Either look up the user's server in a connection registry and send directly, or publish to a channel that the user's connection server subscribes to. Pub/sub is simpler to explain; a registry gives more control.</p></div></details>
+<details><summary>13. How do you handle updates sent while a user is offline?</summary><div class="answer"><p>Persist every update with a sequence number before publishing it. On reconnect the client sends its last seen sequence number and the server returns everything after it, so real-time delivery becomes an optimization rather than a requirement.</p></div></details>
+<details><summary>14. What is a reconnection storm and how do you prevent it?</summary><div class="answer"><p>When a server dies, all of its clients reconnect at once, overloading remaining servers and the database, which causes more failures. Clients should retry with exponential backoff and random jitter, and deploys should drain connections gradually.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Designing only the client transport and forgetting that the backend must find the server holding the recipient's connection.</li><li>Saying WebSockets are required for real-time when updates are one-way and SSE would be simpler.</li><li>Forgetting that pub/sub is fire-and-forget, so an offline or slow client silently loses updates.</li><li>Not persisting updates before delivery, leaving no way to catch up after a disconnect.</li><li>Ignoring that WebSocket connections are stateful, which breaks naive rolling deploys and autoscaling.</li><li>Sizing connection servers by requests per second instead of by concurrent connections and file descriptors.</li><li>Letting all clients retry immediately after a failure and causing a cascading reconnection storm.</li><li>Assuming an idle connection is healthy without heartbeats or a write timeout.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="absorbing-traffic-spikes.html"><span>← Previous</span><strong>Absorbing Traffic Spikes</strong></a><a class="next" href="fanning-out-updates.html"><span>Next →</span><strong>Fanning Out Updates</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design-interviews/realtime-updates">AlgoMaster — Pushing Real-time Updates</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 20 patterns</a> · <a href="../index.html">Interview course</a> · <a href="../../fundamentals/index.html">Fundamentals notes</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>

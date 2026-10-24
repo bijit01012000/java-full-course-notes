@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design a Rate Limiter — Interview Answer</title>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="questions.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">Interview Question Bank · 02 / 32</div>
+      <div class="actions"><button class="btn primary" type="button" onclick="window.print()">Print / PDF</button></div>
+    </div>
+    <div style="margin-bottom:10px"><span class="priority p0">P0 · Infrastructure</span></div>
+    <h1>Design a Rate Limiter</h1>
+    <p class="dek">It tests whether you can enforce a shared limit atomically under concurrency, and whether you can reason about availability when the limiter itself is the failing component.</p>
+    <div class="meta">
+      <span class="pill accent"><strong>4</strong> entities</span>
+      <span class="pill">5 APIs</span>
+      <span class="pill">7 trade-offs</span>
+      <span class="pill">11 follow-ups</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      
+      <a href="#requirements">Requirements</a>
+      <a href="#entities">Key entities</a>
+      <a href="#api">API design</a>
+      <a href="#model">Data modelling</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tradeoffs">Optimisation &amp; trade-offs</a>
+      <a href="#followups">Follow-ups</a>
+      <a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All questions</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">One-line answer</span>Count requests per key in Redis with one atomic token-bucket script, keep versioned rules in a local policy cache, and pick fail-open or fail-closed per route so the limiter never becomes the outage.</div>
+
+      <section class="section-block" id="requirements">
+        <h2><span class="n">01</span>Requirements</h2>
+        <div class="req-grid">
+          <div class="req-card"><span class="tag">Functional</span><ul><li>Enforce limits per API key, user, IP, tenant, and route, with different limits per plan or endpoint.</li><li>Support sustained rate plus a short burst allowance, for example 100 requests per minute with a burst of 20.</li><li>Return HTTP 429 with Retry-After and rate-limit headers (limit, remaining, reset) on rejection.</li><li>Allow operators to create, update, and disable rules without redeploying the gateway.</li><li>Expose current usage per key and aggregate allow/deny metrics for dashboards.</li><li>Choose a failure mode per route: fail-open for browsing, fail-closed for login, payments, and expensive writes.</li></ul></div>
+          <div class="req-card"><span class="tag">Non-functional</span><ul><li>Add no more than a few milliseconds at p99 to every request; the limiter is on the hot path.</li><li>Stay available and correct enough during a Redis node or zone failure, without a global stop-the-world.</li><li>Scale horizontally with the gateway fleet and support at least 100k checks per second at peak.</li><li>Rule changes propagate within a few seconds and are versioned so a bad rule can be rolled back.</li><li>Never let one hot tenant or key consume the capacity of the whole limiter cluster.</li></ul></div>
+        </div>
+        <ul class="estimate-list"><li>Assume 100k rate-limit checks per second at peak and 20M active keys across users, keys, IPs, and tenants.</li><li>One token-bucket hash per active key; at roughly 100 bytes plus Redis overhead, 20M keys is a few GB, which fits a small Redis cluster.</li><li>Each check is one Redis round trip plus one Lua script, so the limiter's own capacity is bounded by Redis ops and network latency.</li><li>Keep counters only as long as the longest window plus a safety margin; a 1-day window needs a 25-hour TTL, not permanent storage.</li><li>Budget roughly 2-3 limiter checks per user request when both a global tenant limit and a per-route limit apply.</li></ul>
+      </section>
+
+      <section class="section-block" id="entities">
+        <h2><span class="n">02</span>Key entities</h2>
+        <div class="entity-grid"><div class="entity"><span class="name">Rule</span><span class="fields">rule_id, scope (global/user/api_key/ip/tenant), route_pattern, limit, window_seconds, burst, algorithm, fail_mode, enabled, version</span></div><div class="entity"><span class="name">Bucket</span><span class="fields">key (rule_id + scope value), tokens, last_refill_ms, window_start, count, ttl</span></div><div class="entity"><span class="name">ClientIdentity</span><span class="fields">api_key_id, user_id, tenant_id, plan, ip, region</span></div><div class="entity"><span class="name">LimitEvent</span><span class="fields">key, rule_id, allowed, remaining, reset_at, latency_ms, sampled_at</span></div></div>
+      </section>
+
+      <section class="section-block" id="api">
+        <h2><span class="n">03</span>API design</h2>
+        <div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/v1/check</code></td><td>Internal endpoint used by gateway middleware: evaluate one key against the matching rules and return allow/deny plus headers.</td></tr><tr><td><code>GET</code></td><td><code>/v1/usage/{key}</code></td><td>Return current consumption, limit, and reset time for a key so support and customers can debug throttling.</td></tr><tr><td><code>POST</code></td><td><code>/admin/rules</code></td><td>Create a rule with scope, route, limit, window, burst, and failure mode.</td></tr><tr><td><code>PUT</code></td><td><code>/admin/rules/{rule_id}</code></td><td>Update an existing rule and bump its version so caches invalidate deterministically.</td></tr><tr><td><code>GET</code></td><td><code>/admin/rules</code></td><td>List and filter rules by scope, route, or tenant for review and rollback.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="model">
+        <h2><span class="n">04</span>Data modelling</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Choice</th><th>Why</th></tr></thead><tbody><tr><td>Counter storage</td><td>Redis hash per key, mutated by a Lua script that refills and consumes in one atomic step.</td><td>The read-modify-write must not race; a single script avoids lost updates and extra round trips, and Redis gives sub-millisecond local latency and TTL for free.</td></tr><tr><td>Key layout</td><td>rl:rule_id:scope:value, for example rl:r123:api_key:abc, with no Redis hash tag, so different tenants and rules spread across cluster slots.</td><td>Each check touches one key, so cross-slot scripts are not needed; forcing related keys onto one slot would concentrate load and create a hot node.</td></tr><tr><td>Rule storage</td><td>Rules in a small SQL table as the source of truth, replicated to an in-process policy cache keyed by route and scope.</td><td>The check path should not query a database; a versioned cache makes rule evaluation local while a pub/sub invalidation keeps it fresh within seconds.</td></tr><tr><td>Algorithm</td><td>Token bucket for most routes, with a fixed-window counter only for coarse daily quotas.</td><td>Token bucket allows a controlled burst and enforces a smooth sustained rate, while daily quotas are cheaper and more intuitive as a window counter.</td></tr><tr><td>Failure fallback</td><td>Per-instance in-memory token bucket with conservative limits when Redis is unreachable, plus a circuit breaker.</td><td>It keeps low-risk traffic flowing and bounds over-admission, but the local state is approximate and must never be the only enforcement for money-moving routes.</td></tr><tr><td>Observability</td><td>Emit counters and sampled decision events asynchronously; never write an audit row synchronously per check.</td><td>A synchronous log write would multiply latency and couple availability to the metrics pipeline; sampling is enough to see deny rates and hot keys.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-block" id="architecture">
+        <h2><span class="n">05</span>Architecture</h2>
+        <div class="diagram-card"><div class="mermaid">flowchart LR
+  C[📱 Client] --> G[🛡️ API Gateway]
+  G --> R[⚙️ Limiter Middleware]
+  R -->|load rules| P[📋 Policy Cache]
+  P --> D[(🗄️ Rule DB)]
+  R -->|atomic Lua check| B[⚡ Redis Bucket Cluster]
+  B -->|allow or deny| G
+  R -.->|Redis down| F[🧮 Local Fallback Bucket]
+  R --> M[📊 Metrics Pipeline]
+  M --> A[📈 Dashboards and Alerts]
+  classDef client fill:#e8efff,stroke:#4d74dc,color:#17211f;
+  classDef edge fill:#e2f4ef,stroke:#0f766e,color:#17211f;
+  classDef svc fill:#f0e9ff,stroke:#7c55c9,color:#17211f;
+  classDef store fill:#fff2d6,stroke:#c07a12,color:#17211f;
+  classDef obs fill:#ffe8ec,stroke:#c23a57,color:#17211f;
+  class C client;
+  class G,R edge;
+  class P,F,B,D svc;
+  class M,A obs;</div><div class="diagram-caption">The gateway asks a local policy cache for the matching rule, then makes one atomic token-bucket call to Redis; a local bucket and metrics pipeline keep the check path alive when Redis or the rule store is unhealthy.</div></div>
+        <ul><li>Run the check as gateway middleware or a sidecar so every request passes through it before touching application code; a separate network hop per service is easy to forget and bypass.</li><li>Load the matching rule from an in-process cache keyed by route and identity type; rebuild the cache on a version change delivered by pub/sub, not on every request.</li><li>Execute refill and consume in one Lua script. Read the clock inside Redis, not in the application, so multiple gateway hosts do not disagree about elapsed time.</li><li>Use token bucket state of tokens and last_refill_ms; on each check add elapsed time times the refill rate, cap at burst, and subtract one only if a token is available.</li><li>Set a TTL of window plus a safety margin on every key so idle keys disappear; otherwise memory grows with every IP that ever made a request.</li><li>Put a circuit breaker around Redis with a short timeout. When it opens, switch to the local fallback for routes marked fail-open and reject fail-closed routes immediately with 503, not 429.</li><li>Apply multiple rules in a defined order: global tenant limit first, then per-user or per-key, then per-route cost. Deny on the first failure and report which rule fired.</li></ul>
+      </section>
+
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">06</span>Optimisation &amp; trade-offs</h2>
+        <div class="table-wrap"><table><thead><tr><th>Decision</th><th>Gain</th><th>Cost / risk</th></tr></thead><tbody><tr><td>Token bucket</td><td>Allows a controlled burst and enforces a smooth long-run rate with only two numbers of state per key.</td><td>A key can spend its whole burst instantly, so downstream capacity must tolerate that spike; the bucket is not a strict per-second guarantee.</td></tr><tr><td>Central Redis counters</td><td>One shared view across all gateway instances, so limits are accurate no matter which node serves the request.</td><td>Every check pays a network round trip and Redis becomes a critical dependency; a hot key or cluster outage affects the whole fleet.</td></tr><tr><td>Local-only counters</td><td>No network hop and no shared failure domain, so the limiter is extremely fast and available.</td><td>Each instance enforces its own limit, so the effective global limit is the per-instance limit times the fleet size and drifts as instances scale.</td></tr><tr><td>Fail-open for low-risk routes</td><td>Browsing and read traffic keep working when the limiter is down, which protects the user experience.</td><td>A misbehaving client can overrun limits during the outage and pressure downstream services exactly when they are already fragile.</td></tr><tr><td>Fail-closed for sensitive routes</td><td>Login, payment, and expensive write paths cannot be abused when the limiter cannot make a decision.</td><td>A limiter outage becomes a product outage for those flows; it needs a very high availability target and a tested manual override.</td></tr><tr><td>Sliding-window counter</td><td>Smoother than a fixed window and much cheaper than storing every request timestamp.</td><td>It is an approximation that can still allow a small burst at the boundary, and it needs two counters and a weighted calculation.</td></tr><tr><td>Gateway middleware</td><td>One enforcement point that covers every route and cannot be bypassed by a forgotten service call.</td><td>The gateway team owns policy plumbing, custom per-route logic is harder, and a gateway incident now affects all rate limiting.</td></tr></tbody></table></div>
+        <ul><li>Keep rule evaluation local and versioned so the common path is a map lookup plus one Redis call.</li><li>Cache the parsed rule per route in the gateway worker; avoid regex evaluation on every request.</li><li>Batch or pipeline limit checks when one request must satisfy several rules, rather than making one round trip per rule.</li><li>Use Redis Cluster so counters spread across nodes; each check touches one key, and a hot tenant can be split into several counter keys if one node saturates.</li><li>Return Retry-After based on the actual refill time, and add jitter guidance so clients do not retry in lockstep.</li><li>Sample decision logs at a low rate and aggregate per-rule allow/deny counts; do not log every allowed request.</li><li>Pre-warm policy caches and Redis connections before a known traffic spike, and load-test the limiter at the target peak rather than at average traffic.</li><li>Separate cheap request-count limits from expensive-operation quotas so a costly endpoint cannot be hammered within a generous request limit.</li></ul>
+      </section>
+
+      <section class="section-block" id="followups">
+        <h2><span class="n">07</span>Follow-ups — one-line answers</h2>
+        <div class="followups"><div class="followup"><strong>What happens if Redis is down?</strong> The circuit breaker opens, low-risk routes fall back to a conservative per-instance token bucket, and money-moving routes fail closed with 503 until Redis recovers.</div><div class="followup"><strong>Why use a Lua script instead of GET then SET?</strong> GET then SET has a race where two gateway hosts both read the same token count and both allow, so the refill and consume must be one atomic operation.</div><div class="followup"><strong>Why token bucket instead of fixed window?</strong> A fixed window lets a client send two full quotas around the boundary, while token bucket smooths the rate and still permits a bounded burst.</div><div class="followup"><strong>How do you enforce a global limit across regions?</strong> Enforce a regional share locally and reconcile a global counter asynchronously, or lease a block of quota from a central store so each region can spend without a cross-region call per request.</div><div class="followup"><strong>How do you handle a hot tenant key?</strong> Split its counter into N sub-keys, sum them for reads, and cap the tenant at the gateway so one key cannot saturate a single Redis node.</div><div class="followup"><strong>How do rule updates reach all gateways quickly?</strong> Write the rule with a new version, publish an invalidation event, and have each gateway reload the full rule set or the changed route within a few seconds.</div><div class="followup"><strong>What do you return to a throttled client?</strong> HTTP 429 with Retry-After, the applicable limit, remaining quota, and reset time, so well-behaved clients can back off instead of retrying immediately.</div><div class="followup"><strong>Can the check and the request race?</strong> Yes, because the token is consumed before the work finishes; for expensive operations use a reservation that is released on failure, or accept a small over-admission and enforce a concurrency limit separately.</div><div class="followup"><strong>How do you avoid clock skew affecting refill?</strong> Use Redis server time inside the Lua script and a monotonic elapsed calculation, never the application host clock.</div><div class="followup"><strong>How would you test it?</strong> Unit-test boundary cases for each algorithm, load-test at the target peak, and run chaos tests that kill Redis and confirm the intended fail-open or fail-closed behavior.</div><div class="followup"><strong>Should limits be per request or per unit of work?</strong> Charge weighted cost per endpoint, so a cheap read costs one token and an expensive export costs many, otherwise clients can bypass the intent of the limit with one heavy call.</div></div>
+      </section>
+
+      <section class="section-block" id="traps">
+        <h2><span class="n">08</span>Traps</h2>
+        <div class="traps"><ul><li>Using a read-then-write check without an atomic operation, which allows two gateway instances to admit the same last token.</li><li>Forgetting TTLs on counter keys, so Redis memory grows with every IP and one-off API key forever.</li><li>Making the limiter a synchronous database call, which turns a protection mechanism into the slowest and most fragile part of the request path.</li><li>Enforcing only at the public edge and leaving internal service-to-service calls unlimited, so a retry storm inside the network is never throttled.</li><li>Choosing fail-open globally, including for payments, or fail-closed globally, including for read-only browsing, instead of deciding per route.</li><li>Reporting a limit in headers that does not match the rule actually enforced, which makes client backoff behavior wrong and support tickets noisy.</li></ul></div>
+      </section>
+
+      <nav class="page-nav"><a class="prev" href="design-url-shortener.html"><span>← Previous</span><strong>Design a URL Shortener</strong></a><a class="next" href="design-news-feed.html"><span>Next →</span><strong>Design a News Feed</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Question bank:</strong> <a href="index.html">all ranked questions</a> · <a href="../index.html">interview concepts</a> · <a href="../patterns/index.html">interview patterns</a>.</p>
+        <p><strong>Sample PDF:</strong> <a href="design-url-shortener.pdf">Design a URL Shortener — detailed sample</a>.</p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../../assets/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  securityLevel: "loose",
+  themeVariables: {
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji",
+    primaryColor: "#e2f4ef",
+    primaryBorderColor: "#0f766e",
+    primaryTextColor: "#17211f",
+    lineColor: "#5d6a66",
+    secondaryColor: "#e8efff",
+    tertiaryColor: "#fff2d6",
+    background: "#ffffff"
+  },
+  flowchart: { curve: "basis", htmlLabels: true, nodeSpacing: 35, rankSpacing: 45 }
+});
+mermaid.run({ querySelector: ".mermaid" });
+</script>
+<script src="../../assets/notes.js"></script>
+</body>
+</html>
