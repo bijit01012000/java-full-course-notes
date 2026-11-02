@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relational Databases — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 45 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Relational Databases</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/relational-databases">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem relational databases solve</a>
+<a href="#s2">Tables, rows, columns, and the schema</a>
+<a href="#s3">Keys and referential integrity</a>
+<a href="#s4">Types of relationships</a>
+<a href="#s5">Normalization</a>
+<a href="#s6">Querying with SQL</a>
+<a href="#s7">Joins</a>
+<a href="#s8">How a query is executed</a>
+<a href="#s9">Indexes</a>
+<a href="#s10">Transactions and constraints</a>
+<a href="#s11">Denormalization</a>
+<a href="#s12">Scaling relational databases</a>
+<a href="#s13">When to use one, and the common engines</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A relational database stores each fact once in typed tables, links tables with keys, and rebuilds answers at query time with SQL and joins — giving strong correctness and flexible querying in exchange for join cost and a single write primary.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Schema</dt><dd>The declared structure of tables — columns, types, constraints — enforced by the database on every write.</dd></div><div class="term"><dt>Primary key</dt><dd>The column or columns that uniquely identify a row; it cannot be duplicated or null.</dd></div><div class="term"><dt>Surrogate key</dt><dd>A generated identifier with no business meaning, such as an auto-increment integer or a UUID.</dd></div><div class="term"><dt>Foreign key</dt><dd>A column whose values must match a primary key in another table, enforcing that the reference exists.</dd></div><div class="term"><dt>Referential integrity</dt><dd>The guarantee that no relationship points at a row that does not exist.</dd></div><div class="term"><dt>Normalization</dt><dd>Organizing tables so each fact is stored once, removing update, insert, and delete anomalies.</dd></div><div class="term"><dt>Junction table</dt><dd>A table whose rows pair two foreign keys, used to model many-to-many relationships and to hold attributes of the pairing.</dd></div><div class="term"><dt>Query planner</dt><dd>The optimizer that estimates the cost of alternative execution plans and picks the cheapest one.</dd></div><div class="term"><dt>Denormalization</dt><dd>Deliberately duplicating data into a table to avoid a join or an aggregate on a hot read path.</dd></div><div class="term"><dt>ACID</dt><dd>Atomicity, consistency, isolation, and durability — the transactional guarantees relational engines are known for.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem relational databases solve</h2>
+<p class="lede">Imagine running an online store from one spreadsheet: every order row repeats the customer's name, email, and address.</p>
+<ul><li>A customer with twenty orders has their <strong>address copied twenty times</strong>.</li><li>When they move, every one of those rows must be found and updated, or the data disagrees with itself.</li><li>Deleting a customer's only order <strong>erases the customer entirely</strong>, because the contact details lived in that row.</li><li>Answering <em>how much did each customer spend last month</em> means writing custom scan-and-group code.</li><li>In 1970 Edgar Codd proposed the <strong>relational model</strong>: describe data as tables, rows, columns, and relationships, and let the database handle storage.</li><li>That model became the foundation of almost every major database since, and it is still the default choice for application data.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Tables, rows, columns, and the schema</h2>
+<ul><li>A table represents one kind of thing: customers, products, orders.</li><li>Each <strong>column</strong> has a name and a data type, such as integer, text, or timestamp.</li><li>Each <strong>row</strong> is one instance of that thing — one customer, one order.</li><li>The declared set of tables, columns, types, and constraints is the <strong>schema</strong>, and the engine enforces it on every write.</li><li>This is <strong>schema-on-write</strong>: a value of the wrong type is rejected instead of silently stored.</li><li>Rows have <strong>no guaranteed order</strong>; without <code>ORDER BY</code> the engine may return them any way it likes.</li><li>A rigid schema costs migrations, but it stops different application versions from slowly filling the table with incompatible rows.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Keys and referential integrity</h2>
+<ul><li>Every table needs a way to identify a row: the <strong>primary key</strong>, unique and never null.</li><li>A <strong>natural key</strong> comes from the business, such as an email or SKU; it is meaningful but can change.</li><li>A <strong>surrogate key</strong> is generated, such as an auto-increment integer or UUID, and never needs to change when business data does.</li><li>Other tables point at that key with a <strong>foreign key</strong>, such as <code>orders.customer_id</code> referencing <code>customers.id</code>.</li><li>The engine can then refuse an order whose customer does not exist — that is <strong>referential integrity</strong>.</li><li>Key choice affects index size and write distribution: random UUIDs scatter inserts, sequential integers cluster them.</li><li>Composite keys, such as <code>(order_id, product_id)</code>, fit relationship tables cleanly but make references wider.</li></ul>
+<h3>What happens when a referenced row is deleted</h3>
+<ul><li><code>RESTRICT</code> or <code>NO ACTION</code> blocks the delete while dependents exist.</li><li><code>CASCADE</code> deletes or updates the dependent rows automatically.</li><li><code>SET NULL</code> keeps the dependent row and clears its reference.</li><li><code>SET DEFAULT</code> keeps the row and substitutes the column default.</li><li>These are business rules, not just settings: deleting a customer should not delete their completed financial records.</li></ul>
+
+
+<h3>Key types at a glance</h3>
+<ul><li>Sequential integers are compact and cluster index writes, which makes them efficient but predictable.</li><li>Random UUIDs can be generated anywhere without coordination, but they scatter writes and enlarge every index that carries them.</li><li>Time-ordered IDs sit between the two: they can be generated independently and still keep recent inserts close in the index.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Type</th><th>Example</th><th>Trade-off</th></tr></thead><tbody><tr><td>Auto-increment</td><td>1, 2, 3</td><td>Compact and index-friendly, but predictable and single-writer</td></tr>
+<tr><td>UUID</td><td>550e8400-e29b-...</td><td>Generatable anywhere, but larger indexes and scattered writes</td></tr>
+<tr><td>Time-ordered ID</td><td>ULID, UUIDv7</td><td>Machine-generated and index-friendly, but clock behavior matters</td></tr>
+<tr><td>Natural key</td><td>email, sku</td><td>Meaningful with no extra column, but can change and may leak data</td></tr>
+<tr><td>Composite</td><td>(order_id, product_id)</td><td>Fits junction tables, but wider references and joins</td></tr></tbody></table></div>
+
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Types of relationships</h2>
+<ul><li><strong>One-to-many:</strong> one customer places many orders; the foreign key lives on the many side, in <code>orders</code>.</li><li><strong>One-to-one:</strong> a user has one profile; model it with a foreign key that is also unique, so a user cannot appear twice.</li><li><strong>Many-to-many:</strong> an order contains many products and a product appears in many orders, which a single foreign key cannot express.</li><li>Many-to-many needs a <strong>junction table</strong>, here <code>order_items</code>, with one row per (order, product) pair.</li><li>The junction table can carry facts about the relationship itself, such as quantity or the unit price at purchase time.</li><li>Storing the historical price there is what makes old orders correct after a product's price changes.</li><li>These three patterns cover most real-world data models, which is why the relational model generalizes so well.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Normalization</h2>
+<ul><li>Normalization removes duplication by storing each fact in exactly one place.</li><li>It eliminates three <strong>anomalies</strong>: update (only some copies change), insert (cannot record one fact without another), and delete (removing one fact destroys another).</li><li><strong>1NF:</strong> each column holds a single value, not a list — <code>Keyboard, Mouse</code> in one cell breaks it.</li><li><strong>2NF and 3NF:</strong> every column depends on the whole primary key, and only on the key — a customer's email does not belong in <code>orders</code>.</li><li>Most application schemas aim for about <strong>third normal form</strong>, which removes the common anomalies without over-splitting.</li><li>Normalization is not purity for its own sake: it is what makes each fact have exactly one authoritative copy.</li><li>The cost is that reads must recombine tables, which is what joins are for.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Anomaly</th><th>What happens</th><th>Spreadsheet example</th></tr></thead><tbody><tr><td>Update</td><td>One fact is copied and only some copies change</td><td>Alice moves; one of twenty rows keeps the old address</td></tr>
+<tr><td>Insert</td><td>A fact cannot be stored without an unrelated fact</td><td>A new customer cannot be added until they order</td></tr>
+<tr><td>Delete</td><td>Deleting one fact destroys another</td><td>Deleting Bob's only order loses Bob's details</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Querying with SQL</h2>
+<ul><li>SQL is <strong>declarative</strong>: you state the result you want, not the algorithm to produce it.</li><li>The query names tables, filters, groupings, and ordering; the engine decides how to execute it.</li><li>The same data can answer questions nobody anticipated when the schema was designed — the key advantage over pre-built access paths.</li><li>Expressions, aggregates, subqueries, and common table expressions compose, so complex questions stay one statement.</li><li><strong>Window functions</strong> compute values across related rows without collapsing them — a running total or a rank per group.</li><li>SQL is standardized enough that skills and most queries transfer across engines.</li><li>The limitation is that deep object graphs and very large analytical scans can still be slow, which is why caches and specialized stores appear around it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Joins</h2>
+<ul><li>A join recombines rows from related tables at read time using key equality.</li><li>An <strong>inner join</strong> returns only rows with a match on both sides, so a customer with no orders disappears.</li><li>A <strong>left join</strong> keeps every row from the left table and fills unmatched columns with NULL, which is how you find customers who never ordered.</li><li>Joins are what make normalization practical: store once, combine on demand.</li><li>Their cost depends on whether the engine can use an index for the matching side, or must hash or sort large inputs.</li><li>Joining many large tables multiplies that cost, and a chain of joins is often where a slow query actually spends its time.</li><li>Join order matters, which is why the planner, not the query author, chooses it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Customer</th><th>Orders</th><th>INNER JOIN</th><th>LEFT JOIN</th></tr></thead><tbody><tr><td>Alice</td><td>2</td><td>2 rows</td><td>2 rows</td></tr>
+<tr><td>Bob</td><td>1</td><td>1 row</td><td>1 row</td></tr>
+<tr><td>Carol</td><td>0</td><td>not returned</td><td>1 row with NULL order columns</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>How a query is executed</h2>
+<ul><li>The <strong>parser</strong> checks syntax and turns the statement into an internal tree.</li><li>The <strong>planner</strong> (optimizer) enumerates alternatives: scan or index, which join algorithm, which join order.</li><li>It estimates each plan's cost using <strong>statistics</strong> — table sizes, distinct values, and value distribution.</li><li>It picks the cheapest estimated plan and hands it to the <strong>executor</strong>, which produces the rows.</li><li><code>EXPLAIN</code> shows the chosen plan; <code>EXPLAIN ANALYZE</code> also runs it and reports real timings.</li><li>Stale statistics are a classic cause of a suddenly bad plan after a data change.</li><li>When a query is slow, the plan is the first thing to read, not the SQL text.</li></ul>
+
+<div class="flow"><span class="flow-step">Parse</span><span class="flow-arrow">→</span><span class="flow-step">Rewrite and validate</span><span class="flow-arrow">→</span><span class="flow-step">Estimate plans from statistics</span><span class="flow-arrow">→</span><span class="flow-step">Choose cheapest plan</span><span class="flow-arrow">→</span><span class="flow-step">Execute and return rows</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Indexes</h2>
+<ul><li>Without an index, finding rows means a <strong>full table scan</strong> proportional to table size.</li><li>An index is a separate structure keeping one or more columns in sorted order with pointers to rows.</li><li>Relational engines typically use a <strong>B-tree</strong>, which supports equality and range lookups with a few page reads.</li><li>The primary key is indexed automatically; indexes on foreign keys and frequent filters are added deliberately.</li><li>Indexes are not free: every insert, update, and delete must maintain each one, and each consumes disk and cache.</li><li>Index the columns queries actually filter on, sort by, or join on — not every column.</li><li>Composite indexes serve a leading-column prefix, which is why column order inside the index matters.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Transactions and constraints</h2>
+<ul><li>A <strong>transaction</strong> groups changes so they succeed or fail together — insert the order, insert its items, decrement stock.</li><li>Relational engines provide <strong>ACID</strong>: atomicity, consistency, isolation, and durability.</li><li>Isolation levels trade anomaly prevention for concurrency, from read uncommitted up to serializable.</li><li>Durability comes from a <strong>write-ahead log</strong>: changes are logged before the commit is acknowledged and replayed after a crash.</li><li>Constraints enforce rules inside the engine: <code>NOT NULL</code>, <code>UNIQUE</code>, <code>CHECK</code>, and foreign keys.</li><li>Because the rules live in the database, a buggy service cannot write data that violates them.</li><li>A constraint failure aborts the transaction, which is exactly what makes <code>CHECK (stock &gt;= 0)</code> a reliable guard against overselling.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Isolation level</th><th>Prevents</th><th>Cost</th></tr></thead><tbody><tr><td>Read Uncommitted</td><td>Very little</td><td>Dirty reads possible; rarely appropriate</td></tr>
+<tr><td>Read Committed</td><td>Dirty reads</td><td>Common default; some anomalies remain</td></tr>
+<tr><td>Repeatable Read</td><td>Dirty and non-repeatable reads</td><td>More stable, behavior varies by engine</td></tr>
+<tr><td>Serializable</td><td>All of the above, including phantoms</td><td>More waiting and retries</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Denormalization</h2>
+<ul><li>Normalization means more joins, and on a read-heavy page those joins become the bottleneck.</li><li>A product listing that shows an average rating would otherwise aggregate millions of review rows on every page load.</li><li>So store the <strong>average rating and review count</strong> in the products table and update them when a review is written.</li><li>That is denormalization: deliberate duplication to make a proven read path fast.</li><li>The cost moves to writes — the application or a trigger must keep every copy in sync, and a missed update silently corrupts the number.</li><li>Start normalized and denormalize only paths measured to be slow; premature duplication is just a future inconsistency.</li><li>Cached aggregates and materialized views are the same trade made in a different place.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Scaling relational databases</h2>
+<ul><li>A traditional deployment has one <strong>primary</strong> that accepts all writes, and that is the first limit to hit.</li><li><strong>Vertical scaling</strong> buys CPU, memory, and faster storage and keeps every guarantee intact, but has a ceiling and stays one write node.</li><li><strong>Read replicas</strong> spread read traffic but lag, so a user may not see their own write immediately.</li><li><strong>Caching</strong> removes load but introduces staleness and invalidation work.</li><li><strong>Partitioning</strong> splits one large table into pieces on the same server, which makes old data cheap to drop and keeps queries to one partition.</li><li><strong>Sharding</strong> spreads data across independent servers and raises write capacity, but cross-shard joins, transactions, and unique constraints become hard.</li><li><strong>Distributed SQL</strong> engines keep the relational model and SQL while partitioning automatically, at the cost of more latency per write and operational complexity.</li><li>A good shard key spreads load evenly and keeps data that is queried together on the same shard.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Scales reads</th><th>Scales writes</th><th>Main cost</th></tr></thead><tbody><tr><td>Vertical scaling</td><td>Yes</td><td>Up to one machine</td><td>Hardware ceiling and price</td></tr>
+<tr><td>Read replicas</td><td>Yes</td><td>No</td><td>Replica lag</td></tr>
+<tr><td>Caching</td><td>Yes</td><td>No</td><td>Keeping the cache fresh</td></tr>
+<tr><td>Partitioning</td><td>Helps large tables</td><td>Helps large tables</td><td>Still one server</td></tr>
+<tr><td>Sharding</td><td>Yes</td><td>Yes</td><td>Cross-shard joins and transactions</td></tr>
+<tr><td>Distributed SQL</td><td>Yes</td><td>Yes</td><td>Higher write latency, more operations</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use one, and the common engines</h2>
+<ul><li>Strong fit when data is <strong>structured with clear relationships</strong> and correctness matters — payments, orders, bookings, inventory.</li><li>Strong fit when you need <strong>many different queries and reports</strong> over the same data.</li><li>Weaker fit for very high write volumes across many machines, constantly changing record shapes, or specialized search and similarity workloads.</li><li>Those needs are usually served by adding a specialized system beside the relational database, not replacing it.</li><li>PostgreSQL is known for extensions such as JSONB, full-text search, PostGIS, and pgvector; MySQL for web workloads; SQL Server and Oracle for large enterprises; SQLite for embedded use.</li><li>Managed services handle backups, patching, replicas, and failover, which removes much of the operational burden.</li><li>A database your team can operate well beats a more impressive one nobody understands.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Engine</th><th>Known for</th></tr></thead><tbody><tr><td>PostgreSQL</td><td>Rich features and extensions</td></tr>
+<tr><td>MySQL</td><td>Widely used for web applications</td></tr>
+<tr><td>SQL Server</td><td>Enterprise, Microsoft-centered environments</td></tr>
+<tr><td>Oracle</td><td>Large enterprises with demanding transactions</td></tr>
+<tr><td>SQLite</td><td>Embedded, runs inside the application</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Normalization</strong> gives one authoritative copy of each fact but forces reads to pay for joins.</li><li><strong>Denormalization</strong> makes hot reads cheap but adds write work and a real risk of copies drifting apart.</li><li><strong>Strict schema-on-write</strong> keeps data clean but makes structural change a planned migration, which is costly on large tables.</li><li><strong>Surrogate keys</strong> never change and keep indexes compact but add a column users must map back to business identity.</li><li><strong>Random UUID keys</strong> are generatable anywhere but scatter index writes; sequential keys cluster writes but are predictable.</li><li><strong>Strong isolation</strong> prevents anomalies but reduces concurrency through waiting and retries.</li><li><strong>Read replicas</strong> raise read capacity and availability but introduce lag and read-after-write anomalies.</li><li><strong>Sharding</strong> raises write capacity but makes cross-shard joins, transactions, and uniqueness constraints expensive.</li><li><strong>Extra indexes</strong> speed reads but slow every write and consume disk and cache.</li><li><strong>Distributed SQL</strong> keeps SQL and ACID at scale but adds per-write coordination latency and more moving parts.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does the relational model solve?</summary><div class="answer"><p>It removes duplication and its consequences by storing each fact once in a typed table and linking tables by keys. That eliminates update, insert, and delete anomalies, and it lets any question be answered at query time with SQL rather than with pre-built access paths.</p></div></details>
+<details><summary>2. Why is a primary key required?</summary><div class="answer"><p>It gives every row a stable, unique identity, which is what other tables reference and what indexes are built on. Without one, updates and deletes cannot target a specific row reliably, and duplicates become undetectable.</p></div></details>
+<details><summary>3. Natural versus surrogate key?</summary><div class="answer"><p>A natural key comes from the business, such as an email or SKU: meaningful, but it can change and may expose sensitive data. A surrogate key is generated and meaningless, so it never changes when business data does; the usual cost is one extra column and a lookup to reach the natural value.</p></div></details>
+<details><summary>4. What does a foreign key actually enforce?</summary><div class="answer"><p>That the referencing value matches an existing primary key, which prevents orphaned rows. It also defines what happens on delete or update of the referenced row: restrict, cascade, set null, or set default. Those choices are business rules, not merely database configuration.</p></div></details>
+<details><summary>5. How do you model many-to-many?</summary><div class="answer"><p>With a junction table holding one foreign key per side, such as <code>order_items(order_id, product_id)</code>. It can also store facts about the pairing itself, like quantity or the unit price at the time of purchase, which the two main tables cannot represent.</p></div></details>
+<details><summary>6. What are the three normalization anomalies?</summary><div class="answer"><p>Update anomaly: a duplicated fact is updated in some rows but not all. Insert anomaly: a fact cannot be recorded without an unrelated fact. Delete anomaly: removing one record destroys another fact that happened to share its row. Normalization removes the duplication that causes them.</p></div></details>
+<details><summary>7. Inner join versus left join?</summary><div class="answer"><p>An inner join returns only rows with matches on both sides. A left join returns every row from the left table and fills unmatched right-side columns with NULL, which is how you list customers with no orders. The two differ precisely in whether unmatched rows survive.</p></div></details>
+<details><summary>8. What does the query planner do?</summary><div class="answer"><p>It enumerates execution alternatives — scan versus index, join algorithm, join order — estimates each one's cost from statistics, and picks the cheapest. <code>EXPLAIN</code> shows the chosen plan, and <code>EXPLAIN ANALYZE</code> shows real timings, which is where slow-query debugging starts.</p></div></details>
+<details><summary>9. Why not index every column?</summary><div class="answer"><p>Because each index must be updated on every insert, update, and delete, and it consumes disk and buffer pool memory. Indexes on low-selectivity columns rarely help, and a wide set of indexes turns a fast write path into a slow one.</p></div></details>
+<details><summary>10. When would you denormalize?</summary><div class="answer"><p>Only on a proven hot path where joins or aggregates dominate the cost — a product page that would otherwise recompute an average from many review rows. Store the derived value next to the entity and accept the job of updating it, ideally through one code path or a trigger.</p></div></details>
+<details><summary>11. How do relational databases scale beyond one server?</summary><div class="answer"><p>First with a bigger machine, then read replicas for read traffic, caching, and table partitioning. Beyond one primary's write capacity, shard by a key and accept cross-shard join and transaction limits, or move to distributed SQL that partitions automatically while keeping SQL semantics.</p></div></details>
+<details><summary>12. When is a relational database the wrong choice?</summary><div class="answer"><p>For very high write volumes spread across many machines, rapidly changing record shapes, or specialized search and similarity work. Even then the usual architecture is a relational source of truth with a specialized store beside it, rather than replacing it outright.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Saying normalization is about saving disk space, when the real goal is eliminating update, insert, and delete anomalies.</li><li>Choosing a random UUID as the clustered primary key without considering scattered writes and index bloat.</li><li>Expecting rows to come back in insertion order without an ORDER BY clause.</li><li>Adding an index for every column in a WHERE clause and then wondering why writes slowed down.</li><li>Denormalizing before measuring, and then having no single place that updates the duplicated value.</li><li>Sharding before exhausting indexes, caching, and read replicas.</li><li>Reading EXPLAIN output as a verdict rather than checking whether the planner's statistics are current.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="lsm-trees.html"><span>← Previous</span><strong>LSM Trees</strong></a><a class="next" href="document-databases.html"><span>Next →</span><strong>Document Databases</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/relational-databases">AlgoMaster — Relational Databases</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

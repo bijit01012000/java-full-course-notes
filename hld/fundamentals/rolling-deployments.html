@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rolling Deployments — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 111 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Rolling Deployments</h1>
+    <p class="dek">Deployment Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>11</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/rolling-deployments">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why rolling deployments exist</a>
+<a href="#s2">How a rollout proceeds</a>
+<a href="#s3">Controlling speed and safety</a>
+<a href="#s4">Health checks decide what actually happens</a>
+<a href="#s5">Two versions, one contract</a>
+<a href="#s6">State, sessions, and routing</a>
+<a href="#s7">Rollback is the same process in reverse</a>
+<a href="#s8">Observability during a rollout</a>
+<a href="#s9">Autoscaling and the controller interact</a>
+<a href="#s10">Failure modes</a>
+<a href="#s11">When rolling is the right default</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A rolling deployment replaces instances a few at a time so the service stays online without a second full copy of production — at the cost of running two versions side by side and rolling back slowly.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Rolling deployment</dt><dd>A rollout that upgrades instances in batches, draining, replacing, and health-checking each batch before moving to the next.</dd></div><div class="term"><dt>Batch (or surge group)</dt><dd>The set of instances upgraded together in one step of the rollout.</dd></div><div class="term"><dt>maxUnavailable</dt><dd>The maximum number of instances allowed to be unavailable at the same time, which bounds the capacity dip.</dd></div><div class="term"><dt>maxSurge</dt><dd>The maximum number of extra instances that may exist temporarily above the desired count, which speeds the rollout at extra cost.</dd></div><div class="term"><dt>Readiness probe</dt><dd>A check that decides whether an instance should receive traffic, as opposed to whether its process is alive.</dd></div><div class="term"><dt>Graceful shutdown</dt><dd>Draining in-flight requests and releasing resources after an instance stops accepting new traffic.</dd></div><div class="term"><dt>Mixed-version window</dt><dd>The period during a rollout when old and new code both serve production traffic.</dd></div><div class="term"><dt>Backward-compatible change</dt><dd>A change that keeps the old version working, such as adding a nullable column before the new code reads it.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why rolling deployments exist</h2>
+<p class="lede">Most services want two things from a deployment: stay online, and avoid paying for a second complete production fleet.</p>
+<ul><li>Recreate satisfies neither: it takes the service down and still exposes everyone to the new version at once.</li><li>Blue-green satisfies both goals partially but requires a duplicate environment for the whole deployment.</li><li>Rolling spreads the change across the existing fleet, so most instances keep serving at all times.</li><li>It is the default deployment strategy on many platforms because it needs no extra infrastructure and no traffic-splitting logic.</li><li>The saving is capacity, and the price is time: a rollout is minutes, not seconds, and rollback is just as slow.</li><li>It works best for stateless services with several instances behind a load balancer.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>How a rollout proceeds</h2>
+<ul><li>The controller takes a batch of instances out of the load balancer's rotation.</li><li>Each instance finishes in-flight requests, then shuts down gracefully.</li><li>New instances with version 2 start in place of the removed ones.</li><li>Each new instance must pass its readiness probe before it is added back to rotation.</li><li>Only after the batch is healthy does the controller move to the next batch.</li><li>The rollout ends when every instance runs version 2, and stops immediately if a readiness check fails.</li></ul>
+
+<div class="flow"><span class="flow-step">Drain batch from rotation</span><span class="flow-arrow">→</span><span class="flow-step">Graceful shutdown</span><span class="flow-arrow">→</span><span class="flow-step">Start version 2 instances</span><span class="flow-arrow">→</span><span class="flow-step">Pass readiness probe</span><span class="flow-arrow">→</span><span class="flow-step">Add back to rotation</span><span class="flow-arrow">→</span><span class="flow-step">Next batch</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Controlling speed and safety</h2>
+<ul><li><code>maxUnavailable</code> bounds how much serving capacity can disappear at once; setting it to zero forces a surge-first rollout.</li><li><code>maxSurge</code> allows temporary extra instances so capacity never dips, at the cost of running above the desired count.</li><li>Large batches finish faster but create bigger capacity dips and wider exposure if version 2 is broken.</li><li>Small batches are safer and slower, and they lengthen the mixed-version window.</li><li>A rollout with both parameters at zero cannot progress; the controller needs room to move.</li><li>Slow readiness checks effectively reduce rollout speed regardless of batch size, because each batch waits for the slowest instance.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Configuration</th><th>Capacity during rollout</th><th>Best for</th></tr></thead><tbody><tr><td>maxSurge high, maxUnavailable 0</td><td>No dip, extra instances</td><td>Latency-sensitive services with headroom to spare</td></tr>
+<tr><td>maxUnavailable high, maxSurge 0</td><td>Reduced capacity</td><td>Cost-constrained environments</td></tr>
+<tr><td>Both moderate</td><td>Small dip</td><td>The usual balanced default</td></tr>
+<tr><td>Tiny batches</td><td>Almost none</td><td>High-risk releases on critical services</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Health checks decide what actually happens</h2>
+<ul><li>A liveness check answers whether the process should be restarted; a readiness check answers whether it can serve traffic.</li><li>Using liveness as readiness causes traffic to be sent to instances that cannot handle requests.</li><li>Readiness should exercise real dependencies — database connectivity, cache, required downstreams — not just open a port.</li><li>Too strict a probe makes a rollout stall or flap; too loose a probe returns broken instances to rotation.</li><li>Set an initial delay or startup probe so slow-booting instances are not killed before they are ready.</li><li>Configure a termination grace period longer than the longest acceptable in-flight request.</li></ul>
+
+
+<div class="note">A probe that always returns success is worse than no probe: it hides failures while giving false assurance.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Two versions, one contract</h2>
+<ul><li>Mid-rollout, some instances run version 1 and others version 2, and both serve the same users.</li><li>A user can hit version 2 on one request and version 1 on the next, so responses must stay compatible.</li><li>API changes must be additive: add fields and endpoints before removing them.</li><li>Database changes must be backward compatible: add and backfill before reading, drop only after old code is gone.</li><li>Cached values and queue messages written by one version may be read by the other, so their format must remain readable.</li><li>Session and token formats must remain valid across both versions or users get logged out mid-rollout.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>State, sessions, and routing</h2>
+<ul><li>Stateless instances make rolling deployments trivial, because any instance can serve any request.</li><li>Local session state forces sticky routing, which makes the mixed-version window visible: a user pinned to an old instance stays on old behavior.</li><li>Sticky sessions also survive a drained instance poorly, since the user is rescheduled and may notice a behavior change.</li><li>Move sessions to a shared store or use signed tokens so routing does not need to be sticky.</li><li>Long-lived connections such as WebSockets need explicit draining, not just removal from the load balancer.</li><li>Background workers consume from queues and need their own rollout discipline, or they process messages with stale code.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Rollback is the same process in reverse</h2>
+<ul><li>Reverting means rolling the fleet back to the previous version in batches, which takes about as long as the rollout.</li><li>Users keep hitting the defective version while the rollback progresses, so the outage lasts for the duration of the reversal.</li><li>Rollback is only possible if the previous artifact still exists and the previous configuration is still valid.</li><li>If version 2 wrote data in a new format, version 1 may not be able to read it, so rollback needs a data story too.</li><li>Pausing a rollout at the first failed readiness check limits how much of the fleet runs the bad version.</li><li>An automated rollback trigger on error-rate thresholds shortens the window substantially compared with manual detection.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Observability during a rollout</h2>
+<ul><li>Track metrics per version, because aggregate numbers hide a broken new version behind healthy old instances.</li><li>Watch error rate, latency percentiles, saturation, and restart counts as the rollout advances.</li><li>Compare the new version against the old one with the same dashboards, not with different queries.</li><li>Alert on rollout progress stalls: a rollout that stops advancing is usually a failing probe.</li><li>Log the version and instance identifier on every request so failures can be attributed quickly.</li><li>Business metrics matter too: a version can be technically healthy while checkout conversion drops.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Autoscaling and the controller interact</h2>
+<ul><li>Autoscaling during a rollout can add instances with the new version, changing the version mix outside the controller's plan.</li><li>Scaling down during a rollout can remove capacity the controller assumed was available.</li><li>A rollout that depends on spare capacity needs headroom; running at full utilization makes a surge-based rollout impossible.</li><li>Instance churn from node failures slows rollouts, because replacements must be scheduled and warmed.</li><li>Freeze autoscaling policy changes during a release if the two systems are not coordinated.</li><li>Track rollout duration as a metric; a rollout that takes far longer than expected usually indicates scheduling or probe problems.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Failure modes</h2>
+<ul><li><strong>Stalled rollout:</strong> the new version never becomes ready, so the controller holds at a partial mix of versions indefinitely.</li><li><strong>Capacity exhaustion:</strong> batches drain faster than replacements become ready, and the remaining instances are overloaded.</li><li><strong>Broken dependency assumption:</strong> new code requires a migration that has not run yet.</li><li><strong>Probe mismatch:</strong> readiness depends on a downstream that is also being rolled out, creating a deadlock.</li><li><strong>Stuck connections:</strong> long-lived requests outlast the grace period and are killed, producing user-visible errors.</li><li><strong>Half-migrated data:</strong> some rows are in the old format, some in the new, and neither version handles both.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>When rolling is the right default</h2>
+<ul><li>Choose rolling for stateless, multi-instance services where a slow rollback is acceptable.</li><li>Avoid it when all users must move together, as with a coordinated schema cutover.</li><li>Avoid it when rollback must be measured in seconds rather than minutes; blue-green or canary fits better.</li><li>Avoid it for single-instance services, where a rolling update is just a brief outage.</li><li>Combine it with feature flags so code rolls out gradually while behavior stays dark until release.</li><li>Combine it with a canary step when metrics can distinguish versions and traffic volume is sufficient.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Rolling</strong> avoids downtime and extra infrastructure, but keeps two versions live against one data layer for the whole rollout.</li><li><strong>Large batches</strong> finish quickly but create a bigger capacity dip and expose more users to a bad build at once.</li><li><strong>Small batches</strong> limit exposure but stretch the mixed-version window and delay detection of fleet-wide problems.</li><li><strong>maxSurge</strong> preserves capacity during the rollout but costs extra compute and can hit quota limits.</li><li><strong>Strict readiness probes</strong> prevent bad instances from serving but can stall rollouts and mask progress.</li><li><strong>Sticky sessions</strong> simplify state handling but expose users to version changes and complicate draining.</li><li><strong>Fast automated rollback</strong> reduces outage time but can thrash if thresholds are noisy and cause repeated flip-flopping.</li><li><strong>Aggressive rollout speed</strong> shortens the change window but leaves less time to observe a bad batch before the next one starts.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a rolling deployment?</summary><div class="answer"><p>A rollout that replaces instances in batches instead of all at once. Each batch is drained, shut down, replaced with the new version, health-checked, and returned to rotation before the next batch begins. The service stays available if the remaining instances can carry the load.</p></div></details>
+<details><summary>2. What do maxUnavailable and maxSurge actually control?</summary><div class="answer"><p><code>maxUnavailable</code> caps how many instances may be down simultaneously, protecting serving capacity. <code>maxSurge</code> allows temporary extra instances so the rollout can proceed without reducing capacity. Together they set the speed of the rollout and the capacity headroom it needs.</p></div></details>
+<details><summary>3. Why is a rolling deployment risky even when it causes no downtime?</summary><div class="answer"><p>Because two versions run simultaneously against the same database, caches, and queues. A user can be served by either version on consecutive requests, so API shapes, data formats, and message schemas must remain compatible. The absence of downtime does not mean the absence of inconsistent behavior.</p></div></details>
+<details><summary>4. How do you make a schema change safe during a rolling deploy?</summary><div class="answer"><p>Use expand-and-contract: add the new column or table without removing the old one, make both versions tolerate both shapes, backfill, switch reads, then drop the old structure only after the old code is fully gone. Each step must be compatible with the version mix that exists at that moment.</p></div></details>
+<details><summary>5. What is the difference between liveness and readiness?</summary><div class="answer"><p>Liveness asks whether the process should be restarted; readiness asks whether the instance should receive traffic. A rolling deployment depends on readiness, because a starting instance is alive but not yet able to serve. Confusing the two sends traffic to instances that cannot handle it or restarts healthy ones unnecessarily.</p></div></details>
+<details><summary>6. Why is rollback slow in a rolling deployment?</summary><div class="answer"><p>Because reverting means running the same batch process in reverse, replacing instances one batch at a time. Until it finishes, part of the fleet still runs the broken version and keeps serving users. Duration scales with fleet size and readiness time, not with the size of the bug.</p></div></details>
+<details><summary>7. How can you shorten the exposure window during a bad rollout?</summary><div class="answer"><p>Abort as early as possible: pause on the first failed readiness check, use automated metric thresholds to trigger rollback, and start with a small batch. Per-version metrics and fast alerts are what make early detection possible. Blue-green or canary shortens recovery further if instant switch-back is required.</p></div></details>
+<details><summary>8. What happens if an instance is removed from the load balancer while requests are in flight?</summary><div class="answer"><p>Without graceful shutdown, those requests fail. The instance should stop accepting new connections, finish in-flight work within a grace period, then exit. The grace period must exceed the longest acceptable request, or long-lived calls are cut off mid-response.</p></div></details>
+<details><summary>9. How do sticky sessions interact with rolling deployments?</summary><div class="answer"><p>Sticky routing keeps a user on one instance, which preserves local session state but means some users stay on the old version for the entire rollout. When their instance is drained, they are rescheduled and may see changed behavior. Moving sessions to a shared store removes the constraint entirely.</p></div></details>
+<details><summary>10. What role does autoscaling play during a rollout?</summary><div class="answer"><p>It can add or remove instances while the controller is mid-rollout, changing the version mix and the available capacity. A surge-based rollout needs headroom, which autoscaling may remove under load. Coordinate the two or freeze scaling policy during a release.</p></div></details>
+<details><summary>11. When would you not choose a rolling deployment?</summary><div class="answer"><p>When recovery must be near-instant, when every user must move together, when the service is a single instance, or when a coordinated data cutover makes mixed versions unsafe. Blue-green, canary, or a maintenance window fits those cases better.</p></div></details>
+<details><summary>12. How does a rolling deploy combine with feature flags?</summary><div class="answer"><p>The rolling deploy distributes the code safely across the fleet while the feature stays disabled. Once the rollout completes and metrics are healthy, the flag ramps exposure to users. This separates infrastructure risk from product risk, and makes disabling the feature instant.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming no downtime means no risk, then shipping a schema change that only one version can read.</li><li>Setting both maxUnavailable and maxSurge to zero, which makes the rollout unable to make progress.</li><li>Using a liveness probe as the readiness signal so traffic reaches instances that cannot serve requests.</li><li>Rolling out a service at full utilization with a surge-based strategy and then blaming the platform for the capacity dip.</li><li>Forgetting that queue consumers and cron workers also need a rollout discipline.</li><li>Relying on manual detection to trigger rollback, which turns a small bad batch into a fleet-wide incident.</li><li>Dropping the old database column as soon as the new code ships, breaking instances still running the old version.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="ci-cd-pipelines.html"><span>← Previous</span><strong>CI/CD Pipelines</strong></a><a class="next" href="blue-green-deployments.html"><span>Next →</span><strong>Blue-Green Deployments</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/rolling-deployments">AlgoMaster — Rolling Deployments</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

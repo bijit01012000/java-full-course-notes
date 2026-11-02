@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outbox Pattern — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 88 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Outbox Pattern</h1>
+    <p class="dek">Distributed Transactions · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/outbox-pattern">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The dual-write problem</a>
+<a href="#s2">Why one transaction cannot cover both</a>
+<a href="#s3">The outbox table</a>
+<a href="#s4">The relay: polling publisher</a>
+<a href="#s5">The relay: transaction log tailing</a>
+<a href="#s6">Delivery guarantees and duplicates</a>
+<a href="#s7">Ordering</a>
+<a href="#s8">Retries, failures, and poison messages</a>
+<a href="#s9">Cleanup and retention</a>
+<a href="#s10">Event contracts and schema evolution</a>
+<a href="#s11">Alternatives and how they compare</a>
+<a href="#s12">Monitoring and common failure modes</a>
+<a href="#s13">When to use it</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>The transactional outbox writes the business row and the event to publish in <em>one</em> local transaction, then a relay publishes the event — so no committed change is ever left without its message.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Dual-write problem</dt><dd>The impossibility of atomically committing a database change and a message publish as one transaction.</dd></div><div class="term"><dt>Outbox table</dt><dd>A table in the same database that stores events in the same transaction as the business change.</dd></div><div class="term"><dt>Relay</dt><dd>The component that reads unpublished outbox rows and forwards them to the broker.</dd></div><div class="term"><dt>Polling publisher</dt><dd>A relay that periodically queries the outbox for unsent rows and publishes them.</dd></div><div class="term"><dt>Transaction log tailing</dt><dd>A relay that reads the database's write-ahead log or binlog and emits changes as events (CDC).</dd></div><div class="term"><dt>At-least-once delivery</dt><dd>A guarantee that every event is delivered, possibly more than once, so consumers must deduplicate.</dd></div><div class="term"><dt>Idempotent consumer</dt><dd>A consumer that can process the same event twice without changing the outcome.</dd></div><div class="term"><dt>Aggregate ID</dt><dd>The entity identifier used as the partition key so all events for one entity stay ordered.</dd></div><div class="term"><dt>Poison message</dt><dd>An event that always fails processing and would block the relay or partition forever.</dd></div><div class="term"><dt>Change data capture</dt><dd>Reading a database's change log to stream committed rows as events without polling.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The dual-write problem</h2>
+<p class="lede">An order service must save the order and announce it. Those are two systems, and nothing makes them commit together.</p>
+<ul><li>Placing an order writes a row to the orders database and publishes an <code>OrderCreated</code> event to a broker.</li><li>Downstream services depend on that event: inventory reserves stock, email confirms the purchase, analytics records the sale.</li><li>A normal database transaction cannot span the database and the broker, so there is always a window where one succeeds and the other fails.</li><li>If the commit succeeds and the publish fails, the order exists but inventory never reserves — a silent inconsistency.</li><li>If the publish succeeds and the commit fails, consumers act on an order that does not exist.</li><li>Retrying the failed half does not fix it: the two operations are not atomic and cannot be made so by the application.</li><li>This is the <strong>dual-write problem</strong>, and it appears in every service that both stores state and emits events.</li></ul>
+
+<div class="flow"><span class="flow-step">Begin database transaction</span><span class="flow-arrow">→</span><span class="flow-step">Insert order row</span><span class="flow-arrow">→</span><span class="flow-step">Commit</span><span class="flow-arrow">→</span><span class="flow-step">Publish event</span><span class="flow-arrow">→</span><span class="flow-step">Publish fails → order exists, no event</span></div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why one transaction cannot cover both</h2>
+<ul><li>The database and the broker are separate systems with separate commit protocols and failure modes.</li><li>Distributed transactions across them require two-phase commit, which most brokers and cloud services do not support well.</li><li>Even with XA, the coordinator becomes a single point of failure and participants hold locks while waiting.</li><li>A broker acknowledgement is not a durable commit from the database's point of view; it can be lost after the fact.</li><li>Network timeouts leave the application unable to tell whether the publish happened.</li><li>The outbox pattern sidesteps this by making only one system part of the critical transaction: the database.</li></ul>
+
+
+<div class="note">The key move is to stop treating the broker as a participant and start treating the event as data.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The outbox table</h2>
+<ul><li>An <code>outbox</code> table lives in the <strong>same database</strong> as the business data.</li><li>The business insert and the outbox insert happen in one local ACID transaction, so both commit or neither does.</li><li>Each row carries an event ID, type, aggregate ID, payload, creation time, and a delivery status or sequence.</li><li>The event ID is generated at write time so consumers can deduplicate later.</li><li>The payload should be a stable contract, not a serialised internal row that changes with schema refactors.</li><li>A monotonically increasing sequence column gives the relay an order and a resume point.</li><li>Because the event is just a row, it inherits the durability, backup, and replication of the database.</li></ul>
+
+
+<pre class="code"><code>BEGIN;
+INSERT INTO orders (id, customer_id, total) VALUES (:id, :customer, :total);
+INSERT INTO outbox (id, aggregate_id, type, payload, created_at)
+VALUES (:event_id, :id, &#x27;OrderCreated&#x27;, :json, now());
+COMMIT;</code></pre>
+<div class="note">One transaction, one commit point, two rows — the event cannot be lost independently of the order.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The relay: polling publisher</h2>
+<ul><li>A separate relay process polls for rows that have not yet been published.</li><li>It publishes each row to the broker, waits for acknowledgement, then marks the row as sent or deletes it.</li><li>Batching and <code>FOR UPDATE SKIP LOCKED</code> let several relay instances share the work without contention.</li><li>Polling introduces latency equal to the poll interval, which is fine for most business events.</li><li>The relay must be idempotent on restart: publishing before marking sent can produce duplicates, which consumers must tolerate.</li><li>Ordering is preserved if a single relay processes rows by sequence and publishes to one partition.</li><li>Polling is simple, portable, and easy to reason about, which is why it is the default choice.</li></ul>
+
+<div class="flow"><span class="flow-step">Select unsent rows ordered by sequence</span><span class="flow-arrow">→</span><span class="flow-step">Publish to the broker</span><span class="flow-arrow">→</span><span class="flow-step">Await broker acknowledgement</span><span class="flow-arrow">→</span><span class="flow-step">Mark rows sent or delete them</span><span class="flow-arrow">→</span><span class="flow-step">Repeat on the next interval</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The relay: transaction log tailing</h2>
+<ul><li>Instead of polling, a connector tails the database's write-ahead log or binlog and emits row changes as events.</li><li>This is change data capture, and it avoids poll queries and their load on the primary.</li><li>Latency is much lower because events stream as transactions commit.</li><li>The connector must understand the table schema and map rows to event contracts.</li><li>Log retention matters: if the connector falls too far behind, the database may discard the log it needs.</li><li>It couples the event stream to physical schema changes, so column renames leak into events unless you project a stable view.</li><li>Log tailing is operationally heavier but scales better than polling on high-write databases.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Polling publisher</th><th>Log tailing (CDC)</th></tr></thead><tbody><tr><td>Latency</td><td>Poll interval</td><td>Near real time</td></tr>
+<tr><td>Database load</td><td>Periodic queries</td><td>Reads the log stream</td></tr>
+<tr><td>Complexity</td><td>Low</td><td>Higher, schema-aware</td></tr>
+<tr><td>Coupling</td><td>Explicit outbox table</td><td>Physical table changes</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Delivery guarantees and duplicates</h2>
+<ul><li>The outbox gives <strong>at-least-once</strong> delivery: an event is published one or more times, never silently dropped.</li><li>A crash between publish and mark-sent causes a duplicate, which is the normal case rather than a bug.</li><li>Exactly-once delivery end to end is not achievable across a database and a broker without cooperation.</li><li>The practical target is <strong>effectively once</strong>: at-least-once delivery plus idempotent consumers.</li><li>Consumers deduplicate on the event ID, often with a unique constraint in a processed-events table.</li><li>Deduplication must be part of the same transaction as the consumer's own write, or it just moves the dual-write problem.</li><li>Broker-side deduplication helps but does not cover the database write, so it is not sufficient alone.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Ordering</h2>
+<ul><li>The outbox sequence gives a total order of commits, but the broker only preserves order within a partition.</li><li>Publish with the <strong>aggregate ID as the partition key</strong> so all events for one entity land on one partition in order.</li><li>Global ordering across all entities requires a single partition, which caps throughput.</li><li>Multiple relay instances must not publish the same aggregate concurrently, or order is lost.</li><li>Consumers must not process a partition's events in parallel without preserving per-key order.</li><li>Out-of-order delivery is a correctness bug for state-machine consumers; design for per-key ordering rather than hoping.</li><li>If events carry a version number per aggregate, consumers can reject stale updates and stay correct under reordering.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Retries, failures, and poison messages</h2>
+<ul><li>The relay must retry transient broker failures with backoff and jitter.</li><li>A permanently failing event must not block the entire outbox behind it.</li><li>After a bounded number of attempts, move the event to a dead-letter queue and alert.</li><li>Track attempt counts and last error on the outbox row so operators can diagnose a stuck event.</li><li>A relay that dies mid-batch should resume from the last acknowledged sequence, not from scratch.</li><li>Broker outages should back-pressure the relay, not cause it to drop rows.</li><li>Alert on outbox lag, not just on relay uptime; a running relay that publishes nothing is still an outage.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Cleanup and retention</h2>
+<ul><li>Published rows must be deleted or archived, or the table grows without bound.</li><li>Deleting in small batches avoids long locks and heavy vacuum work on the primary.</li><li>Partition the outbox by time so old partitions can be dropped instead of deleted row by row.</li><li>Keep a retention window long enough to debug incidents, but reconcile it with storage cost.</li><li>An index on the unpublished status keeps relay queries cheap as the table grows.</li><li>Beware of bloat: frequent delete/insert cycles on a small table still generate dead tuples in MVCC databases.</li><li>Archive to object storage if events are needed for audit or replay.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Event contracts and schema evolution</h2>
+<ul><li>The event payload is a public contract consumed by other teams, so it must be versioned.</li><li>Do not serialise an internal table row directly; project an explicit schema that you control.</li><li>Additive changes are safe; removals and type changes break consumers and need a new version.</li><li>Include an event ID, type, aggregate ID, occurred-at timestamp, and aggregate version in every message.</li><li>Validate the payload at write time so malformed events never enter the outbox.</li><li>Keep the payload small; large blobs belong in object storage with a reference in the event.</li><li>Document the compatibility rule and enforce it in CI rather than in review comments.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Alternatives and how they compare</h2>
+<ul><li><strong>Two-phase commit / XA</strong> is atomic but blocking, poorly supported by brokers, and operationally fragile.</li><li><strong>Listen to yourself</strong> (publish after commit, then consume your own event) still leaves a window where the publish is lost.</li><li><strong>Event sourcing</strong> makes the event log the source of truth, removing the dual write entirely but changing the data model deeply.</li><li><strong>Sagas</strong> coordinate multi-service transactions with compensations; they solve a different problem and often use an outbox to publish their steps.</li><li><strong>Broker transactions</strong> make broker-side writes atomic but cannot include the database commit.</li><li>The outbox is the smallest change that fixes the dual write while keeping the existing database and broker.</li><li>Choose log tailing over polling when write volume is high or latency matters; otherwise polling is simpler.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Atomicity</th><th>Main cost</th></tr></thead><tbody><tr><td>Outbox</td><td>Database commit is the single point</td><td>Relay, duplicates, cleanup</td></tr>
+<tr><td>2PC / XA</td><td>True distributed commit</td><td>Blocking, weak broker support</td></tr>
+<tr><td>Event sourcing</td><td>Log is the truth</td><td>Full data model change</td></tr>
+<tr><td>Saga</td><td>Compensating actions</td><td>No isolation, complex recovery</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Monitoring and common failure modes</h2>
+<ul><li>Monitor <strong>outbox lag</strong> — the age of the oldest unpublished row — rather than relay heartbeats.</li><li>A relay that runs but publishes nothing usually means a publish error being swallowed.</li><li>Watch duplicate rates at consumers; a spike means the relay is crashing between publish and mark.</li><li>Track dead-letter growth and the age of the oldest dead-lettered event.</li><li>Table growth is a leading indicator of a broken cleanup job.</li><li>The most dangerous failure is silent: the order commits, the relay is down, and only outbox lag reveals it.</li><li>Run the relay as a separately scaled deployment so a busy API does not starve publishing.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use it</h2>
+<ul><li>Use an outbox whenever a service must both change its own state and announce that change.</li><li>It is not needed for pure read models or for events that are merely telemetry and can be dropped.</li><li>It is the right tool when the database is the source of truth and the broker is a downstream transport.</li><li>It does not replace idempotency: consumers still need deduplication to reach effectively-once.</li><li>It does not provide ordering across aggregates, and it does not roll back the database if a consumer fails.</li><li>Combine it with a saga when a business process spans services and needs compensation.</li><li>Start with polling, an indexed status column, and a cleanup job; move to log tailing only when the load justifies it.</li></ul>
+
+<div class="flow"><span class="flow-step">Write business row and event in one transaction</span><span class="flow-arrow">→</span><span class="flow-step">Commit locally</span><span class="flow-arrow">→</span><span class="flow-step">Relay publishes with broker acknowledgement</span><span class="flow-arrow">→</span><span class="flow-step">Mark or delete the outbox row</span><span class="flow-arrow">→</span><span class="flow-step">Consumer deduplicates by event ID</span><span class="flow-arrow">→</span><span class="flow-step">Cleanup removes old rows</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>One local transaction</strong> removes the dual write but makes the database the bottleneck for event publication.</li><li><strong>Polling relays</strong> are simple and portable but add latency and repeated query load.</li><li><strong>Log tailing</strong> is fast and low-impact but couples events to physical schema and adds operational complexity.</li><li><strong>At-least-once delivery</strong> guarantees no lost events but forces every consumer to deduplicate.</li><li><strong>Per-aggregate ordering</strong> keeps state machines correct but limits parallelism to one consumer per key.</li><li><strong>Long retention</strong> aids debugging and replay but grows the table and vacuum cost.</li><li><strong>Small batches</strong> avoid lock contention but reduce throughput and increase relay overhead.</li><li><strong>Outbox instead of 2PC</strong> avoids blocking coordination but accepts asynchronous, eventually consistent consumers.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the dual-write problem?</summary><div class="answer"><p>It is the impossibility of atomically committing a database change and publishing a message to a broker. One can succeed while the other fails, leaving either a committed change with no event or an event describing a change that never happened.</p></div></details>
+<details><summary>2. How does the outbox pattern solve it?</summary><div class="answer"><p>The event is written as a row in an outbox table inside the same local transaction as the business change. Both commit or neither does. A separate relay then publishes outbox rows to the broker, so publication becomes retryable without risking the database state.</p></div></details>
+<details><summary>3. Polling publisher or transaction log tailing?</summary><div class="answer"><p>Polling is simple, portable, and easy to operate, but adds poll-interval latency and query load. Log tailing streams changes as they commit with low latency and little database load, but is more complex and couples events to physical schema changes.</p></div></details>
+<details><summary>4. Does the outbox give exactly-once delivery?</summary><div class="answer"><p>No. A crash between publishing and marking the row sent produces a duplicate, so the guarantee is at-least-once. You reach effectively-once by making consumers idempotent and deduplicating on the event ID.</p></div></details>
+<details><summary>5. How should consumers deduplicate?</summary><div class="answer"><p>Record processed event IDs in a table with a unique constraint, and commit that insert in the same transaction as the consumer's own state change. Broker-level deduplication alone does not cover the database write.</p></div></details>
+<details><summary>6. How do you preserve event ordering?</summary><div class="answer"><p>Use the aggregate ID as the partition key so all events for one entity go to one partition, and have a single relay publish each aggregate in sequence. Global ordering requires a single partition and sacrifices throughput.</p></div></details>
+<details><summary>7. What happens when the broker is down?</summary><div class="answer"><p>The relay retries with backoff and the outbox rows accumulate. Publication resumes from the last acknowledged sequence when the broker returns, so no events are lost, but outbox lag grows and consumers fall behind.</p></div></details>
+<details><summary>8. How do you handle a poison message?</summary><div class="answer"><p>Bound the retries, then move the event to a dead-letter queue and alert. It must not block the rest of the outbox behind it, or one bad event stalls every downstream consumer.</p></div></details>
+<details><summary>9. Why does the outbox table need cleanup?</summary><div class="answer"><p>Published rows accumulate forever otherwise, bloating the table, indexes, and vacuum work. Delete in small batches, or partition by time and drop old partitions, keeping a retention window for debugging.</p></div></details>
+<details><summary>10. What should an outbox event contain?</summary><div class="answer"><p>At minimum an event ID, type, aggregate ID, aggregate version, occurred-at timestamp, and a stable payload. The payload should be an explicit contract rather than a serialised internal row.</p></div></details>
+<details><summary>11. Is the outbox a replacement for 2PC?</summary><div class="answer"><p>It replaces 2PC for the specific case of publishing an event alongside a local write. It does not provide atomicity across multiple services databases; that needs a saga with compensations, often built on top of an outbox.</p></div></details>
+<details><summary>12. How do you monitor an outbox deployment?</summary><div class="answer"><p>Track the age of the oldest unpublished row, duplicate rates at consumers, dead-letter growth, and table size. Relay uptime alone is misleading because a running relay can be silently failing to publish.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Publishing to the broker inside the same try block as the commit and assuming they are atomic.</li><li>Marking an outbox row sent before the broker acknowledges the publish.</li><li>Assuming at-least-once delivery means consumers need no deduplication.</li><li>Deduplicating in memory or in a separate transaction, which recreates the dual-write problem.</li><li>Letting one poison message block the entire outbox behind it.</li><li>Never cleaning up published rows until the table dominates the database.</li><li>Publishing with a random partition key and then expecting per-entity ordering.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="saga-pattern.html"><span>← Previous</span><strong>SAGA Pattern</strong></a><a class="next" href="geohash.html"><span>Next →</span><strong>Geohash</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/outbox-pattern">AlgoMaster — Outbox Pattern</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

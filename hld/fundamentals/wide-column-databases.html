@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wide Column Databases — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 49 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Wide Column Databases</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/wide-column-databases">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem wide-column databases solve</a>
+<a href="#s2">What a wide-column database is</a>
+<a href="#s3">The data model</a>
+<a href="#s4">How the data is laid out on disk</a>
+<a href="#s5">Query-first modeling</a>
+<a href="#s6">Writing queries</a>
+<a href="#s7">The write path</a>
+<a href="#s8">The read path</a>
+<a href="#s9">Compaction and tombstones</a>
+<a href="#s10">Replication and tunable consistency</a>
+<a href="#s11">Scaling out</a>
+<a href="#s12">Limitations</a>
+<a href="#s13">When to use one</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A wide-column database stores rows that can have many sparse columns, groups them into a partition by a partition key, and sorts them inside the partition by a clustering key — so a huge, write-heavy, single-partition query becomes a cheap sequential read.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Partition key</dt><dd>The first part of the primary key; it hashes to a node and groups all rows of one entity together.</dd></div><div class="term"><dt>Clustering key</dt><dd>The second part of the primary key; it sorts rows inside a partition, which is what makes ordered range reads cheap.</dd></div><div class="term"><dt>Partition</dt><dd>All rows sharing one partition key, stored together on one node and written as one unit.</dd></div><div class="term"><dt>Column family</dt><dd>A named group of columns stored and compacted together, letting a row hold many optional columns without wasting space.</dd></div><div class="term"><dt>Sparse row</dt><dd>A row that defines only some of the possible columns; missing columns cost nothing.</dd></div><div class="term"><dt>Commit log</dt><dd>The append-only durability log written before a mutation reaches memory.</dd></div><div class="term"><dt>Tombstone</dt><dd>A marker recording a delete so it can propagate to replicas that still hold older versions.</dd></div><div class="term"><dt>Replication factor</dt><dd>How many nodes hold a copy of each partition.</dd></div><div class="term"><dt>Tunable consistency</dt><dd>Choosing per query how many replicas must respond, from one for latency to a quorum or all for safety.</dd></div><div class="term"><dt>Compaction</dt><dd>The background merge of sorted files that discards overwritten values and tombstones.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem wide-column databases solve</h2>
+<p class="lede">A chat system with millions of users writes a continuous stream of messages and reads them one conversation at a time. A relational database can store that, but the shape of the workload is hostile to it.</p>
+<ul><li>The write rate is enormous and mostly append-only, so most of the cost of joins, constraints, and multi-row transactions is wasted.</li><li>The data set outgrows one machine, so partitioning must be built in rather than bolted on.</li><li>The dominant query is narrow and identical every time: the latest messages in one conversation, already in order.</li><li>Messages rarely change, so update paths and their locking are mostly irrelevant.</li><li>Rows are also wide and sparse: different entities use different subsets of a large set of possible columns.</li><li>What is needed is a store that distributes by key, appends fast, and serves one partition in sorted order.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a wide-column database is</h2>
+<ul><li>Data is stored as rows identified by a key, and each row may contain a large number of columns.</li><li>Columns are grouped into <strong>column families</strong>, and a family is stored and compacted as its own set of files.</li><li>Rows are <strong>sparse</strong>: a row that defines three columns costs only those three, not the full schema.</li><li>The primary key has two parts: a <strong>partition key</strong> that decides placement, and a <strong>clustering key</strong> that sorts rows within the partition.</li><li>All rows with the same partition key live together on one node and are read together efficiently.</li><li>Inside a partition, rows are stored in clustering-key order, so range reads return sorted data with no sort step.</li><li>Common engines are Cassandra, HBase, and ScyllaDB, all designed for horizontal scale and high write throughput.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The data model</h2>
+<ul><li>The primary key is declared as <code>(partition key, clustering key ...)</code>, and together they identify a row uniquely.</li><li>The partition key answers <em>where does this row live</em>; the clustering key answers <em>where inside the partition</em>.</li><li>Regular columns hold the values; they are not part of the key and cannot be filtered on efficiently without extra structures.</li><li>A partition is the unit of distribution and of atomicity, so all rows that must change together belong to one partition.</li><li>Choosing the key is the modeling decision: it fixes both the physical layout and the queries the table can serve.</li><li>A table is usually built for one query, and the same data is written into several tables for several queries.</li><li>Changing a key later means rewriting the table, so key design deserves more thought than column design.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>conversation_id (partition)</th><th>message_ts (clustering)</th><th>sender_id</th><th>body</th></tr></thead><tbody><tr><td>c-101</td><td>10:02:11</td><td>u-42</td><td>see you at nine</td></tr>
+<tr><td>c-101</td><td>10:02:40</td><td>u-77</td><td>works for me</td></tr>
+<tr><td>c-101</td><td>10:05:02</td><td>u-42</td><td>bring the notes</td></tr>
+<tr><td>c-205</td><td>09:58:13</td><td>u-13</td><td>shipping today</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>How the data is laid out on disk</h2>
+<ul><li>A partition is stored as one contiguous structure: the partition key, then its rows in clustering order.</li><li>Reading the latest messages is therefore a single sequential read of one partition, already sorted.</li><li>The engine keeps an in-memory index of partition keys to file positions, so it can seek without scanning.</li><li>Column families are stored separately, which means a query touching one family never reads the others.</li><li>Sparse rows are cheap because absent columns are simply not written.</li><li>Wide partitions are the danger: a partition with millions of rows becomes a large, slow unit to read and repair.</li><li>So the key must both group what is queried together and bound how much one partition can hold.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Query-first modeling</h2>
+<ul><li>There are no joins, so a query can only read from one table.</li><li>The modeling process starts from the queries, and each distinct query usually gets its own table.</li><li>If messages must be found by conversation and also by sender, store the messages in two tables with different keys.</li><li>Duplication is expected; the write path becomes more expensive and the read path becomes trivial.</li><li>Ordering inside the partition comes from the clustering key, so put the sort order into the key.</li><li>A query that does not constrain the partition key requires a scan of every node and is usually rejected by design.</li><li>This is the opposite of relational modeling: you decide the questions first and derive the tables from them.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Query</th><th>Partition key</th><th>Clustering key</th></tr></thead><tbody><tr><td>Latest messages in a conversation</td><td>conversation_id</td><td>message_ts descending</td></tr>
+<tr><td>Messages from one sender</td><td>sender_id</td><td>message_ts descending</td></tr>
+<tr><td>Orders for a customer</td><td>customer_id</td><td>order_date descending</td></tr>
+<tr><td>Events for one device</td><td>device_id</td><td>event_time</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Writing queries</h2>
+<ul><li>The query language is usually SQL-like — CQL in Cassandra — but the allowed shapes are much narrower than SQL.</li><li>A typical statement inserts a row by full primary key; it is an upsert, not an insert-or-fail.</li><li>Reads name the partition key and may bound a clustering range, such as the last fifty rows in time order.</li><li><code>ORDER BY</code> is normally limited to the clustering order already stored, not an arbitrary sort.</li><li>Filtering on a non-key column without an index triggers a warning or an error rather than a scan.</li><li>Updates and deletes also require the full primary key, because the engine must know the exact partition and row.</li><li>The API is deliberately restrictive: it makes the cost of every operation predictable.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The write path</h2>
+<ul><li>A write is appended to the <strong>commit log</strong> on disk for durability.</li><li>It is then applied to an in-memory structure called a <strong>memtable</strong>, sorted by key.</li><li>When the memtable fills, it is flushed to disk as an immutable sorted file — an SSTable.</li><li>Writes never read before writing; they simply append the new version with a timestamp.</li><li>That is why write throughput is high and latency is predictable: no read-modify-write, no page lookups.</li><li>If a replica is temporarily down, the coordinator stores a <strong>hint</strong> and replays it when the node returns.</li><li>The trade-off is that several versions of the same row may exist until compaction reconciles them.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends mutation</span><span class="flow-arrow">→</span><span class="flow-step">Append to commit log</span><span class="flow-arrow">→</span><span class="flow-step">Apply to memtable</span><span class="flow-arrow">→</span><span class="flow-step">Flush memtable to SSTable</span><span class="flow-arrow">→</span><span class="flow-step">Compaction merges SSTables</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>The read path</h2>
+<ul><li>The coordinator picks replicas that should hold the partition and asks the required number of them.</li><li>Each replica checks its memtable and its SSTables, newest first.</li><li><strong>Bloom filters</strong> let it skip SSTables that cannot contain the partition key.</li><li>Key and row caches can answer repeated reads without touching disk.</li><li>The replica merges versions of each row, keeping the newest value per column.</li><li>If replicas disagree, a <strong>read repair</strong> writes the newest version back to the stale replicas.</li><li>Latency is determined by the slowest replica that must respond, which is why consistency level is a latency decision.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Compaction and tombstones</h2>
+<ul><li>Compaction merges SSTables, keeps the newest value per column, and discards overwritten data.</li><li>A delete cannot remove a value in place, so it writes a <strong>tombstone</strong> with a timestamp.</li><li>The tombstone must survive long enough to reach every replica that might still hold the deleted value.</li><li>If it is purged too early, a node that missed the delete can resurrect the data — a well-known Cassandra failure mode.</li><li>The grace period exists exactly to bound that risk, and it must exceed the longest realistic node outage.</li><li>Tombstones consume space and read effort until compaction removes them, so delete-heavy tables degrade.</li><li>Choosing the compaction strategy is choosing between write cost, read cost, and space.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Replication and tunable consistency</h2>
+<ul><li>Each partition is replicated to a <strong>replication factor</strong> of nodes, often across racks or data centers.</li><li>The coordinator forwards a write to all replicas but waits only for the requested consistency level.</li><li><code>ONE</code> is fastest but can be lost if that replica fails; <code>QUORUM</code> requires a majority.</li><li>Reads choose their own level, so a read of <code>QUORUM</code> plus a write of <code>QUORUM</code> overlaps on at least one up-to-date replica.</li><li>Writes carry timestamps and conflicts are resolved by <strong>last write wins</strong>, which can silently drop a concurrent update.</li><li>Multi-data-center replication lets local reads be fast while writes propagate to other regions.</li><li>The system is eventually consistent by default: a read at <code>ONE</code> may return an older value with no error.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Scaling out</h2>
+<ul><li>Keys are distributed with <strong>consistent hashing</strong> over a ring, often with virtual nodes per physical node.</li><li>Adding a node moves only its share of the ring, so capacity grows without a full rehash.</li><li>Every node is equal — there is no primary for the whole cluster — so there is no single write bottleneck.</li><li>The cluster detects failures with gossip and rebalances automatically.</li><li>Secondary indexes are local to each node, so a query on an indexed non-key column fans out to all nodes.</li><li>That makes secondary indexes useful for occasional lookups and unsuitable for high-volume query patterns.</li><li>Aggregations and cross-partition reads are the application's job or belong in a different system.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Limitations</h2>
+<ul><li>No joins: related data must be duplicated into the table that needs it.</li><li>No ad hoc queries: the table only answers the queries its key was designed for.</li><li>No efficient aggregations; scan-and-aggregate belongs in an analytical system.</li><li>Cross-partition transactions are limited and expensive; lightweight transactions add coordination cost.</li><li>Hot partitions and unbounded partitions are the main operational failure modes.</li><li>Reads are eventually consistent unless you raise the consistency level, which costs latency and availability.</li><li>Deletes are expensive in the long run because of tombstones.</li><li>The result is a narrow, extremely scalable store, not a general-purpose database.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use one</h2>
+<ul><li>High write volume with an append-heavy access pattern: messages, events, sensor readings, activity feeds.</li><li>Queries that are known in advance and always constrained by a partition key.</li><li>Data sets too large for one primary and tolerant of eventual consistency.</li><li>Multi-region availability where local reads matter more than global linearizability.</li><li>Time-ordered data inside a partition, where clustering by timestamp gives ordered reads for free.</li><li>Not for payments, inventory, or reporting, where transactions, joins, and ad hoc queries dominate.</li><li>A common architecture keeps relational or document data as the source of truth and uses a wide-column table for the high-volume feed.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Partition-key queries</strong> are fast and predictable but any query without the key fans out or is disallowed.</li><li><strong>Query-first tables</strong> make reads trivial but duplicate data and multiply write work.</li><li><strong>Append-only writes</strong> give high throughput but leave multiple versions for compaction to reconcile.</li><li><strong>Tunable consistency</strong> lets you pick latency or safety per query, but the choice must be made deliberately for every path.</li><li><strong>Last-write-wins</strong> resolves conflicts automatically but can silently lose a concurrent update.</li><li><strong>Tombstones</strong> propagate deletes reliably but hold space and add read cost until compaction.</li><li><strong>Compaction</strong> reclaims space and bounds read cost but consumes I/O and can stall ingestion.</li><li><strong>Local secondary indexes</strong> enable lookups on other columns but scatter the query across every node.</li><li><strong>Wide partitions</strong> keep related data together but become slow to read, repair, and stream.</li><li><strong>Eventual consistency</strong> keeps the cluster available during failures but exposes stale reads.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What makes a database wide-column?</summary><div class="answer"><p>Rows can hold many columns, grouped into column families, and a row only pays for the columns it actually sets. Rows are grouped and distributed by a partition key and sorted inside the partition by a clustering key, which makes single-partition ordered reads cheap.</p></div></details>
+<details><summary>2. What do the partition key and clustering key each do?</summary><div class="answer"><p>The partition key decides which node holds the row and which rows are stored together. The clustering key decides the order of rows inside that partition. Together they form the primary key and define both the physical layout and the queries the table can answer.</p></div></details>
+<details><summary>3. Why must you model from queries backwards?</summary><div class="answer"><p>Because there are no joins and no ad hoc filtering, the table only serves queries whose partition key is known. So you list the queries first and create one table per query, duplicating data as needed. The column set is easy to change later; the key is not.</p></div></details>
+<details><summary>4. Why are writes so fast?</summary><div class="answer"><p>A write is appended to the commit log, applied in memory, and later flushed as an immutable sorted file — no read-modify-write and no page lookup. That turns writes into sequential appends, which storage handles efficiently and which keeps latency predictable under load.</p></div></details>
+<details><summary>5. How does a read find the newest version of a row?</summary><div class="answer"><p>Each replica checks its memtable and its sorted files, using Bloom filters to skip files that cannot contain the partition key, then keeps the newest value per column by timestamp. If replicas disagree, read repair writes the newest version back to the stale ones.</p></div></details>
+<details><summary>6. What is a tombstone and why is it dangerous?</summary><div class="answer"><p>It is a timestamped delete marker, needed because data is append-only and a delete must overwrite older versions on every replica. If compaction removes the tombstone while a replica is still offline, that replica can later resurrect the deleted row. The grace period exists to bound this risk.</p></div></details>
+<details><summary>7. How does tunable consistency work?</summary><div class="answer"><p>The coordinator sends a write to all replicas but waits only for the requested count, and a read waits for its own count. Choosing quorum for both makes the read and write sets overlap, so at least one response carries the newest value. Choosing one is faster but can return stale data or lose a write on failure.</p></div></details>
+<details><summary>8. What is last-write-wins and what does it cost?</summary><div class="answer"><p>When replicas hold conflicting versions, the one with the higher timestamp wins. It needs no coordination and always converges, but it discards the losing update entirely, and clock skew can make the wrong value win. Workloads where concurrent updates must merge need a different strategy.</p></div></details>
+<details><summary>9. Why are secondary indexes a problem here?</summary><div class="answer"><p>Indexes are local to each node, so a query on an indexed column cannot know which nodes hold matches and must ask all of them. That turns a cheap lookup into a cluster-wide fan-out, fine occasionally but not for a primary query path.</p></div></details>
+<details><summary>10. What is a hot partition?</summary><div class="answer"><p>A partition whose key value receives disproportionate traffic, so one node saturates while others idle. It comes from low-cardinality keys, a dominant tenant or celebrity, or a time-ordered key where all new writes land on the newest partition. Fixes include adding a bucket component to the key or splitting the entity.</p></div></details>
+<details><summary>11. How does the cluster scale without a primary?</summary><div class="answer"><p>Keys are placed on a consistent-hashing ring with virtual nodes, and every node serves its own range. Adding a node moves only its share of the ring, and failures are detected by gossip while replicas take over. There is no global write bottleneck to upgrade.</p></div></details>
+<details><summary>12. When would you not use a wide-column database?</summary><div class="answer"><p>When you need transactions across entities, joins, ad hoc queries, or aggregations — payments, inventory, and reporting are the classic mismatches. It also fits poorly when access patterns are unknown at design time, because the key fixes them.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Designing the table from entities instead of from queries, then discovering the key cannot serve the read path.</li><li>Choosing a low-cardinality partition key that concentrates all traffic on a few nodes.</li><li>Letting a partition grow without bound — a per-conversation or per-device partition with years of history.</li><li>Setting a tombstone grace period shorter than the longest realistic node outage, then resurrecting deleted data.</li><li>Using read consistency ONE for a flow that must reflect the user's own write.</li><li>Relying on a local secondary index for a high-volume query and paying a cluster-wide fan-out.</li><li>Assuming lightweight transactions give the same isolation as a relational multi-row transaction.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="full-text-search-engines.html"><span>← Previous</span><strong>Full-Text Search Engines</strong></a><a class="next" href="time-series-databases.html"><span>Next →</span><strong>Time Series Databases</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/wide-column-databases">AlgoMaster — Wide Column Databases</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

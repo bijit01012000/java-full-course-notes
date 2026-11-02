@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Block Storage — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 61 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Block Storage</h1>
+    <p class="dek">Storage Systems · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/block-storage">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem block storage solves</a>
+<a href="#s2">What block storage is</a>
+<a href="#s3">How files map to blocks</a>
+<a href="#s4">Local block storage</a>
+<a href="#s5">Network-attached block storage</a>
+<a href="#s6">Measuring performance: IOPS, throughput, and latency</a>
+<a href="#s7">Inside cloud block storage</a>
+<a href="#s8">One volume, one server</a>
+<a href="#s9">Snapshots</a>
+<a href="#s10">Scaling block storage</a>
+<a href="#s11">Where block storage sits in a design</a>
+<a href="#s12">When to use block storage</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Block storage exposes a volume as a numbered array of fixed-size blocks, so a server can do small random in-place reads and writes — exactly the access pattern databases, message brokers, and virtual machines need.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Block</dt><dd>A fixed-size unit of storage with a numeric address and no metadata describing its contents.</dd></div><div class="term"><dt>Volume</dt><dd>A block device presented to a server, which the server formats with a file system and mounts.</dd></div><div class="term"><dt>File system</dt><dd>The layer that maps file names and offsets onto block addresses, tracking which blocks belong to which file.</dd></div><div class="term"><dt>Local block storage</dt><dd>A disk physically attached to the server, such as an NVMe drive, offering the lowest latency but tied to that machine.</dd></div><div class="term"><dt>Network-attached block storage</dt><dd>A volume that lives on separate storage hardware and is reached over the network, appearing as a local disk.</dd></div><div class="term"><dt>IOPS</dt><dd>Input/output operations per second — how many individual reads and writes a volume can complete each second.</dd></div><div class="term"><dt>Throughput</dt><dd>The number of bytes per second a volume can transfer, which equals IOPS multiplied by operation size.</dd></div><div class="term"><dt>Snapshot</dt><dd>A point-in-time capture of a volume, usually incremental, stored durably so a volume can be restored or cloned.</dd></div><div class="term"><dt>Multi-attach</dt><dd>Attaching one volume to several servers, which is only safe with a cluster-aware file system or coordinated access.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem block storage solves</h2>
+<p class="lede">A database updates thousands of small pieces of data per second: one balance, one order row, one index entry. Each change touches a few kilobytes somewhere in the middle of a large set of files.</p>
+<ul><li>Object storage treats each object as an indivisible unit, so changing a few bytes means rewriting the whole object.</li><li>Object requests travel over HTTP, which adds latency a millisecond-scale database cannot absorb.</li><li>A database needs disk-like behaviour: fast access at any offset and in-place updates of small regions.</li><li>Block storage provides exactly that by exposing addressable fixed-size blocks.</li><li>The cost is that block storage knows nothing about files, so something above it must supply that structure.</li><li>Choosing block storage is really choosing a low-level, high-performance substrate for a stateful component.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What block storage is</h2>
+<ul><li>Data is stored as a sequence of fixed-size blocks, each identified only by a numeric address.</li><li>There are no file names, no directories, and no metadata describing meaning.</li><li>The device understands essentially two operations: read this block, write this block.</li><li>A common block size is 4 KB, so a 1 TB volume is roughly 268 million blocks.</li><li>The disk in a laptop is block storage; in the cloud it is a virtual disk attached to a server.</li><li>Because blocks are addressable, the server can overwrite any region without touching the rest.</li></ul>
+
+
+<div class="note">The absence of structure is the feature: the upper layer decides what the bytes mean, and block storage just moves them.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>How files map to blocks</h2>
+<p class="lede">Attaching a volume gives the operating system a raw disk. Formatting it with a file system such as ext4, XFS, or NTFS creates the mapping from files to blocks.</p>
+<ul><li>The application asks the file system to write a number of bytes at an offset in a file.</li><li>The file system translates that offset into one or more block addresses.</li><li>The block device overwrites only those blocks; nothing else on the volume changes.</li><li>This is what makes small, random, in-place updates cheap.</li><li>Databases sometimes bypass the page cache with direct I/O so they control their own buffering.</li><li>Underneath either approach, the device sees the same thing: reads and writes to numbered blocks.</li></ul>
+
+<div class="flow"><span class="flow-step">Database requests an 8 KB write at an offset</span><span class="flow-arrow">→</span><span class="flow-step">File system maps the offset to block addresses</span><span class="flow-arrow">→</span><span class="flow-step">Block device overwrites exactly those blocks</span><span class="flow-arrow">→</span><span class="flow-step">Write is acknowledged once the device has persisted it</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Local block storage</h2>
+<ul><li>The disk is physically inside or directly attached to the server, typically NVMe or SSD.</li><li>Traffic never crosses a network, so latency is the lowest available, often well under a millisecond.</li><li>It can deliver very high IOPS and throughput for the price.</li><li>The data is bound to that machine: if the server fails, the data is lost or stranded.</li><li>Cloud local disks are usually ephemeral and survive only a reboot, not a stop or host failure.</li><li>It fits caches, temporary and spill files, and systems that already replicate data across nodes.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Local block storage</th><th>Network-attached block storage</th></tr></thead><tbody><tr><td>Latency</td><td>Lowest, no network hop</td><td>Higher, includes a network hop</td></tr>
+<tr><td>Survives server failure</td><td>No</td><td>Yes, reattach to a new server</td></tr>
+<tr><td>Resize or change tier</td><td>Fixed with the machine</td><td>Usually yes, often while in use</td></tr>
+<tr><td>Snapshots</td><td>Not built in</td><td>Built in</td></tr>
+<tr><td>Good for</td><td>Caches, temp files, self-replicating clusters</td><td>Databases, boot disks, stateful servers</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Network-attached block storage</h2>
+<ul><li>The volume lives on separate storage hardware and the server reaches it over the network.</li><li>From the server's view it is still a normal disk: format it, mount it, read and write blocks.</li><li>Traditional data centres use a SAN with iSCSI or Fibre Channel; clouds offer the same model as a managed service.</li><li>Because storage is independent of compute, a replacement server can attach the same volume and continue.</li><li>Volumes can usually be resized, retiered, and snapshotted without touching the server.</li><li>The trade-off is a network hop, so latency is higher than a local NVMe drive.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Measuring performance: IOPS, throughput, and latency</h2>
+<ul><li><strong>IOPS</strong> counts individual operations per second; small random database reads are limited by it.</li><li><strong>Throughput</strong> measures bytes per second; large sequential scans and backups are limited by it.</li><li>The two are linked: <code>throughput = IOPS × operation size</code>.</li><li>A 4 KB random workload can exhaust IOPS long before it uses the available bandwidth.</li><li>A large sequential read can hit the throughput ceiling with very few operations per second.</li><li><strong>Latency</strong> is the time for one operation; a transaction doing several dependent reads accumulates it.</li><li>Latency rises sharply as a volume approaches its limits because requests begin to queue.</li><li>Cloud providers usually let you provision IOPS and throughput separately, at a price.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Metric</th><th>Measures</th><th>Matters most for</th></tr></thead><tbody><tr><td>IOPS</td><td>Operations per second</td><td>Databases with small random reads and writes</td></tr>
+<tr><td>Throughput</td><td>Bytes per second</td><td>Analytics scans, backups, log shipping</td></tr>
+<tr><td>Latency</td><td>Time per operation</td><td>Transactional and user-facing systems</td></tr>
+<tr><td>Queue depth</td><td>Operations waiting</td><td>Diagnosing saturation and tail latency</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Inside cloud block storage</h2>
+<ul><li>A cloud volume is not one physical disk; it is split into pieces spread across many storage servers.</li><li>Each piece is replicated to multiple servers, so one disk or server failure does not lose data.</li><li>A write travels over the network to the storage servers responsible for that block.</li><li>The write is acknowledged only after the replicas have stored it.</li><li>Replication usually stays inside a single availability zone to keep write latency low.</li><li>That ties the volume to one zone: a server in another zone generally cannot attach it.</li><li>A zone-wide outage therefore makes the volume unavailable even though the data is replicated.</li><li>This is why snapshots and cross-zone database replicas still matter.</li></ul>
+
+
+<div class="note">Replication protects against <em>device</em> failure inside the zone. It does not protect against zone failure or operator error.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>One volume, one server</h2>
+<ul><li>A block volume is normally attached to exactly one server at a time.</li><li>The reason is the file system: it assumes it is the only writer and caches its own block allocation state.</li><li>Two servers writing through ordinary file systems can allocate the same block to different files and corrupt both.</li><li>Some providers offer multi-attach, but only for volume types designed for it.</li><li>Safe multi-attach requires a cluster-aware file system or an application that coordinates block access itself.</li><li>When many servers must share the same files, file storage is usually the simpler answer.</li><li>Shared-nothing designs avoid the problem by giving each node its own volume and replicating at the application layer.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Snapshots</h2>
+<ul><li>A snapshot captures the volume's state at a point in time.</li><li>Snapshots are typically incremental: the first copies all data blocks, later ones store only changed blocks.</li><li>Each snapshot still restores the full volume because it references unchanged blocks held by earlier ones.</li><li>Snapshots usually live in object storage, which is far more durable than the volume itself.</li><li>They support backups, cloning a volume for testing, and moving data across zones or regions.</li><li>Consistency matters: a snapshot of a live database can look like an abrupt power loss.</li><li>Databases should flush writes first or rely on their own crash recovery, such as replaying a write-ahead log.</li><li>A volume restored from a snapshot can be slow at first while blocks are lazily fetched.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Scaling block storage</h2>
+<ul><li>Block storage scales vertically: grow the volume, or move it to a faster tier with more provisioned IOPS.</li><li>On many cloud platforms these changes can happen while the volume stays attached.</li><li>After resizing, the file system must still be extended to use the new space.</li><li>Every volume type has hard maximums for size, IOPS, and throughput.</li><li>Because a volume serves one server, it cannot absorb unlimited traffic from many machines.</li><li>Past those limits, add servers each with their own volume — read replicas, shards, or partitioned brokers.</li><li>Striping several volumes with software RAID 0 adds their IOPS and throughput, but losing one volume loses the array.</li><li>Striping is only safe when the data is protected elsewhere, such as by replication.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Where block storage sits in a design</h2>
+<ul><li>Relational databases store data files and write-ahead logs on block volumes.</li><li>NoSQL databases such as MongoDB and Cassandra do the same on each node.</li><li>Message brokers store log segments on a volume attached to each broker.</li><li>Search engines keep their indexes on block storage.</li><li>Every cloud virtual machine boots from a block volume.</li><li>In each case the application owns the higher-level concerns: replication across zones and sharding across nodes.</li><li>A single volume in one zone does not make a component highly available; the database or managed service must add that.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When to use block storage</h2>
+<ul><li>Choose block storage when one server needs fast, low-latency access to frequently changing data.</li><li>Classic fits: databases, transaction logs, virtual machine disks, and search indexes.</li><li>Choose local storage for the lowest latency when the application already replicates data elsewhere.</li><li>Choose network-attached storage when data must survive server failure and you want snapshots and resizing.</li><li>Avoid block storage when many servers need to share the same files; use file storage.</li><li>Avoid it for huge amounts of media, backups, or logs; object storage is cheaper and simpler.</li><li>Match the choice to the access pattern, not to what is familiar.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Need</th><th>Best fit</th></tr></thead><tbody><tr><td>Fast random I/O for one server (databases, VM disks)</td><td>Network-attached block storage</td></tr>
+<tr><td>Lowest latency, data replicated elsewhere</td><td>Local block storage (NVMe)</td></tr>
+<tr><td>Many servers sharing files and folders</td><td>File storage</td></tr>
+<tr><td>Huge media, backup, or log archives at low cost</td><td>Object storage</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Block storage</strong> gives low-latency random access, but it has no structure of its own, so a file system or database must impose one.</li><li><strong>Local NVMe</strong> offers the best latency and IOPS, but the data dies with the instance and cannot be resized.</li><li><strong>Network-attached volumes</strong> survive server loss and support snapshots and resizing, but every I/O pays a network hop.</li><li><strong>In-zone replication</strong> keeps write latency low, but leaves the volume vulnerable to a zone outage.</li><li><strong>Incremental snapshots</strong> are cheap to take repeatedly, but restoring produces a cold volume with slow first reads.</li><li><strong>Vertical scaling</strong> avoids distributed complexity, but each volume type has a hard ceiling on size and IOPS.</li><li><strong>Striping volumes</strong> multiplies throughput, but any single volume loss destroys the whole array.</li><li><strong>Multi-attach</strong> lets several servers reach one volume, but only with cluster-aware file systems and careful coordination.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is block storage?</summary><div class="answer"><p>Storage exposed as a sequence of fixed-size blocks, each identified by a numeric address, with no file names or metadata. A file system on the server maps files onto those blocks. This allows small, random, in-place reads and writes.</p></div></details>
+<details><summary>2. Why not put a database on object storage?</summary><div class="answer"><p>Object storage treats each object as a whole, so changing a few bytes requires rewriting the entire object. Requests also go over HTTP, which adds far too much latency for a database needing millisecond responses. Databases need addressable, in-place writes, which is what block storage provides.</p></div></details>
+<details><summary>3. How does a file system relate to block storage?</summary><div class="answer"><p>The file system is the layer that gives blocks meaning: it tracks which blocks belong to which file and translates a file offset into block addresses. The block device itself only knows reads and writes at addresses. Formatting a fresh volume creates that mapping.</p></div></details>
+<details><summary>4. Local vs network-attached block storage — how do you choose?</summary><div class="answer"><p>Choose local when you need the lowest possible latency and the data is replicated elsewhere, as in Cassandra, Kafka, or Elasticsearch clusters. Choose network-attached when data must survive server failure and you need snapshots, resizing, and reattachment to a new server.</p></div></details>
+<details><summary>5. Explain IOPS, throughput, and latency together.</summary><div class="answer"><p>IOPS is operations per second, throughput is bytes per second, and latency is time per operation. They are linked by <code>throughput = IOPS × operation size</code>, which is why a small-random workload hits the IOPS limit first and a large-sequential workload hits the throughput limit first. Latency rises when the volume is saturated and requests queue.</p></div></details>
+<details><summary>6. Why can a volume be attached to only one server?</summary><div class="answer"><p>Because the file system assumes it is the sole writer and caches block allocation state. Two servers writing through ordinary file systems can allocate the same block to different files and corrupt both. Multi-attach needs a cluster-aware file system or coordinated access.</p></div></details>
+<details><summary>7. What happens inside a cloud block volume?</summary><div class="answer"><p>The volume is split into pieces spread across many storage servers, and each piece is replicated. A write travels over the network to the responsible servers and is acknowledged after the replicas store it. Replication usually stays within one availability zone to keep latency low.</p></div></details>
+<details><summary>8. Does in-zone replication make a volume durable enough?</summary><div class="answer"><p>It protects against individual disk and server failures, but not against a full zone outage or an operator deleting data. The volume is tied to its zone, so a zone failure makes it unavailable. Snapshots and cross-zone replicas are still required for real durability and availability.</p></div></details>
+<details><summary>9. How do snapshots work?</summary><div class="answer"><p>The first snapshot copies all data blocks; later snapshots store only blocks that changed, yet each can still restore the full volume by referencing earlier blocks. They are usually stored in object storage, which is more durable than the volume. They enable backups, cloning, and moving data across zones.</p></div></details>
+<details><summary>10. What consistency issue do snapshots have?</summary><div class="answer"><p>A snapshot of a live database captures disk state as if the machine lost power, so data still in memory is missing. The restored volume then needs crash recovery, such as replaying the write-ahead log. For clean backups, flush or quiesce writes first.</p></div></details>
+<details><summary>11. How does block storage scale?</summary><div class="answer"><p>Mostly vertically: enlarge the volume or move to a faster tier with more provisioned IOPS, then extend the file system. Each volume type has maximum size, IOPS, and throughput. Beyond that, add servers with their own volumes and distribute data through replicas or sharding.</p></div></details>
+<details><summary>12. When is RAID 0 striping of volumes appropriate?</summary><div class="answer"><p>When one server needs more IOPS or throughput than a single volume allows and the data is protected elsewhere, for example by application-level replication. Striping adds the volumes' performance, but losing any one volume destroys the array, so it is not a durability strategy.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating a single-zone volume as highly available because it is replicated inside the zone.</li><li>Attaching one volume to multiple servers with a normal file system and corrupting the data.</li><li>Sizing for capacity while ignoring IOPS and throughput ceilings.</li><li>Assuming a restored snapshot volume performs at full speed immediately.</li><li>Forgetting to extend the file system after growing the volume.</li><li>Using block storage for shared files or cheap archives that file or object storage handles better.</li><li>Taking database snapshots without flushing writes and then finding the backup needs crash recovery.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="connection-pooling.html"><span>← Previous</span><strong>Connection Pooling</strong></a><a class="next" href="distributed-file-systems.html"><span>Next →</span><strong>Distributed File Systems</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/block-storage">AlgoMaster — Block Storage</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

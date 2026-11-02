@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Message Brokers — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 32 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Message Brokers</h1>
+    <p class="dek">Communication Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/message-brokers">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with direct service-to-service messaging</a>
+<a href="#s2">What a message broker is</a>
+<a href="#s3">The five jobs of a broker</a>
+<a href="#s4">Routing in RabbitMQ</a>
+<a href="#s5">Kafka's partitioned log</a>
+<a href="#s6">Two philosophies</a>
+<a href="#s7">Durability: persistence and replication</a>
+<a href="#s8">Failover and duplicates</a>
+<a href="#s9">Flow control and backpressure</a>
+<a href="#s10">Why Kafka is fast</a>
+<a href="#s11">Managed and lighter options</a>
+<a href="#s12">Choosing a broker</a>
+<a href="#s13">The costs of adding a broker</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A message broker is shared infrastructure that stores, routes, delivers, and acknowledges messages between producers and consumers, so services can talk without knowing each other's addresses, availability, or speed.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Message broker</dt><dd>A service, usually a replicated cluster, that receives messages from producers and delivers them to consumers.</dd></div><div class="term"><dt>Exchange</dt><dd>The RabbitMQ routing component that decides which queues receive a copy of each incoming message.</dd></div><div class="term"><dt>Binding</dt><dd>A rule connecting a queue to an exchange that describes which messages the queue wants.</dd></div><div class="term"><dt>Partition</dt><dd>A Kafka append-only log shard; the unit of ordering, replication, and parallelism for a topic.</dd></div><div class="term"><dt>Offset</dt><dd>The sequential position of a message inside a Kafka partition, used by consumers to track progress.</dd></div><div class="term"><dt>Consumer group</dt><dd>A set of consumers that split the partitions of a topic so each message is processed by one member, or several groups reading independently.</dd></div><div class="term"><dt>Publisher confirm</dt><dd>The RabbitMQ acknowledgment that a message reached the broker; without it the producer cannot know the write survived.</dd></div><div class="term"><dt>Consumer lag</dt><dd>How far a consumer sits behind the latest message in a partition, the key backlog health metric in Kafka.</dd></div><div class="term"><dt>Prefetch limit</dt><dd>The cap on unacknowledged messages a push-based consumer may hold, protecting it from being overwhelmed.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with direct service-to-service messaging</h2>
+<p class="lede">With a dozen backend services, the order service must reach inventory, billing, and shipping; billing must reach notifications and analytics. Point-to-point calls make this look like a mesh that every team maintains separately.</p>
+<ul><li>Every service must know every peer's address, retry policy, and availability assumptions.</li><li>Each team re-solves the same problems: where messages wait when a receiver is down, how many times to retry.</li><li>No one centrally understands who subscribes to which events, so adding a consumer means changing producers.</li><li>One slow receiver forces producers to buffer, or back-pressure, on their own.</li><li>The number of connections grows roughly with the square of the service count.</li><li>A broker replaces that web with one shared piece of infrastructure in the middle.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a message broker is</h2>
+<ul><li>Producers send messages to the broker; consumers receive messages from the broker.</li><li>The producer does not need to know who the consumers are, where they run, or whether they are online now.</li><li>It only needs the broker's address and the message contract, which is a much smaller coupling.</li><li>Message queues and pub/sub are <em>patterns</em>; a broker is the <em>system</em> that implements them.</li><li>RabbitMQ, Apache Kafka, Amazon SQS, Google Cloud Pub/Sub, and NATS are all brokers, and most support both patterns in some form.</li><li>Because the broker sits between many services, it becomes critical infrastructure and must be treated as such.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Concept</th><th>What it is</th><th>Example</th></tr></thead><tbody><tr><td>Pattern</td><td>A way of exchanging messages</td><td>Queue, pub/sub</td></tr>
+<tr><td>Broker</td><td>The system implementing patterns</td><td>RabbitMQ, Kafka, SQS, NATS</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The five jobs of a broker</h2>
+<ul><li><strong>Store:</strong> accept messages and persist them, usually on disk, so a crash does not erase them.</li><li><strong>Route:</strong> send each message to the right queue, set of queues, or topic.</li><li><strong>Deliver:</strong> hand messages to consumers, either by pushing or by letting them pull.</li><li><strong>Track:</strong> remember what each consumer has processed so redelivery after failure is possible.</li><li><strong>Protect:</strong> shield itself and its consumers from overload through flow control and backpressure.</li><li>Brokers differ mainly in how they implement these five, which is why choosing one is a design decision rather than a brand decision.</li></ul>
+
+<div class="flow"><span class="flow-step">Producer publishes</span><span class="flow-arrow">→</span><span class="flow-step">Broker persists</span><span class="flow-arrow">→</span><span class="flow-step">Broker routes to destination</span><span class="flow-arrow">→</span><span class="flow-step">Consumer receives and processes</span><span class="flow-arrow">→</span><span class="flow-step">Consumer acknowledges; broker tracks progress</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Routing in RabbitMQ</h2>
+<ul><li>Producers send to an <strong>exchange</strong>, never directly to a queue.</li><li>The exchange inspects each message and decides which queues get a copy.</li><li>Queues attach to the exchange through <strong>bindings</strong>, which describe what that queue wants.</li><li>Each message carries a <strong>routing key</strong>, a short string such as <code>order.created.us</code>.</li><li>Routing lives in the broker, so a new consumer can appear with a new binding and no producer change.</li><li>This is the origin of the 'smart broker, simple consumers' philosophy.</li></ul>
+<h3>Exchange types</h3>
+<ul><li><strong>Direct:</strong> delivers to queues whose binding key exactly matches the routing key.</li><li><strong>Fanout:</strong> ignores the routing key and copies to every bound queue.</li><li><strong>Topic:</strong> matches routing keys against wildcard patterns.</li><li><strong>Headers:</strong> routes on message headers instead of the routing key.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Binding</th><th>Matches</th><th>Why</th></tr></thead><tbody><tr><td>order.*.us</td><td>order.created.us</td><td><code>*</code> matches exactly one word</td></tr>
+<tr><td>order.#</td><td>order.created.us and deeper keys</td><td><code>#</code> matches zero or more words</td></tr>
+<tr><td>payment.#</td><td>Not order.created.us</td><td>Different first word</td></tr></tbody></table></div>
+
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Kafka's partitioned log</h2>
+<ul><li>Kafka has no exchanges or routing rules inside the broker; routing is decided by the producer and the topic layout.</li><li>A topic is split into <strong>partitions</strong>, each an append-only log on disk.</li><li>New messages are appended to the end and receive a sequential <strong>offset</strong>.</li><li>The producer chooses the partition, typically by hashing a message key, so equal keys land in the same partition and stay ordered.</li><li>Consumers read from partitions and commit their offsets, stored in an internal topic so a restart resumes where it stopped.</li><li>Reading a message does <strong>not</strong> delete it: retention time or size governs deletion, so many consumer groups can read the same data at their own pace.</li></ul>
+<h3>Consequences of keeping data</h3>
+<ul><li>Any consumer group can rewind to an earlier offset and replay.</li><li>Independent readers — analytics, search indexing, billing — do not compete for the same messages.</li><li>Retention becomes a capacity and cost decision rather than an incidental side effect.</li><li>Ordering is guaranteed per partition, never across the whole topic.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Two philosophies</h2>
+<p class="lede">RabbitMQ and Kafka are not two implementations of one design; they encode different answers to where intelligence belongs.</p>
+<ul><li>RabbitMQ: <strong>smart broker, simple consumers</strong> — routing, per-message tracking, and deletion on acknowledgment live in the broker.</li><li>Kafka: <strong>simple broker, smarter consumers</strong> — the broker stores an ordered log efficiently and consumers manage their own position.</li><li>Neither is better in general; each optimizes for a different workload shape.</li><li>RabbitMQ fits task queues, retries, priorities, and flexible routing.</li><li>Kafka fits high-throughput streams, long retention, replay, and many independent readers.</li><li>Mixing them in one system is normal, and often the correct answer.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>RabbitMQ</th><th>Kafka</th></tr></thead><tbody><tr><td>Model</td><td>Smart broker, simple consumers</td><td>Simple broker, smarter consumers</td></tr>
+<tr><td>Routing</td><td>Exchanges and bindings in the broker</td><td>Producer picks a partition by key</td></tr>
+<tr><td>After a message is read</td><td>Removed once acknowledged</td><td>Kept until retention expires</td></tr>
+<tr><td>Progress tracking</td><td>Broker tracks each message</td><td>Consumer group commits an offset</td></tr>
+<tr><td>Replay</td><td>Not built in</td><td>Rewind the offset</td></tr>
+<tr><td>Natural fit</td><td>Task queues, retries, priorities</td><td>High-throughput streams, retention, many readers</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Durability: persistence and replication</h2>
+<ul><li>Losing messages at this layer can affect every service downstream, so brokers protect them twice.</li><li><strong>Persistence</strong> writes messages to disk; in RabbitMQ the queue must be declared durable and messages marked persistent.</li><li>Persistence alone is insufficient: disks fail and whole machines go down.</li><li><strong>Replication</strong> keeps copies on multiple nodes; in Kafka each partition has a leader and followers, commonly three replicas.</li><li>Producers write to the leader and followers copy; with <code>acks=all</code> plus <code>min.insync.replicas</code> the write is confirmed only after in-sync replicas have it.</li><li>RabbitMQ achieves the same with quorum queues, replicating via Raft and confirming after a majority accepts.</li><li>The producer must <strong>wait for the acknowledgment</strong>; otherwise the message may still be in a network buffer when failure strikes.</li></ul>
+
+
+<div class="note">An unacknowledged send is an unknown outcome, not a success. Treat it as a possibly-lost write.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Failover and duplicates</h2>
+<ul><li>Replication also provides availability: when a partition leader dies, an in-sync follower is elected and clients follow it.</li><li>RabbitMQ quorum queues elect a new leader from remaining nodes in the same way.</li><li>Failover creates a subtle duplicate: the broker stored the message but the acknowledgment never reached the producer.</li><li>The producer retries, and the broker now holds the same message twice.</li><li>Kafka's <strong>idempotent producer</strong> attaches a producer ID and sequence number so the broker discards retried duplicates.</li><li>Duplicates still arise elsewhere — a consumer crashing before committing its offset — so consumers must be idempotent regardless.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Flow control and backpressure</h2>
+<ul><li>Sooner or later producers outpace consumers, and the broker must decide where the backlog goes.</li><li><strong>RabbitMQ blocks publishers</strong> when memory crosses a threshold or free disk gets too low, slowing production instead of exhausting itself.</li><li><strong>Kafka treats backlogs as normal</strong>, because messages are already on disk with retention.</li><li>Large Kafka backlogs still consume storage, and a consumer that falls too far behind can lose messages to retention.</li><li><strong>Consumer lag</strong> is therefore the metric that matters most for Kafka health.</li><li>Kafka quotas cap per-client bandwidth so one busy producer cannot starve the rest.</li><li>Delivery model shapes backpressure: Kafka pulls at the consumer's pace, RabbitMQ pushes and relies on a prefetch limit.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Pressure signal</th><th>RabbitMQ</th><th>Kafka</th></tr></thead><tbody><tr><td>Overload response</td><td>Block publishing connections</td><td>Accept backlog on disk</td></tr>
+<tr><td>Consumer protection</td><td>Prefetch limit</td><td>Consumer pulls at its own rate</td></tr>
+<tr><td>Key metric</td><td>Queue depth and unacked messages</td><td>Consumer lag per partition</td></tr>
+<tr><td>Failure risk</td><td>Broker resource exhaustion</td><td>Retention deletes unread messages</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Why Kafka is fast</h2>
+<ul><li><strong>Sequential writes:</strong> appending to a log keeps disk writes sequential, far cheaper than random writes.</li><li><strong>OS page cache:</strong> recently written messages are often still in memory when consumers read them.</li><li><strong>Batching and compression:</strong> producers send compressed batches, cutting network requests and bytes written.</li><li><strong>Zero-copy transfer:</strong> the OS sends page-cache data straight to the socket, skipping application copies.</li><li>RabbitMQ makes the opposite trade: per-message routing and acknowledgment state cost extra work per message.</li><li>RabbitMQ performs best when consumers keep up and queues stay short, rather than when large backlogs accumulate.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Managed and lighter options</h2>
+<ul><li>Running a broker cluster means upgrades, disk capacity, replication, monitoring, and failure recovery — real operational load.</li><li>Managed services move most of that to a provider: Amazon SQS for queues, SNS for pub/sub, Google Cloud Pub/Sub for both.</li><li>Azure Service Bus adds sessions and scheduled delivery; Amazon MSK and Confluent Cloud provide managed Kafka.</li><li>Redis Streams offers a persistent log-like structure with consumer groups inside Redis.</li><li>NATS is lightweight and low-latency, with JetStream adding persistence and replay.</li><li>Apache Pulsar separates serving from storage so storage can scale independently.</li><li>The trade is less control and some vendor lock-in for much less operational work.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Option</th><th>What it offers</th></tr></thead><tbody><tr><td>Amazon SQS</td><td>Managed queues</td></tr>
+<tr><td>Amazon SNS</td><td>Managed pub/sub fan-out</td></tr>
+<tr><td>Google Cloud Pub/Sub</td><td>Queues and pub/sub in one service</td></tr>
+<tr><td>Azure Service Bus</td><td>Queues and topics with sessions, scheduling</td></tr>
+<tr><td>Amazon MSK / Confluent Cloud</td><td>Managed Kafka</td></tr>
+<tr><td>Redis Streams</td><td>Log-like structure with consumer groups in Redis</td></tr>
+<tr><td>NATS / JetStream</td><td>Low-latency messaging, optional persistence</td></tr>
+<tr><td>Apache Pulsar</td><td>Separated serving and storage tiers</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Choosing a broker</h2>
+<ul><li>Start from requirements, not from a product shortlist.</li><li>Distributing background tasks that are processed and removed: a traditional queue such as RabbitMQ or SQS is simpler.</li><li>Flexible routing on message attributes: RabbitMQ exchanges fit directly.</li><li>Very high throughput, long retention, or replay: Kafka or another log-based system fits better.</li><li><strong>Ordering</strong> limits parallelism: Kafka orders within a partition, SQS FIFO within a message group.</li><li><strong>Operational load</strong> matters: a simpler managed service often beats a powerful system the team cannot maintain.</li><li>Many production systems run Kafka for streams plus a lightweight queue for background jobs.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>The costs of adding a broker</h2>
+<ul><li><strong>Extra latency:</strong> every message takes another network hop before delivery.</li><li><strong>Critical dependency:</strong> if the broker is unavailable, many services stop communicating at once.</li><li><strong>More to operate:</strong> disk usage, replication health, consumer lag, and dead-letter queues all need monitoring.</li><li><strong>Harder debugging:</strong> asynchronous flow needs tooling to reconstruct what happened.</li><li>Propagating a <strong>trace ID</strong> in every message makes it possible to follow one request across producers, broker, and consumers.</li><li>For two services that need a direct request and an immediate answer, a broker only adds moving parts.</li></ul>
+
+<div class="flow"><span class="flow-step">Producer stamps a trace ID</span><span class="flow-arrow">→</span><span class="flow-step">Broker stores and forwards it</span><span class="flow-arrow">→</span><span class="flow-step">Each consumer logs the same trace ID</span><span class="flow-arrow">→</span><span class="flow-step">One query reconstructs the whole path</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Decoupling producers from consumers</strong> removes address knowledge, but adds a shared dependency that many services now need.</li><li><strong>Broker-side routing</strong> (RabbitMQ) gives flexible bindings, but costs per-message bookkeeping and weakens replay.</li><li><strong>Log-based storage</strong> (Kafka) gives throughput and replay, but pushes partition, ordering, and offset management onto consumers.</li><li><strong>Persistence plus replication</strong> protects against node loss, at the cost of write latency and storage.</li><li><strong>Waiting for acknowledgments</strong> makes delivery knowable, but reduces throughput and adds failure paths to handle.</li><li><strong>Idempotent producers</strong> suppress retry duplicates, but do not cover consumer-side duplicates.</li><li><strong>Blocking publishers</strong> protects RabbitMQ from overload, but pushes the stall back onto producers.</li><li><strong>Long retention</strong> enables replay and multiple readers, but grows storage and can mask a lagging consumer until retention deletes its messages.</li><li><strong>Managed services</strong> cut operational work, but reduce control and introduce vendor lock-in.</li><li><strong>One broker for everything</strong> keeps the stack small, but often fits neither task queues nor event streams well.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a message broker?</summary><div class="answer"><p>A server or cluster that accepts messages from producers and delivers them to consumers, handling storage, routing, delivery, and acknowledgment. Producers only need to reach the broker, not each consumer, which removes direct coupling between services.</p></div></details>
+<details><summary>2. Walk through how RabbitMQ routes a message.</summary><div class="answer"><p>A producer publishes to an exchange with a routing key. Bindings describe which queues want which keys, and the exchange copies the message to the matching queues. Consumers then read from their queues and acknowledge, after which the broker can delete the message.</p></div></details>
+<details><summary>3. What guarantees does Kafka give that RabbitMQ does not?</summary><div class="answer"><p>Kafka keeps messages in an ordered log until retention expires, so reading does not delete and consumers can rewind to replay. Multiple consumer groups can read the same data at different offsets. RabbitMQ removes a message once acknowledged and has no built-in replay.</p></div></details>
+<details><summary>4. Explain 'smart broker, simple consumers' versus 'simple broker, smarter consumers'.</summary><div class="answer"><p>RabbitMQ puts routing, per-message tracking, and delivery state in the broker, so consumers just receive and acknowledge. Kafka keeps the broker focused on storing an ordered log efficiently, leaving partition choice, offset management, and replay to consumers.</p></div></details>
+<details><summary>5. Why is persistence alone not enough for durability?</summary><div class="answer"><p>Writing to disk protects against a process crash but not against disk or machine failure. Replication across nodes is needed so a node loss does not lose acknowledged messages. Kafka uses leader and follower replicas; RabbitMQ uses quorum queues.</p></div></details>
+<details><summary>6. What does acks=all actually buy you?</summary><div class="answer"><p>It makes the broker acknowledge a write only after all in-sync replicas have received it. Combined with a minimum in-sync replica setting, an acknowledged message survives a single broker failure. Without waiting for that acknowledgment, the producer cannot know whether the write survived.</p></div></details>
+<details><summary>7. Where do duplicates come from even with replication?</summary><div class="answer"><p>A leader can store a message and fail before the acknowledgment reaches the producer, so the producer retries and the broker holds the message twice. Idempotent producers with sequence numbers suppress those retries, but consumer crashes before offset commit produce duplicates that only idempotent consumers can absorb.</p></div></details>
+<details><summary>8. How do RabbitMQ and Kafka handle a growing backlog?</summary><div class="answer"><p>RabbitMQ blocks publishing connections when memory or free disk crosses a threshold, pushing back on producers. Kafka accepts the backlog on disk because retention already exists, so the risk moves to storage growth and retention deleting messages a slow consumer has not read.</p></div></details>
+<details><summary>9. How would you get high throughput out of a log-based broker?</summary><div class="answer"><p>Append sequentially instead of seeking randomly, rely on the OS page cache for recent reads, batch and compress on the producer, and use zero-copy transfer so the kernel sends page-cache data directly to the socket.</p></div></details>
+<details><summary>10. What does ordering cost you?</summary><div class="answer"><p>Ordering is guaranteed only within a Kafka partition or an SQS FIFO message group, so preserving order caps parallelism to the number of partitions or groups. More ordering means fewer independent lanes and potentially a hot key that limits scale.</p></div></details>
+<details><summary>11. What operational costs does a broker introduce?</summary><div class="answer"><p>An extra network hop of latency, a critical shared dependency, more infrastructure to run and monitor (disk, replication health, consumer lag, dead-letter queues), and harder debugging because flow is asynchronous. Trace IDs in messages are the usual mitigation.</p></div></details>
+<details><summary>12. When is a broker the wrong choice?</summary><div class="answer"><p>When only two services communicate and the caller needs a direct request with an immediate answer. Adding a broker there introduces latency, a new failure mode, and operating work without buying decoupling or buffering that the system needs.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Choosing Kafka for simple background task distribution where a managed queue would be far less work.</li><li>Producing without waiting for the broker acknowledgment and treating the send as durable.</li><li>Assuming replication alone prevents duplicates during failover.</li><li>Building consumers that are not idempotent while running at-least-once delivery.</li><li>Expecting global ordering from a partitioned log.</li><li>Ignoring consumer lag until retention deletes messages the consumer never processed.</li><li>Treating the broker as the source of truth for event history when replay matters.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="pub-sub.html"><span>← Previous</span><strong>Pub/Sub</strong></a><a class="next" href="delivery-semantics.html"><span>Next →</span><strong>Delivery Semantics</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/message-brokers">AlgoMaster — Message Brokers</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

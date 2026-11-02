@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Gateway Pattern — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 75 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>API Gateway Pattern</h1>
+    <p class="dek">Microservices Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/api-gateway-pattern">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with calling services directly</a>
+<a href="#s2">The client knows too much and calls too often</a>
+<a href="#s3">Every service repeats the same work</a>
+<a href="#s4">The backend structure leaks to clients</a>
+<a href="#s5">What an API gateway is</a>
+<a href="#s6">Core responsibilities</a>
+<a href="#s7">How a request flows</a>
+<a href="#s8">Gateway versus neighbouring components</a>
+<a href="#s9">The gateway as a new single point of failure</a>
+<a href="#s10">Performance and the latency budget</a>
+<a href="#s11">Failure modes and resilience</a>
+<a href="#s12">Operating and evolving the gateway</a>
+<a href="#s13">Anti-patterns and decision rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>An API gateway is the single stable front door for outside clients: it routes each request to the right service and centralizes authentication, rate limiting, TLS, and response shaping.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>API gateway</dt><dd>A server that sits between external clients and internal services, routing requests and centralizing cross-cutting edge concerns.</dd></div><div class="term"><dt>North-south traffic</dt><dd>Traffic entering or leaving the system from outside clients, which the gateway handles.</dd></div><div class="term"><dt>East-west traffic</dt><dd>Service-to-service traffic inside the system, usually handled by discovery, load balancing, or a mesh rather than the gateway.</dd></div><div class="term"><dt>Request aggregation</dt><dd>Calling several backend services for one client request and merging the results into a single response.</dd></div><div class="term"><dt>TLS termination</dt><dd>Ending encryption at the gateway so backend services receive plain traffic inside a trusted network.</dd></div><div class="term"><dt>Rate limiting</dt><dd>Restricting request volume per client, key, or route to protect services and enforce quotas.</dd></div><div class="term"><dt>Backend for frontend</dt><dd>A gateway variant dedicated to one client type, with an API shaped for that client's experience.</dd></div><div class="term"><dt>Service discovery</dt><dd>The mechanism that lets the gateway find healthy instances of each backend service.</dd></div><div class="term"><dt>Single point of failure</dt><dd>A component whose outage takes down the whole request path, which the gateway becomes if it is not made redundant.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with calling services directly</h2>
+<p class="lede">An e-commerce system split into user, product, order, payment, and review services exposes a separate API for each.</p>
+<ul><li>A mobile product page needs product details, reviews, and the user's saved addresses.</li><li>Without a gateway, the client calls each service directly over the public network.</li><li>The client must know every service address and keep that list current.</li><li>The client must implement retries, timeouts, and partial-failure handling for each dependency.</li><li>Every service independently re-implements authentication, quotas, and logging.</li><li>Internal refactoring becomes a client-visible breaking change.</li><li>The result is a chatty, brittle client coupled to backend topology.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The client knows too much and calls too often</h2>
+<ul><li>The client holds a hard-coded map of services, which must change whenever the backend is split or renamed.</li><li>Multiple round trips over a mobile connection multiply latency and failure probability.</li><li>Sequential calls add up; parallel calls still wait for the slowest dependency.</li><li>The client needs per-call retry, timeout, and fallback logic, duplicated on every platform.</li><li>Partial failure is hard: one service failing should degrade a section, not blank the page.</li><li>Caching and compression decisions are pushed into every client.</li><li>Each new client re-solves the same orchestration problem.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Product page dependency</th><th>Service</th><th>Illustrative mobile latency</th></tr></thead><tbody><tr><td>Product details</td><td>Product service</td><td>150 ms</td></tr>
+<tr><td>Reviews</td><td>Review service</td><td>180 ms</td></tr>
+<tr><td>Saved addresses</td><td>User service</td><td>130 ms</td></tr></tbody></table></div>
+
+<div class="note">The exact numbers matter less than the shape: several network calls from a constrained device, each with its own failure modes.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Every service repeats the same work</h2>
+<ul><li>Each exposed service validates external tokens, so auth logic is copied and can drift.</li><li>Rate limits are configured per service, producing inconsistent protection.</li><li>Every service manages its own public certificates and TLS settings.</li><li>CORS policy is configured in many places and easily misconfigured.</li><li>Request logging uses different fields and formats, so correlation across services breaks.</li><li>Duplication raises the chance that one service gets a security check wrong.</li><li>The public boundary is the first security boundary, so one gap is enough.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Concern</th><th>Problem when every service is exposed</th></tr></thead><tbody><tr><td>Authentication</td><td>Each service validates external tokens separately</td></tr>
+<tr><td>Rate limiting</td><td>Limits are inconsistent across endpoints</td></tr>
+<tr><td>TLS and certificates</td><td>Every service manages its own public certificates</td></tr>
+<tr><td>CORS</td><td>Browser policy is configured in many places</td></tr>
+<tr><td>Request logging</td><td>Logs use different fields, formats, and request IDs</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The backend structure leaks to clients</h2>
+<ul><li>Splitting the product service into catalog and pricing would break every direct client.</li><li>Service names and routes become a public contract that is expensive to change.</li><li>Mobile apps make this worse: old versions stay installed for months.</li><li>The backend cannot reorganize without coordinating with client releases.</li><li>Internal APIs get shaped by external client quirks instead of domain design.</li><li>Versioning becomes a per-service negotiation rather than one edge policy.</li><li>This coupling is the organizational reason gateways appear.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>What an API gateway is</h2>
+<ul><li>A single entry point in front of many backend services.</li><li>Clients send every request to the gateway and never address services directly.</li><li>The gateway decides which service or services should handle the request.</li><li>It can translate protocols, for example exposing REST while calling gRPC internally.</li><li>It hides internal topology, so services can split, merge, or move.</li><li>It concentrates edge concerns in one deployable component with one policy.</li><li>It is a <strong>north-south</strong> component: it handles external traffic, not service-to-service calls.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Core responsibilities</h2>
+<ul><li><strong>Routing</strong> by path, host, header, or method to the correct service and version.</li><li><strong>Authentication and authorization</strong>: validate tokens once, forward trusted identity claims.</li><li><strong>Rate limiting and quotas</strong> per client, API key, or route.</li><li><strong>TLS termination</strong> and certificate management at the edge.</li><li><strong>Request and response shaping</strong>, including aggregation for chatty screens.</li><li><strong>Observability</strong>: one request ID, consistent access logs, and edge metrics.</li><li><strong>Resilience</strong>: timeouts, retries with budgets, circuit breaking, and payload limits.</li><li>Not every gateway does all of this; choose the set the system actually needs.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>How a request flows</h2>
+<ul><li>The client connects to one hostname and presents a token.</li><li>The gateway terminates TLS and authenticates the caller.</li><li>It applies rate limits, request size limits, and route matching.</li><li>It resolves the target service through discovery and picks a healthy instance.</li><li>For composite screens it fans out to several services with per-call timeouts.</li><li>It merges, filters, and caches responses before returning one payload.</li><li>It records latency, status, and a correlation ID for every hop.</li></ul>
+
+<div class="flow"><span class="flow-step">Client calls gateway</span><span class="flow-arrow">→</span><span class="flow-step">TLS termination and authentication</span><span class="flow-arrow">→</span><span class="flow-step">Rate limit and route match</span><span class="flow-arrow">→</span><span class="flow-step">Discover target instance</span><span class="flow-arrow">→</span><span class="flow-step">Call backend services</span><span class="flow-arrow">→</span><span class="flow-step">Aggregate and shape response</span><span class="flow-arrow">→</span><span class="flow-step">Log, meter, and return</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Gateway versus neighbouring components</h2>
+<ul><li>A <strong>load balancer</strong> distributes connections across instances but does not understand APIs.</li><li>A <strong>reverse proxy</strong> forwards traffic and can cache, but usually lacks API-aware auth and aggregation.</li><li>An <strong>API gateway</strong> adds routing by API semantics, auth, quotas, and composition.</li><li>A <strong>service mesh</strong> handles east-west traffic between services, with mTLS, retries, and telemetry.</li><li>A <strong>BFF</strong> is a gateway per client type, shaped for one experience.</li><li>These roles overlap in products, so separate the responsibilities conceptually before buying a tool.</li><li>Many systems use a gateway at the edge and a mesh inside.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Component</th><th>Traffic</th><th>Primary job</th></tr></thead><tbody><tr><td>Load balancer</td><td>Inbound connections</td><td>Spread load across instances</td></tr>
+<tr><td>Reverse proxy</td><td>Inbound HTTP</td><td>Forward and optionally cache</td></tr>
+<tr><td>API gateway</td><td>North-south API calls</td><td>Route, authenticate, limit, aggregate</td></tr>
+<tr><td>Service mesh</td><td>East-west service calls</td><td>Secure, observe, and retry service traffic</td></tr>
+<tr><td>BFF</td><td>One client type</td><td>Shape an API for one experience</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>The gateway as a new single point of failure</h2>
+<ul><li>Every request now passes through one component, so its outage is a total outage.</li><li>Run multiple gateway instances behind a load balancer across availability zones.</li><li>Keep the gateway stateless so instances can be replaced freely.</li><li>Avoid per-instance configuration drift by treating routes as versioned configuration.</li><li>Protect against cascading failure with connection limits to each backend.</li><li>Plan capacity for peak traffic plus failover headroom, not average load.</li><li>Test gateway failure and failover explicitly; it sits on the critical path.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Performance and the latency budget</h2>
+<ul><li>The gateway adds at least one network hop and some processing time to every request.</li><li>Keep the hot path lean: avoid heavy transformation and unnecessary body parsing.</li><li>Reuse upstream connections with pooling instead of opening one per request.</li><li>Cache safe, cacheable responses at the edge where correctness allows.</li><li>Set explicit per-route timeouts so one slow service cannot hold edge capacity.</li><li>Aggregation in parallel reduces total time only to the slowest included call.</li><li>Measure gateway latency separately from backend latency to attribute regressions.</li></ul>
+
+
+<div class="note">A gateway that saves client round trips usually wins overall, but only if its own overhead stays small and predictable.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes and resilience</h2>
+<ul><li>Retries at the gateway multiply load during an outage; use budgets and jitter.</li><li>Aggressive aggregation turns one backend slowdown into a fully failed screen.</li><li>A shared connection pool to a hot service can saturate and stall unrelated routes.</li><li>Large request bodies can exhaust memory if limits are absent.</li><li>A bad route configuration deploy can misroute all traffic at once.</li><li>Auth token caches that are too long-lived delay revocation.</li><li>Missing fallbacks turn partial degradation into blank pages.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Operating and evolving the gateway</h2>
+<ul><li>Treat routes, policies, and limits as code with review and rollback.</li><li>Version the external API at the edge, not inside every service.</li><li>Roll out configuration changes gradually and watch error and latency metrics.</li><li>Keep business logic out: the gateway routes and enforces policy, it does not price orders.</li><li>Document which concerns live at the edge versus inside services.</li><li>Give the platform team ownership, with client teams proposing routes through review.</li><li>Revisit the gateway when it becomes a deployment bottleneck for every team.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Anti-patterns and decision rules</h2>
+<ul><li><strong>God gateway</strong>: every feature adds logic until it is an unmaintainable monolith at the edge.</li><li><strong>Chatty aggregation</strong>: fanning out to many services per request with no caching or batching.</li><li>Putting domain rules in the gateway duplicates logic and drifts from the services.</li><li>Using a gateway to hide a broken service design instead of fixing the API.</li><li>Adopting one too early for a single-service system adds a hop with no benefit.</li><li>Adopt it when clients are many, services are many, or edge concerns are duplicated.</li><li>If only one client type needs shaping, a BFF is the better fit.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Single entry point</strong> simplifies clients but concentrates availability risk in one tier.</li><li><strong>Centralized auth</strong> removes duplication but makes the gateway a security-critical component.</li><li><strong>Aggregation</strong> reduces client round trips but couples the gateway to multiple service contracts.</li><li><strong>Edge caching</strong> cuts latency and backend load but risks serving data that is stale or user-specific.</li><li><strong>Protocol translation</strong> decouples clients from internals but adds transformation cost and mapping bugs.</li><li><strong>One policy layer</strong> gives consistent limits but can become a release bottleneck for all teams.</li><li><strong>Hiding topology</strong> lets the backend evolve but makes debugging require correlation across the gateway.</li><li><strong>Extra hop</strong> buys control and observability at the cost of latency and another component to operate.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does an API gateway solve?</summary><div class="answer"><p>It gives external clients one stable entry point instead of direct access to every service. That removes client-side service discovery and orchestration, centralizes authentication and rate limiting, and hides internal topology so services can change without breaking clients.</p></div></details>
+<details><summary>2. What does a gateway typically do?</summary><div class="answer"><p>Routes requests by path or host, terminates TLS, authenticates callers, enforces quotas, aggregates several backend calls, translates protocols, and emits consistent logs and metrics. It should not hold business rules.</p></div></details>
+<details><summary>3. How is a gateway different from a load balancer?</summary><div class="answer"><p>A load balancer distributes connections across instances and knows nothing about API semantics. A gateway understands routes, tokens, quotas, and response composition, and it usually sits behind or alongside a load balancer that spreads traffic across gateway instances.</p></div></details>
+<details><summary>4. How is it different from a service mesh?</summary><div class="answer"><p>The gateway handles north-south traffic from outside clients. A mesh handles east-west traffic between services, providing mTLS, retries, and telemetry. Many systems run both, each with a distinct responsibility.</p></div></details>
+<details><summary>5. How is it different from a BFF?</summary><div class="answer"><p>A BFF is a gateway dedicated to one client type and shaped for that experience; a general gateway serves all clients with one API. Start with a gateway, and split out a BFF when client needs diverge sharply.</p></div></details>
+<details><summary>6. Does a gateway become a single point of failure?</summary><div class="answer"><p>Yes, because all traffic passes through it. Mitigate with multiple stateless instances across zones, a load balancer in front, versioned configuration, connection limits per backend, and tested failover.</p></div></details>
+<details><summary>7. How does aggregation work and what does it cost?</summary><div class="answer"><p>The gateway calls several services, applies per-call timeouts, and merges the results into one response. It saves client round trips but couples the gateway to several contracts, and total latency is bounded by the slowest included call.</p></div></details>
+<details><summary>8. Where should authentication happen?</summary><div class="answer"><p>At the edge: the gateway validates the external token once, rejects unauthenticated calls, and forwards trusted identity claims to services. Services still enforce authorization on their own resources, because the gateway cannot know every domain rule.</p></div></details>
+<details><summary>9. What are common gateway failure modes?</summary><div class="answer"><p>Retry storms during outages, aggregation turning one slow service into a failed screen, connection pool saturation, missing payload limits, and a bad configuration deploy misrouting everything. Timeouts, budgets, limits, and staged rollouts address them.</p></div></details>
+<details><summary>10. Should the gateway contain business logic?</summary><div class="answer"><p>No. Business rules in the gateway duplicate service logic, drift, and make the edge a deployment bottleneck. Keep it to routing, policy, and light shaping; push domain decisions into services.</p></div></details>
+<details><summary>11. When is a gateway unnecessary?</summary><div class="answer"><p>For a single service, a small number of trusted clients, or when edge concerns are not duplicated. Adding a gateway there adds a hop and an operational component with little benefit.</p></div></details>
+<details><summary>12. How do you version APIs at the edge?</summary><div class="answer"><p>Expose stable, versioned external routes at the gateway and map them to current internal services. That lets services split or change while old client versions keep working, which matters most for mobile apps that upgrade slowly.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Letting the gateway accumulate business logic until it becomes a monolith at the edge.</li><li>Running a single gateway instance and discovering it is a single point of failure during an incident.</li><li>Adding retries at the gateway without budgets, turning a backend slowdown into a retry storm.</li><li>Aggregating many services per request with no per-call timeout, so the slowest dependency fails the page.</li><li>Treating the gateway as a replacement for service-to-service discovery or a mesh.</li><li>Exposing internal service routes as a permanent public contract and then being unable to split them.</li><li>Skipping payload size limits and letting large uploads exhaust gateway memory.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="service-discovery.html"><span>← Previous</span><strong>Service Discovery</strong></a><a class="next" href="backend-for-frontend.html"><span>Next →</span><strong>Backend for Frontend (BFF)</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/api-gateway-pattern">AlgoMaster — API Gateway Pattern</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

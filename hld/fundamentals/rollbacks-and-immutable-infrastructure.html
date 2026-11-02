@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rollbacks &amp; Immutable Infrastructure — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 117 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Rollbacks &amp; Immutable Infrastructure</h1>
+    <p class="dek">Deployment Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/rollbacks-and-immutable-infrastructure">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Rollback is a capability, not a command</a>
+<a href="#s2">Mutable infrastructure and drift</a>
+<a href="#s3">Immutable infrastructure</a>
+<a href="#s4">Bake versus fry</a>
+<a href="#s5">Making the previous version deployable</a>
+<a href="#s6">Layers of rollback</a>
+<a href="#s7">Rollback is not only code</a>
+<a href="#s8">Triggers: manual versus automated</a>
+<a href="#s9">Rollback versus roll forward</a>
+<a href="#s10">Rehearsing recovery</a>
+<a href="#s11">Failure modes</a>
+<a href="#s12">Adopting immutable infrastructure</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Rollback is only fast if the last good version still exists and can be deployed without rebuilding it — which is exactly what <strong>immutable infrastructure</strong> makes possible.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Immutable infrastructure</dt><dd>A model where servers and containers are never modified after creation; changes produce a new versioned artifact that replaces the old one.</dd></div><div class="term"><dt>Golden image</dt><dd>A prebuilt, versioned machine or container image containing the application and its dependencies, used to launch identical instances.</dd></div><div class="term"><dt>Configuration drift</dt><dd>The gradual divergence of running servers from their intended state caused by manual patches and ad-hoc changes.</dd></div><div class="term"><dt>Artifact retention</dt><dd>Keeping previous build artifacts available so a rollback can redeploy exactly what ran before.</dd></div><div class="term"><dt>Rollback</dt><dd>Restoring the previous known-good version, configuration, and data compatibility after a failed release.</dd></div><div class="term"><dt>Roll forward</dt><dd>Fixing the defect with a new release instead of reverting, which is faster when a rollback is unsafe but requires a working fix path.</dd></div><div class="term"><dt>Bake vs fry</dt><dd>Baking puts configuration into the image at build time; frying injects it at boot, trading immutability for flexibility.</dd></div><div class="term"><dt>Deployment provenance</dt><dd>The recorded link between a running instance and the commit, artifact digest, and configuration that produced it.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Rollback is a capability, not a command</h2>
+<p class="lede">When production breaks, reverting is only easy if the last good version still exists and can be deployed quickly.</p>
+<ul><li>A rollback command that rebuilds from source is not a rollback; it is a new release under pressure.</li><li>If the previous artifact was overwritten or deleted, the previous version is gone even though the code is in git.</li><li>If servers are patched in place, there is no clean previous state to return to.</li><li>Rollback capability must be designed and rehearsed before an incident, not discovered during one.</li><li>The measure that matters is time from decision to serving the old version, not the elegance of the process.</li><li>Every additional manual step in the recovery path is a step that can fail at the worst moment.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Mutable infrastructure and drift</h2>
+<ul><li>In a mutable model, servers are provisioned once and then patched, reconfigured, and hot-fixed over time.</li><li>Each server accumulates a unique history, so no two are truly identical even if they started the same.</li><li>Drift makes environments unreproducible: a problem cannot be recreated because the failing state cannot be rebuilt.</li><li>Rolling back means reversing a sequence of undocumented changes, which is usually impossible.</li><li>Snowflake servers become unremovable because nobody knows what depends on their accumulated state.</li><li>The failure mode is gradual: drift is invisible until a deploy or an autoscaling event exposes it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Immutable infrastructure</h2>
+<ul><li>Servers and containers are created from a versioned image and are never modified after launch.</li><li>A change produces a new image version, which replaces the old instances rather than patching them.</li><li>Every running instance is traceable to an image digest, which is traceable to a commit and build.</li><li>Replacing instead of patching means the previous image is still a valid, deployable artifact.</li><li>Reproducibility improves: the same image produces the same environment anywhere.</li><li>Rollback becomes a redeploy of a known image, which uses the same tested path as a normal deploy.</li></ul>
+
+<div class="flow"><span class="flow-step">Build image from commit</span><span class="flow-arrow">→</span><span class="flow-step">Test the image</span><span class="flow-arrow">→</span><span class="flow-step">Publish immutable version</span><span class="flow-arrow">→</span><span class="flow-step">Launch new instances</span><span class="flow-arrow">→</span><span class="flow-step">Shift traffic</span><span class="flow-arrow">→</span><span class="flow-step">Keep the old image available</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Bake versus fry</h2>
+<ul><li>Baking puts dependencies, runtime, and configuration into the image at build time; startup is fast and deterministic.</li><li>Frying injects configuration at boot from a config service or environment variables; the same image runs everywhere.</li><li>Baking improves immutability but requires a rebuild for every configuration change.</li><li>Frying improves flexibility but reintroduces runtime variation and can hide environment-specific failures until launch.</li><li>A common compromise bakes the application and runtime, and fries only environment-specific settings and secrets.</li><li>Whatever the split, the boundary must be explicit, or the same image behaves differently in two places.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Reproducibility</th><th>Change speed</th></tr></thead><tbody><tr><td>Full bake</td><td>High</td><td>Rebuild required</td></tr>
+<tr><td>Full fry</td><td>Low</td><td>Fast, config only</td></tr>
+<tr><td>Bake runtime, fry config</td><td>Medium-high</td><td>Fast for config changes</td></tr>
+<tr><td>Hand-patched servers</td><td>None</td><td>Fast and untraceable</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Making the previous version deployable</h2>
+<ul><li>Retain a bounded history of artifacts, at least enough to cover the rollback window you promise.</li><li>Tag artifacts by commit or digest, never by a mutable label, so the previous version is unambiguous.</li><li>Keep the previous version's configuration available too; an old binary with new configuration can fail identically.</li><li>Verify that the old artifact still starts in the current environment before you need it.</li><li>Record which version is deployed where, so recovery does not begin with an inventory exercise.</li><li>Expire old artifacts deliberately with a policy, not accidentally by overwriting a tag.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Layers of rollback</h2>
+<ul><li><strong>Feature flag:</strong> turn off the behavior in seconds without touching infrastructure; fastest and least invasive.</li><li><strong>Traffic switch:</strong> move users back to the previous environment, as in blue-green.</li><li><strong>Redeploy:</strong> launch the previous artifact through the normal pipeline; slower but works for any code defect.</li><li><strong>Configuration revert:</strong> restore the previous settings when the release itself was fine.</li><li><strong>Data restore:</strong> the last resort, because it loses writes made after the snapshot.</li><li>Use the cheapest layer that actually removes the harm; escalating to a redeploy for a flag-gated bug wastes the outage window.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Rollback is not only code</h2>
+<ul><li>Schema changes may be irreversible, so the old code cannot simply be redeployed.</li><li>Data written in a new format can be unreadable by the previous version.</li><li>Messages already published to queues will be consumed by whichever version is running.</li><li>External side effects such as emails, payments, or third-party calls cannot be undone by a deployment.</li><li>Cache entries written by the new version may persist after the rollback.</li><li>This is why backward-compatible migrations and idempotent effects are prerequisites for a credible rollback story.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Triggers: manual versus automated</h2>
+<ul><li>Manual rollback depends on someone noticing, deciding, and acting, which is slow at night and under stress.</li><li>Automated triggers compare error rate, latency, and saturation against thresholds and revert without waiting.</li><li>Automated triggers need debouncing, or normal variance produces repeated deploy-revert flapping.</li><li>Thresholds should be tied to user-facing objectives rather than raw infrastructure counters.</li><li>Keep a manual override for cases automation cannot judge, such as a business metric anomaly.</li><li>Every automated rollback should produce a notification and a record of the metrics that triggered it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Rollback versus roll forward</h2>
+<ul><li>Roll back when the previous version is known good, still deployable, and data-compatible.</li><li>Roll forward when the rollback is unsafe, for example after an irreversible migration.</li><li>Roll forward requires a ready fix and a fast pipeline, which may not exist at that moment.</li><li>Rolling forward under incident pressure risks compounding the original defect with a rushed fix.</li><li>Decide the default policy before the incident, and define which conditions force the other path.</li><li>If the fix is small and the rollback is expensive, roll forward; if the rollback is cheap, revert first and fix calmly.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Rehearsing recovery</h2>
+<ul><li>Practice rollbacks in production-like environments during normal operations, not during incidents.</li><li>Measure the actual time from trigger to healthy, and fix the steps that dominate it.</li><li>Test the oldest artifact you promise to support, not just the most recent one.</li><li>Simulate a failed release end to end: alert, decision, revert, verification, and communication.</li><li>Include the database in the rehearsal, because data-related rollbacks are the ones that surprise teams.</li><li>Record findings as pipeline or infrastructure fixes so the next rehearsal is faster.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes</h2>
+<ul><li><strong>Missing artifact:</strong> the previous image was overwritten or garbage-collected, so there is nothing to redeploy.</li><li><strong>Config mismatch:</strong> old code starts with new configuration and fails in a novel way.</li><li><strong>Irreversible migration:</strong> the schema moved forward and the old code cannot run.</li><li><strong>Rollback storm:</strong> automation flips between versions repeatedly on a noisy metric.</li><li><strong>Partial rollback:</strong> some instances revert while others stay on the new version, creating a mixed state nobody designed.</li><li><strong>Untested path:</strong> the rollback procedure references a script or permission that no longer exists.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Adopting immutable infrastructure</h2>
+<ul><li>Start by moving application deployment to versioned images, even if some infrastructure remains mutable.</li><li>Define the build once, promote everywhere rule so the artifact tested is the artifact deployed.</li><li>Remove SSH-based patching from the normal path; if a change is needed, build a new image.</li><li>Automate instance replacement with a rollout strategy so replacement is routine rather than exceptional.</li><li>Keep configuration and secrets outside the image but version them, so a config revert is also auditable.</li><li>Immutable infrastructure is a prerequisite for reliable rollback, not an end in itself.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Immutable infrastructure</strong> makes rollback and reproducibility reliable but requires image build, registry, and replacement automation.</li><li><strong>Baking configuration</strong> improves determinism but makes every configuration change a full rebuild.</li><li><strong>Frying configuration</strong> speeds changes but reintroduces runtime variation and environment-specific surprises.</li><li><strong>Long artifact retention</strong> keeps rollback possible but costs storage and invites deploying long-obsolete versions.</li><li><strong>Automated rollback</strong> shortens outages but can flap on noisy thresholds and hide the underlying defect.</li><li><strong>Rolling forward</strong> avoids an unsafe revert but requires a working fix path under incident pressure.</li><li><strong>Frequent rehearsals</strong> keep the recovery path real but consume engineering time that could ship features.</li><li><strong>Aggressive garbage collection</strong> saves registry cost but can delete the exact artifact needed during an incident.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What makes a rollback actually work?</summary><div class="answer"><p>The previous version must still exist as a deployable artifact, its configuration must still be available, the data layer must remain compatible, and the redeploy must use a path that has been exercised. If any of those is missing, the rollback is a rebuild or a restore, not a revert.</p></div></details>
+<details><summary>2. What is immutable infrastructure?</summary><div class="answer"><p>A model where instances are never modified after launch. Any change produces a new versioned image, and instances are replaced rather than patched. The benefit is that every running instance is reproducible and traceable, and the previous version remains a valid deployable artifact.</p></div></details>
+<details><summary>3. Why is mutable infrastructure bad for rollback?</summary><div class="answer"><p>Because each server accumulates an undocumented history of patches, so no clean previous state exists. Reverting means reversing a sequence nobody recorded. Drift also makes failures unreproducible, since the failing environment cannot be rebuilt.</p></div></details>
+<details><summary>4. What is configuration drift?</summary><div class="answer"><p>The gradual divergence of running servers from their intended state, caused by manual patches, ad-hoc config edits, and inconsistent provisioning. It is invisible until a deploy or scaling event exposes it, and it is the main reason environments stop matching.</p></div></details>
+<details><summary>5. Bake versus fry: what is the trade-off?</summary><div class="answer"><p>Baking puts configuration in the image, so startup is deterministic but every change needs a rebuild. Frying injects configuration at boot, so changes are fast but the same image can behave differently per environment. Many teams bake the runtime and fry only environment-specific settings and secrets.</p></div></details>
+<details><summary>6. What are the layers of rollback?</summary><div class="answer"><p>From cheapest to most expensive: disable a feature flag, switch traffic back to the previous environment, redeploy the previous artifact, revert configuration, and finally restore data from a backup. You should use the least invasive layer that removes the harm.</p></div></details>
+<details><summary>7. Why can a code rollback still fail after a database migration?</summary><div class="answer"><p>Because the schema may have moved forward irreversibly, or the new version may have written data in a format the old code cannot read. Redeploying old code against a changed schema produces errors that look unrelated to the original bug. This is why migrations must be backward compatible.</p></div></details>
+<details><summary>8. When would you roll forward instead of back?</summary><div class="answer"><p>When the rollback is unsafe or impossible, such as after an irreversible migration, or when the fix is small and the pipeline is fast. Roll forward is riskier under pressure, so the default policy should be decided in advance and documented.</p></div></details>
+<details><summary>9. What signals should trigger an automatic rollback?</summary><div class="answer"><p>User-facing objectives such as error rate, latency percentiles, and saturation crossing agreed thresholds for a sustained period. Triggers need debouncing to avoid flapping, and they should record the metrics that fired so the decision can be reviewed afterwards.</p></div></details>
+<details><summary>10. How do you keep rollback fast as the system grows?</summary><div class="answer"><p>Retain immutable artifacts, automate the redeploy through the same pipeline as a normal deploy, keep the previous environment warm where possible, and practice. Every manual step and every missing artifact adds minutes exactly when they matter most.</p></div></details>
+<details><summary>11. What is the relationship between immutable infrastructure and deployment strategies?</summary><div class="answer"><p>Immutable images make rolling, blue-green, and canary practical, because each version is a complete replaceable unit. Without them, strategies degrade into patching live servers, which has no clean rollback point. Immutability supplies the unit of deployment that strategies assume.</p></div></details>
+<details><summary>12. How would you rehearse a rollback?</summary><div class="answer"><p>Run a game day that deploys a deliberately faulty version, lets monitoring detect it, triggers the rollback, and times recovery to healthy. Include the database and the communication steps. Record where time was lost and fix the pipeline rather than adding documentation.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Overwriting a mutable image tag so the previous version no longer exists to redeploy.</li><li>Promising fast rollback while running only one environment and no retained artifacts.</li><li>Redeploying old code against a schema that was already migrated forward.</li><li>Forgetting that configuration and secrets also need a previous version.</li><li>Letting a rollback trigger flap between two versions on a noisy metric.</li><li>Patching servers over SSH and calling the fleet reproducible.</li><li>Assuming automation covers the whole revert when a manual approval or manual step remains in the path.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="schema-migrations.html"><span>← Previous</span><strong>Schema Migrations</strong></a><a class="next" href="three-pillars-observability.html"><span>Next →</span><strong>Three Pillars of Observability</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/rollbacks-and-immutable-infrastructure">AlgoMaster — Rollbacks &amp; Immutable Infrastructure</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

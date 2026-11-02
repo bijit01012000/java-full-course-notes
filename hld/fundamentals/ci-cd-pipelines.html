@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CI/CD Pipelines — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 110 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>CI/CD Pipelines</h1>
+    <p class="dek">Deployment Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/ci-cd-pipelines">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: shipping is not one step</a>
+<a href="#s2">Continuous integration</a>
+<a href="#s3">Continuous delivery vs continuous deployment</a>
+<a href="#s4">Anatomy of a pipeline</a>
+<a href="#s5">Build once, promote the same artifact</a>
+<a href="#s6">Testing layers and quality gates</a>
+<a href="#s7">The deployment stage</a>
+<a href="#s8">Making the pipeline fast</a>
+<a href="#s9">Reliability and determinism</a>
+<a href="#s10">Security and secrets in the pipeline</a>
+<a href="#s11">Verification after deployment</a>
+<a href="#s12">Common failure modes</a>
+<a href="#s13">Designing a pipeline: decision rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A CI/CD pipeline automates the path from commit to production — build, test, package, deploy, verify — so that every change passes the same checks and no step depends on someone remembering a command.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Continuous integration</dt><dd>Merging every change into the shared mainline frequently and automatically building and testing it there, so integration problems surface in minutes rather than weeks.</dd></div><div class="term"><dt>Continuous delivery</dt><dd>Keeping every change in a deployable state so that releasing to production is a business decision, not an engineering project.</dd></div><div class="term"><dt>Continuous deployment</dt><dd>Automatically promoting every change that passes the pipeline to production without a human approval step.</dd></div><div class="term"><dt>Pipeline stage</dt><dd>One ordered block of work in the pipeline, such as build, unit test, integration test, package, deploy, or verify.</dd></div><div class="term"><dt>Artifact</dt><dd>The immutable build output — container image, binary, or archive — that is tested and then promoted unchanged through environments.</dd></div><div class="term"><dt>Quality gate</dt><dd>An automated condition that must pass before the pipeline advances, such as test success, coverage floor, or a security scan result.</dd></div><div class="term"><dt>Hermetic build</dt><dd>A build that depends only on declared inputs and pinned versions, so the same commit produces the same artifact anywhere.</dd></div><div class="term"><dt>Deployment verification</dt><dd>Post-deploy checks against real traffic and error budgets that decide whether the rollout continues or reverts.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: shipping is not one step</h2>
+<p class="lede">Getting a change to production means building it, testing it, packaging it, deploying it, and confirming the running service is healthy. Each step is a chance to do something slightly different from last time.</p>
+<ul><li>Manual steps invite small errors: a skipped command, a script run from the wrong branch, a local environment that differs from the server.</li><li>Undocumented release steps live in one engineer's head, so releases stall when that person is unavailable.</li><li>Without a shared, repeatable procedure, two releases of the same commit can behave differently.</li><li>A pipeline makes the procedure explicit, versioned in code, and identical for every change.</li><li>Automation also creates evidence: which commit, which tests, which artifact, which approver, and when.</li><li>The point is not ceremony but <strong>consistency</strong>: the same checks apply whether the change is trivial or risky.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Continuous integration</h2>
+<ul><li>Developers merge to a shared mainline frequently, in small changes, instead of living on long-lived branches.</li><li>Every push triggers an automatic build and test run on a clean environment.</li><li>Integration conflicts surface within minutes, while the change is small and the author still has context.</li><li>Long-lived branches invert this: conflicts accumulate, and the eventual merge is a large, untested, high-risk event.</li><li>CI requires a fast suite; if a run takes an hour, developers batch changes and the feedback loop collapses.</li><li>A red mainline must block new merges, or the signal is ignored and CI becomes decorative.</li></ul>
+
+
+<div class="note">The value of CI comes from frequency and a green mainline, not from owning a CI server.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Continuous delivery vs continuous deployment</h2>
+<ul><li><strong>Continuous delivery</strong> guarantees every change is releasable; the final push to production stays a deliberate human decision.</li><li><strong>Continuous deployment</strong> removes that decision and ships every passing change automatically.</li><li>Both require the same foundations: automated tests, artifact promotion, and a fast, reversible deploy.</li><li>Delivery suits products with regulatory approval, coordinated launches, or batch release cadences.</li><li>Deployment suits services with strong automated verification and a mature rollback story.</li><li>The difference is only the last gate; the pipeline before it is identical, so teams can move between them without redesign.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Anatomy of a pipeline</h2>
+<ul><li><strong>Trigger:</strong> a push, pull request, tag, or scheduled run starts the pipeline.</li><li><strong>Build:</strong> compile, resolve dependencies, and produce a versioned artifact.</li><li><strong>Test:</strong> unit tests first, then integration, contract, and end-to-end suites in increasing cost order.</li><li><strong>Scan:</strong> dependency vulnerabilities, secrets, license checks, and static analysis run as gates.</li><li><strong>Package and publish:</strong> the artifact is tagged immutably and stored in a registry.</li><li><strong>Deploy:</strong> the same artifact is promoted to staging, then production, using a chosen deployment strategy.</li><li><strong>Verify:</strong> health checks, smoke tests, and metric comparison confirm the release before it is declared done.</li></ul>
+
+<div class="flow"><span class="flow-step">Commit</span><span class="flow-arrow">→</span><span class="flow-step">Build</span><span class="flow-arrow">→</span><span class="flow-step">Unit tests</span><span class="flow-arrow">→</span><span class="flow-step">Integration tests</span><span class="flow-arrow">→</span><span class="flow-step">Package artifact</span><span class="flow-arrow">→</span><span class="flow-step">Deploy to staging</span><span class="flow-arrow">→</span><span class="flow-step">Deploy to production</span><span class="flow-arrow">→</span><span class="flow-step">Verify and monitor</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Build once, promote the same artifact</h2>
+<ul><li>Build the artifact once and promote that exact bytes-identical artifact through every environment.</li><li>Rebuilding per environment risks a different dependency resolution, so production runs something never tested.</li><li>Tag artifacts immutably by commit SHA or content digest rather than a mutable label such as <code>latest</code>.</li><li>Configuration should be injected at deploy time, not baked differently per environment.</li><li>Artifact registries should retain previous versions, because rollback depends on the old artifact still existing.</li><li>Promotion history is the audit trail that answers what is running and where.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Testing layers and quality gates</h2>
+<ul><li>Order tests by cost: unit tests in seconds, integration tests in minutes, end-to-end tests only for critical journeys.</li><li>Run fast checks on every commit and expensive suites on merge or on a schedule, so feedback stays quick.</li><li>Use contract tests to catch incompatibility between services before a deployment does.</li><li>Gates should be objective and few; a wall of advisory checks trains people to ignore all of them.</li><li>Coverage floors are a weak proxy for quality but a useful tripwire for untested new code.</li><li>Any gate that can be bypassed without a recorded exception will eventually be bypassed.</li></ul>
+
+
+<div class="note">A failing test that everyone reruns until it passes is worse than no test: it teaches the team to distrust the pipeline.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The deployment stage</h2>
+<ul><li>Deployment should reuse the platform's strategy — rolling, blue-green, or canary — rather than a custom script.</li><li>Staging should resemble production in dependency versions and configuration shape, even if at smaller scale.</li><li>Gate production on automated checks, not on a manual checklist that no one reads.</li><li>Approvals, when needed, should be fast and recorded; a slow approval step silently becomes a batching mechanism.</li><li>The pipeline must be able to deploy any previous artifact, which makes rollback a normal pipeline run.</li><li>Separate the deploy step from the release step where feature flags exist, so shipping code does not immediately expose behavior.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Making the pipeline fast</h2>
+<ul><li>Cache dependencies and build layers keyed by lockfile hash, so unchanged inputs reuse work.</li><li>Parallelize independent test shards and stages instead of running everything serially.</li><li>Run only affected tests where the build graph allows it, keeping a full suite for merges.</li><li>Fail fast: put cheap checks first so a typo does not wait behind a ten-minute integration suite.</li><li>Reduce queue time too; a fast pipeline behind a saturated runner pool is still slow to the developer.</li><li>Measure pipeline duration and flake rate as first-class metrics, because they determine whether CI is actually used.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Reliability and determinism</h2>
+<ul><li>Pin dependency versions with a lockfile so an upstream release cannot change the build silently.</li><li>Build in a clean, containerized environment rather than on a long-lived agent with accumulated state.</li><li>Quarantine flaky tests with an owner and a deadline instead of retrying them indefinitely.</li><li>Make pipeline steps idempotent so a retried job does not double-apply a migration or duplicate a publish.</li><li>Treat the pipeline configuration as code: reviewed, versioned, and tested like the application.</li><li>Record the commit, artifact digest, and environment for every deployment so failures can be traced.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Security and secrets in the pipeline</h2>
+<ul><li>Store secrets in a managed secret store and inject them at runtime; never commit them or echo them into logs.</li><li>Scope credentials per environment and per stage, so a compromised test job cannot reach production data.</li><li>Scan dependencies and container images for known vulnerabilities as a gate before publishing.</li><li>Generate provenance and sign artifacts so production can verify what was built and by whom.</li><li>Require review and least privilege for changes to pipeline definitions, since they can execute arbitrary code.</li><li>Mask secret values in logs and restrict who can read build output, because logs are widely accessible.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Verification after deployment</h2>
+<ul><li>Health checks confirm the process is serving, but only real request success confirms the release works.</li><li>Compare error rate, latency percentiles, saturation, and business metrics against the previous version.</li><li>Automate the comparison so a regression triggers a revert instead of waiting for a human to notice.</li><li>Define the observation window explicitly; a release is not done when the deploy command returns.</li><li>Keep rollback inside the pipeline so recovery uses the same tested path as deployment.</li><li>Feed incidents back into the pipeline as new tests or gates, so the same class of bug cannot ship twice.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Common failure modes</h2>
+<ul><li><strong>Slow pipeline:</strong> developers batch changes, and CI becomes a weekly integration event with large blast radius.</li><li><strong>Flaky suite:</strong> retries hide real failures and people stop trusting red builds.</li><li><strong>Snowflake runners:</strong> builds pass only on one agent with hand-installed tools.</li><li><strong>Rebuild per environment:</strong> production runs an artifact that was never tested.</li><li><strong>Manual hotfix path:</strong> the emergency route bypasses every gate and becomes the normal route.</li><li><strong>No artifact retention:</strong> rollback is impossible because the previous build was deleted.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Designing a pipeline: decision rules</h2>
+<ul><li>Optimize for the time from commit to trustworthy feedback; that number drives how small changes stay.</li><li>Start with build, unit tests, artifact publishing, and one automated deploy path; add gates as incidents justify them.</li><li>Keep one pipeline definition for all environments and vary only parameters, so staging really predicts production.</li><li>Make the safe path the fast path; if the compliant route is slower, engineers will route around it.</li><li>Treat deploys per day and change failure rate as outcomes to improve, not as targets to game.</li><li>Rehearse rollback regularly; an untested rollback path is a hypothesis, not a capability.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr></thead><tbody><tr><td>Pipeline takes hours</td><td>Serial stages, no caching, oversized e2e suite</td><td>Parallelize, cache, split fast and slow suites</td></tr>
+<tr><td>Builds differ between runs</td><td>Unpinned dependencies, dirty runners</td><td>Lockfiles and clean containers</td></tr>
+<tr><td>Red builds ignored</td><td>Flaky tests, no ownership</td><td>Quarantine with deadlines, block merges on red</td></tr>
+<tr><td>Rollback fails</td><td>Artifacts deleted, no previous version retained</td><td>Immutable artifacts with retention</td></tr>
+<tr><td>Release risk unknown</td><td>No post-deploy verification</td><td>Automated metric comparison and auto-revert</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>More gates</strong> catch more defects but slow feedback, and slow feedback pushes developers toward batching changes.</li><li><strong>Continuous deployment</strong> shortens time to value but demands strong automated verification and a fast rollback path.</li><li><strong>Caching</strong> speeds builds but can serve stale dependencies and hide a broken clean build.</li><li><strong>Parallel test shards</strong> cut duration but add infrastructure cost and can amplify flakiness through shared resources.</li><li><strong>Full test suites on every commit</strong> maximize confidence but make the pipeline the bottleneck.</li><li><strong>Manual approvals</strong> add control and auditability but create queues that quietly become release batching.</li><li><strong>Rebuilding per environment</strong> simplifies environment-specific configuration but breaks the tested-artifact guarantee.</li><li><strong>Aggressive test quarantine</strong> keeps the pipeline green but can silence genuine failures if quarantined tests are never fixed.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does a CI/CD pipeline solve?</summary><div class="answer"><p>It replaces a sequence of manual, error-prone release steps with one automated, repeatable path from commit to production. That gives consistency across releases and removes dependence on individual memory. It also produces an audit trail of what was built, tested, and deployed.</p></div></details>
+<details><summary>2. What is continuous integration, precisely?</summary><div class="answer"><p>It is the practice of merging small changes into a shared mainline frequently, with an automatic build and test on every merge. The point is to discover integration problems in minutes rather than at the end of a long branch. A CI server without frequent merges is just automation of an infrequent event.</p></div></details>
+<details><summary>3. Continuous delivery versus continuous deployment?</summary><div class="answer"><p>Delivery keeps every change in a releasable state but leaves the production push as a human decision. Deployment removes that decision and ships every passing change automatically. The pipeline is otherwise the same, so the choice is about risk tolerance and approval requirements, not architecture.</p></div></details>
+<details><summary>4. Why build the artifact once and promote it?</summary><div class="answer"><p>Rebuilding for each environment can resolve different dependency versions, so production runs something that was never tested. Building once and promoting the identical digest guarantees that what passed staging is exactly what runs in production. It also makes rollback a matter of redeploying a retained artifact.</p></div></details>
+<details><summary>5. What should come first in a pipeline?</summary><div class="answer"><p>Cheap, fast, high-signal checks: compile, lint, and unit tests. Expensive integration and end-to-end suites come later so obvious failures do not wait behind slow work. Ordering by cost keeps feedback time low, which is what keeps changes small.</p></div></details>
+<details><summary>6. How do you keep a pipeline fast as the codebase grows?</summary><div class="answer"><p>Cache dependencies and build layers by input hash, parallelize independent stages, and run only affected tests for small changes while keeping a full suite on merge. Also track queue time, not just execution time. Speed is a design constraint, not a one-time optimization.</p></div></details>
+<details><summary>7. How do flaky tests damage a pipeline?</summary><div class="answer"><p>They make red builds ambiguous, so people rerun until green and stop treating failures as information. Real regressions then slip through inside the noise. The fix is quarantine with ownership and a deadline, plus root-cause work, not blanket retries.</p></div></details>
+<details><summary>8. What is a hermetic build and why does it matter?</summary><div class="answer"><p>A hermetic build depends only on declared, pinned inputs and produces the same output anywhere. It matters because reproducibility is what makes an artifact's test results meaningful. Without it, a passing build may be an accident of one machine's state.</p></div></details>
+<details><summary>9. Where do secrets belong in a CI/CD pipeline?</summary><div class="answer"><p>In a managed secret store, injected at runtime, scoped per environment, and masked in logs. They should never live in the repository or in pipeline definitions. Least-privilege credentials limit the damage if a job or runner is compromised.</p></div></details>
+<details><summary>10. When is a deployment actually finished?</summary><div class="answer"><p>When the new version has served real traffic within acceptable error, latency, and business metrics for a defined observation window. A successful deploy command only means the platform accepted the change. Automated post-deploy verification is what closes the loop.</p></div></details>
+<details><summary>11. How should rollback be implemented?</summary><div class="answer"><p>As a normal pipeline run that redeploys the previous retained artifact, using the same tested deployment path. It should be triggered automatically when verification fails. Ad-hoc rollback scripts are usually the least tested code in the system.</p></div></details>
+<details><summary>12. Why do teams drift back to manual releases?</summary><div class="answer"><p>Usually because the automated path is slower or less flexible than a manual hotfix. Once an emergency bypass exists, it becomes the default under pressure. Keeping the compliant path fastest is the only durable defense.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Rebuilding the artifact separately for each environment so production runs untested bytes.</li><li>Letting the test suite grow to an hour and then batching changes to avoid waiting for it.</li><li>Retrying flaky tests indefinitely instead of quarantining and fixing them.</li><li>Keeping a manual hotfix path with no gates that quietly becomes the primary release route.</li><li>Storing secrets in the repository or printing them into build logs.</li><li>Treating a green pipeline as proof of correctness when the tests only cover the happy path.</li><li>Discarding old artifacts, which makes rollback impossible exactly when it is needed.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="deployment-strategies-overview.html"><span>← Previous</span><strong>Deployment Strategies Overview</strong></a><a class="next" href="rolling-deployments.html"><span>Next →</span><strong>Rolling Deployments</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/ci-cd-pipelines">AlgoMaster — CI/CD Pipelines</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feature Flags — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 114 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Feature Flags</h1>
+    <p class="dek">Deployment Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/feature-flags">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: unfinished work and uncontrollable releases</a>
+<a href="#s2">Deploy is not release</a>
+<a href="#s3">How a flag is evaluated</a>
+<a href="#s4">Kinds of flags</a>
+<a href="#s5">The flag lifecycle</a>
+<a href="#s6">Architecture and availability</a>
+<a href="#s7">Consistency and stickiness</a>
+<a href="#s8">Flag debt and combinatorial growth</a>
+<a href="#s9">Failure modes</a>
+<a href="#s10">Governance, safety, and auditing</a>
+<a href="#s11">Testing flagged code</a>
+<a href="#s12">When flags are the right tool</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Feature flags put behavior behind a runtime switch, so code can be deployed without being released and a risky feature can be turned off in seconds without a redeploy.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Feature flag</dt><dd>A runtime decision point that enables, disables, or varies a code path for a defined population without shipping new code.</dd></div><div class="term"><dt>Deploy vs release</dt><dd>Deploying puts code into production; releasing exposes behavior to users. Flags separate the two events.</dd></div><div class="term"><dt>Targeting rule</dt><dd>The condition that decides whether a user or request evaluates a flag as on, such as user ID, tenant, region, or percentage.</dd></div><div class="term"><dt>Bucketing</dt><dd>Deterministically mapping an identifier into a group so the same user consistently gets the same flag value.</dd></div><div class="term"><dt>Kill switch</dt><dd>An operational flag whose only job is to disable a feature quickly during an incident.</dd></div><div class="term"><dt>Flag evaluation</dt><dd>The act of resolving a flag to a value for a specific context, either locally in the SDK or remotely.</dd></div><div class="term"><dt>Flag debt</dt><dd>The accumulation of stale flags that no one removes, multiplying code paths and test combinations.</dd></div><div class="term"><dt>Default value</dt><dd>The value used when the flag service is unreachable or the flag is undefined, which decides behavior during an outage.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: unfinished work and uncontrollable releases</h2>
+<p class="lede">A large feature can take weeks. Keeping it on a side branch means constant merge conflicts, and merging it later exposes it to every user at once.</p>
+<ul><li>Long-lived branches drift from the mainline, so the eventual merge is a large, risky, poorly tested event.</li><li>Shipping the finished feature makes it visible to everyone the moment it deploys, with no gradual exposure.</li><li>Turning a bad feature off then requires another deployment, which is exactly what you cannot rely on during an incident.</li><li>Both problems share a root cause: code availability and user exposure are treated as the same event.</li><li>Flags break that coupling: the code can be in production, merged, and tested long before users see it.</li><li>The result is smaller, continuous integration and a separate, controllable release decision.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Deploy is not release</h2>
+<ul><li><strong>Deploy</strong> means getting code into the production environment and running it.</li><li><strong>Release</strong> means making the behavior visible to users. A flag makes this a separate, reversible action.</li><li>Code can run dark for weeks, exercised by tests and internal users, while customers see the old path.</li><li>Release can be ramped: internal accounts, then a small population, then everyone.</li><li>Turning a flag off does not require a build, a rollout, or a rollback, so the kill switch is instant.</li><li>This separation is the reason flags work alongside every deployment strategy rather than replacing one.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>How a flag is evaluated</h2>
+<ul><li>The application asks a flag provider for a value, passing a context such as user ID, tenant, region, and plan.</li><li>The provider applies targeting rules in order and returns the first matching variation.</li><li>Common rule shapes: explicit allowlists, attribute match, percentage rollout, and a scheduled enable time.</li><li>Percentage rollouts hash a stable identifier so the same user always lands in the same bucket.</li><li>Evaluation usually happens in a local SDK using a cached ruleset, so a request does not depend on a network call.</li><li>The decision, and ideally the reason for it, should be logged so later analysis can attribute behavior to a variation.</li></ul>
+
+<div class="flow"><span class="flow-step">Request arrives with user context</span><span class="flow-arrow">→</span><span class="flow-step">SDK evaluates the flag locally</span><span class="flow-arrow">→</span><span class="flow-step">Targeting rules produce a variation</span><span class="flow-arrow">→</span><span class="flow-step">Application runs the matching code path</span><span class="flow-arrow">→</span><span class="flow-step">Exposure event is logged</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Kinds of flags</h2>
+<ul><li><strong>Release flags</strong> hide incomplete or risky features and are removed once the feature is fully launched.</li><li><strong>Experiment flags</strong> split traffic into variants for measurement and are removed when the experiment concludes.</li><li><strong>Operational flags (kill switches)</strong> disable a dependency-heavy feature during an incident and may be long-lived.</li><li><strong>Permission flags</strong> gate features by plan or entitlement and are effectively product configuration, not deployment debt.</li><li>Each kind has a different expected lifetime, which determines whether keeping it is debt or intent.</li><li>Confusing the categories is why teams either delete flags they still need or keep dead release flags forever.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Kind</th><th>Lifetime</th><th>Owner</th></tr></thead><tbody><tr><td>Release</td><td>Short, removed after launch</td><td>Feature team</td></tr>
+<tr><td>Experiment</td><td>Until results are conclusive</td><td>Product and data</td></tr>
+<tr><td>Kill switch</td><td>Long-lived</td><td>Operations</td></tr>
+<tr><td>Permission</td><td>Permanent product logic</td><td>Product and billing</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The flag lifecycle</h2>
+<ul><li>Create the flag disabled by default, so the old behavior is the safe default when anything goes wrong.</li><li>Deploy the code and enable it for internal users or a test tenant first.</li><li>Ramp exposure in stages while watching error, latency, and business metrics.</li><li>Reach full exposure and keep the flag for an observation period before removing the old code path.</li><li>Delete the flag and the dead branch together; a flag without its removal is half a change.</li><li>Track every flag with an owner and an expiry date, because unused flags are indistinguishable from used ones without records.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Architecture and availability</h2>
+<ul><li>A flag service stores definitions and serves them to SDKs, which evaluate locally to avoid per-request latency.</li><li>SDKs cache the ruleset and refresh it periodically or on change notification.</li><li>If the service is unreachable, evaluation falls back to the last known ruleset or to the code default.</li><li>Defaults must be safe: a fallback that enables an unproven feature turns a flag outage into a product incident.</li><li>Server-side evaluation suits shared services; client-side SDKs need the ruleset to be publishable to browsers or apps.</li><li>Expose the flag state and the SDK's last refresh time as metrics, or you cannot tell stale from correct.</li></ul>
+
+
+<div class="note">Flags should be a data dependency with a graceful fallback, never a hard request-time dependency on a control plane.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Consistency and stickiness</h2>
+<ul><li>Hashing a stable identifier gives deterministic bucketing, so a user does not flip variations between requests.</li><li>Hashing the request ID instead produces flicker and invalidates both user experience and experiment results.</li><li>When several services read the same flag, they must share the same evaluation context or they will disagree.</li><li>Changing the bucketing salt or ramp percentage reshuffles users, which can be visible as a sudden shift in behavior.</li><li>Propagating the evaluated variation downstream is safer than letting each service re-evaluate independently.</li><li>Cached rulesets mean a flag change is eventually consistent; the propagation delay must be acceptable for the use case.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Flag debt and combinatorial growth</h2>
+<ul><li>Every flag doubles the number of possible behavior combinations, so testing cannot cover the full matrix.</li><li>Stale flags hide dead code, confuse new engineers, and make incidents harder to reason about.</li><li>Interactive flags that depend on each other create order-dependent behavior that is nearly impossible to test.</li><li>Old experiment flags keep serving variant code long after the experiment ended, silently changing behavior.</li><li>Removal is part of the flag's definition of done, not a cleanup task for later.</li><li>Some organizations cap the number of live flags per service or require an expiry date at creation.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Failure modes</h2>
+<ul><li><strong>Unsafe default:</strong> service outage falls back to enabling the feature, so availability of the flag service becomes a release gate.</li><li><strong>Stale ruleset:</strong> an instance keeps a cached value long after the kill switch was flipped.</li><li><strong>Split-brain evaluation:</strong> two services evaluate the same flag differently and disagree on data shape.</li><li><strong>Orphaned flag:</strong> nobody remembers what the flag does or who owns it, so nobody dares remove it.</li><li><strong>Kill switch rot:</strong> the switch was never tested, so flipping it throws an exception instead of disabling the feature.</li><li><strong>Unaudited change:</strong> someone flips a flag in production without review, producing an unexplained behavior change.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Governance, safety, and auditing</h2>
+<ul><li>Restrict who can change flags in production and record who changed what, when, and why.</li><li>Require review for changes that affect a large population, treating them like deployments.</li><li>Test kill switches periodically in production-like conditions, because an untested fallback is a guess.</li><li>Separate flag administration from application credentials so a compromised service cannot rewrite its own behavior.</li><li>Alert on unexpected flag changes, especially flips of high-impact operational flags.</li><li>Keep an inventory with owner, purpose, and expiry so audits do not become archaeology.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Testing flagged code</h2>
+<ul><li>Test both the on and off branches of every release flag, not just the new path.</li><li>Avoid testing all combinations; test the two meaningful states and any explicitly interacting pairs.</li><li>Use contract tests to confirm both branches produce compatible responses for downstream consumers.</li><li>Add a test that fails when a flag has passed its expiry date, so debt becomes visible in CI.</li><li>Cover the fallback path: simulate an unreachable flag service and assert safe defaults.</li><li>Keep flag evaluation behind a thin abstraction so tests can set values without a live provider.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When flags are the right tool</h2>
+<ul><li>Use flags when a feature must be dark-launched before it is finished or proven.</li><li>Use flags when exposure must be ramped by population rather than by infrastructure.</li><li>Use a kill switch when a dependency or feature is likely to need instant disabling.</li><li>Avoid flags for permanent business rules that never change at runtime; that is configuration, not a feature toggle.</li><li>Avoid adding a flag when a deployment strategy already gives the same control; redundant switches multiply the state space.</li><li>Keep the number of live flags small enough that a single engineer can reason about the current behavior.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Feature flags</strong> decouple release from deploy and enable instant disablement, but add a runtime dependency and configuration surface.</li><li><strong>Long-lived flags</strong> support gradual rollouts and kill switches, but accumulate into debt that multiplies code paths.</li><li><strong>Local SDK evaluation</strong> keeps latency low and avoids a network hop, but introduces eventual consistency and stale rulesets.</li><li><strong>Remote evaluation</strong> guarantees fresh values but makes every request depend on a control plane.</li><li><strong>Many small flags</strong> give fine-grained control but make the possible behavior space untestable.</li><li><strong>Strict flag governance</strong> reduces accidental changes but slows down the emergency changes flags exist to enable.</li><li><strong>Aggressive flag cleanup</strong> keeps the codebase honest but can remove a switch that operations still relies on.</li><li><strong>Separate experiment and release flags</strong> improves clarity but requires teams to understand and respect the distinction.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a feature flag?</summary><div class="answer"><p>A runtime switch that decides whether a code path is active for a given user or request, based on rules stored outside the application binary. It lets code be deployed without being released. Flipping it changes behavior without a build or a deployment.</p></div></details>
+<details><summary>2. Explain the difference between deploy and release.</summary><div class="answer"><p>Deploying puts code into production and makes it runnable; releasing exposes its behavior to users. Without flags these happen together, so every deployment is also a product launch. Flags let a team ship code early, test it dark, and decide exposure separately and reversibly.</p></div></details>
+<details><summary>3. Why are long-lived feature branches a problem?</summary><div class="answer"><p>While a branch lives, the mainline keeps changing, so the eventual merge is large and full of conflicts. The merged result is also untested against everything that landed meanwhile. Shipping behind a flag keeps the work on the mainline in small increments and avoids the big-bang merge.</p></div></details>
+<details><summary>4. How does percentage rollout stay consistent for a user?</summary><div class="answer"><p>By hashing a stable identifier such as user ID and mapping the hash into a bucket range. Because the same input always produces the same bucket, a user keeps the same variation as the percentage grows. Hashing a request ID instead would make users flip between variations.</p></div></details>
+<details><summary>5. What kinds of flags exist?</summary><div class="answer"><p>Release flags hide unfinished features, experiment flags split traffic for measurement, kill switches disable features during incidents, and permission flags gate features by entitlement. Their lifetimes differ, which is why the category determines whether keeping a flag is intentional or debt.</p></div></details>
+<details><summary>6. What should happen when the flag service is down?</summary><div class="answer"><p>Evaluation should fall back to the last known ruleset or to a hard-coded default that preserves the safe, previously shipped behavior. The control plane must never be a hard dependency of the request path. If the fallback enables an unproven feature, a flag outage becomes a product outage.</p></div></details>
+<details><summary>7. Why is flag debt dangerous?</summary><div class="answer"><p>Each flag doubles the number of behavior combinations, so tests cover a shrinking fraction of reality. Stale flags hide dead code, confuse debugging, and keep old experiment variants alive. The codebase becomes something nobody can fully reason about.</p></div></details>
+<details><summary>8. How do you prevent flag debt?</summary><div class="answer"><p>Give every flag an owner and an expiry date at creation, and treat removal as part of the feature's definition of done. Track live flags per service and fail CI or flag reviews when a flag passes its expiry. Keep only the flags whose lifetime is genuinely long, such as kill switches and entitlements.</p></div></details>
+<details><summary>9. How should flagged code be tested?</summary><div class="answer"><p>Test both branches rather than the full combinatorial matrix, plus any pairs that genuinely interact. Include contract tests so both branches stay compatible with consumers. Also test the fallback path by simulating an unreachable flag service.</p></div></details>
+<details><summary>10. What is a kill switch and what makes it reliable?</summary><div class="answer"><p>An operational flag whose purpose is to disable a feature instantly during an incident. It is reliable only if it is exercised regularly, has a safe default, and does not itself depend on the failing code path. A kill switch that has never been flipped is an untested hypothesis.</p></div></details>
+<details><summary>11. Can feature flags replace deployment strategies?</summary><div class="answer"><p>No. Flags control behavior inside a running version; deployment strategies control how code is distributed across instances. A flag cannot protect you from a bad binary that crashes on startup, and a deployment strategy cannot disable one risky feature. They solve different problems and compose well.</p></div></details>
+<details><summary>12. What are the operational risks of flags?</summary><div class="answer"><p>Unsafe defaults during a flag-service outage, stale cached rulesets, inconsistent evaluation across services, and unaudited production changes. Each is mitigated by safe defaults, freshness metrics, shared evaluation context, and change auditing with least privilege.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Making the flag service a synchronous dependency of the request path so a control-plane incident becomes an outage.</li><li>Defaulting to enabled during a fallback, turning a flag outage into an unproven feature launch.</li><li>Hashing request IDs for percentage rollouts, so users flip between variations.</li><li>Leaving experiment flags in place long after the experiment ended.</li><li>Never testing the off branch, so the kill switch throws when it is finally needed.</li><li>Letting each service evaluate the same flag independently with different context.</li><li>Allowing production flag changes with no review, audit trail, or alerting.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="canary-releases.html"><span>← Previous</span><strong>Canary Releases</strong></a><a class="next" href="ab-testing-infrastructure.html"><span>Next →</span><strong>A/B Testing Infrastructure</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/feature-flags">AlgoMaster — Feature Flags</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

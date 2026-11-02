@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OSI Model — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 08 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>OSI Model</h1>
+    <p class="dek">Networking · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>11</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/osi">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why the OSI model matters</a>
+<a href="#s2">The seven layers and encapsulation</a>
+<a href="#s3">Layer 1: Physical</a>
+<a href="#s4">Layer 2: Data Link</a>
+<a href="#s5">Layer 3: Network</a>
+<a href="#s6">Layer 4: Transport</a>
+<a href="#s7">Layers 5 and 6: Session and Presentation</a>
+<a href="#s8">Layer 7: Application</a>
+<a href="#s9">Following a request through the layers</a>
+<a href="#s10">OSI vs TCP/IP</a>
+<a href="#s11">Using the OSI model to debug</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>The OSI model divides network communication into <strong>seven layers</strong>, each providing a service to the layer above and relying on the layer below, so you can reason about what is built where and where a request breaks.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Layer</dt><dd>A level of the networking stack with one narrow responsibility, exposing a service upward and consuming a service downward.</dd></div><div class="term"><dt>Encapsulation</dt><dd>The process of each layer wrapping the data from the layer above with its own header before handing it down the stack.</dd></div><div class="term"><dt>Frame</dt><dd>The Layer 2 unit of data, addressed with MAC addresses and valid only within one local network segment.</dd></div><div class="term"><dt>Packet</dt><dd>The Layer 3 unit of data, addressed with source and destination IP addresses and routable across networks.</dd></div><div class="term"><dt>Segment</dt><dd>The Layer 4 unit of data, carrying source and destination ports so the receiving host can pick the right application.</dd></div><div class="term"><dt>MAC address</dt><dd>A hardware-level address used to deliver a frame to a specific device on the same local network.</dd></div><div class="term"><dt>Port</dt><dd>A 16-bit number that identifies which application or service on a machine should receive the data.</dd></div><div class="term"><dt>TCP/IP model</dt><dd>A four-layer model that collapses OSI layers and matches how the internet is actually implemented.</dd></div><div class="term"><dt>PDU</dt><dd>Protocol Data Unit: the name of the data chunk at a given layer, such as frame, packet, or segment.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why the OSI model matters</h2>
+<p class="lede">One request touches many technologies before it reaches your code: Wi-Fi or Ethernet, IP routing, a TCP connection, TLS, and finally HTTP.</p>
+<ul><li>The OSI model is a <strong>mental map</strong> of that journey, not a protocol you implement.</li><li>It separates concerns so each layer can change without rewriting the others: Wi-Fi became 5G, Ethernet became fiber, and HTTP still worked.</li><li>It gives a shared vocabulary for debugging: “is this a Layer 3 problem or a Layer 7 problem?” is a faster question than “is the network broken?”.</li><li>Each layer provides a service to the layer above it and relies on the layer below it.</li><li>As a system designer you mostly live at <strong>Layer 4 and Layer 7</strong>, but failures propagate from every layer.</li><li>Knowing the layer tells you what information is available: MAC addresses at Layer 2, IP addresses at Layer 3, ports at Layer 4, HTTP headers at Layer 7.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The seven layers and encapsulation</h2>
+<p class="lede">Sending data means walking down the stack; receiving it means walking back up. Each step down adds a header, and each step up removes one.</p>
+<ul><li>Layer 7 <strong>Application</strong> — what the request means: HTTP, HTTPS, DNS, WebSocket, gRPC.</li><li>Layer 6 <strong>Presentation</strong> — representation: serialization, compression, encoding, encryption.</li><li>Layer 5 <strong>Session</strong> — creating, maintaining, and closing communication sessions.</li><li>Layer 4 <strong>Transport</strong> — end-to-end delivery between applications: TCP, UDP, ports.</li><li>Layer 3 <strong>Network</strong> — delivery between networks: IP addresses, packets, routers.</li><li>Layer 2 <strong>Data Link</strong> — delivery on one local network: MAC addresses, frames, switches.</li><li>Layer 1 <strong>Physical</strong> — moving raw bits over copper, fiber, or radio.</li><li>Encapsulation turns one HTTP request into a TCP segment, then an IP packet, then an Ethernet frame, then bits on the wire; the receiver reverses the process.</li></ul>
+
+<div class="flow"><span class="flow-step">HTTP request (Layer 7)</span><span class="flow-arrow">→</span><span class="flow-step">TLS / encoding (Layers 6)</span><span class="flow-arrow">→</span><span class="flow-step">TCP segment with ports (Layer 4)</span><span class="flow-arrow">→</span><span class="flow-step">IP packet with addresses (Layer 3)</span><span class="flow-arrow">→</span><span class="flow-step">Frame with MAC addresses (Layer 2)</span><span class="flow-arrow">→</span><span class="flow-step">Bits on the medium (Layer 1)</span></div>
+<div class="note">The layer names matter less than the ordering: each header answers a narrower question than the one above it.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Layer 1: Physical</h2>
+<ul><li>Moves <strong>raw bits</strong> from one device to another over a physical medium: copper cable, fiber, or radio such as Wi-Fi.</li><li>Defines electrical, optical, and radio characteristics, plus connectors and signalling rates.</li><li>In system design you rarely touch it directly; cloud providers and hardware vendors own it.</li><li>Physical failures look like packet loss, link flapping, or reduced throughput rather than application errors.</li><li>Redundancy at this layer means multiple links, diverse paths, and separate providers so one cut cable does not take you down.</li><li>Because everything above depends on it, a physical problem is invisible to application-level retries that keep hitting the same dead link.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Layer 2: Data Link</h2>
+<ul><li>Moves data between devices on the <strong>same local network</strong>, packaged into frames and addressed with MAC addresses.</li><li>Switches operate here: they learn which MAC address sits on which port and forward frames only out of the relevant port.</li><li>The destination MAC changes at every hop, because each hop is a new local delivery.</li><li>Broadcast and link-local discovery (such as DHCP discovery) live at this layer.</li><li>Cloud networks hide most Layer 2 detail, but overlay networks and MAC-based routing still appear in some designs.</li><li>ARP, which maps an IP address to a MAC address on the local segment, is the glue between Layer 3 and Layer 2.</li><li>Layer 2 domains are a failure domain: a broadcast storm or looping topology can take out a whole segment.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Layer 3: Network</h2>
+<ul><li>Moves packets <strong>between different networks</strong>, addressed by IP addresses.</li><li>Routers operate here: they read the destination IP and choose the next hop, with no need to know the full path.</li><li>Longest-prefix match decides which route wins when several prefixes match a destination.</li><li>The destination IP normally stays the same end to end, unless NAT or a proxy rewrites it.</li><li>Layer 3 is where you express topology: subnets, VPCs, peering, VPNs, and route tables.</li><li>A Layer 3 failure is reachability: timeouts, “no route to host”, or asymmetric paths, not HTTP error codes.</li><li>Reaching the machine is not enough — you still need the right process on it, which is Layer 4's job.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Layer 4: Transport</h2>
+<p class="lede">The Transport Layer provides end-to-end communication between applications running on different machines.</p>
+<ul><li>The dominant protocols are <strong>TCP</strong> and <strong>UDP</strong>.</li><li>It introduces <strong>ports</strong>: the IP address finds the machine, the port finds the application on it.</li><li>A connection is identified by the four-tuple of source IP, source port, destination IP, and destination port.</li><li>It decides reliability: ordering, retransmission, and flow control are TCP features, not IP features.</li><li>Layer 4 load balancers route on IP and port only, so they are fast but blind to URLs and headers.</li><li>Firewalls and security groups commonly operate here, allowing or denying specific ports.</li><li>Ephemeral source ports are a finite resource, which is why a NAT gateway or client can run out under heavy connection churn.</li></ul>
+<h3>TCP</h3>
+<ul><li>Connection-oriented: a handshake establishes state on both sides before data flows.</li><li>Reliable and ordered: missing segments are detected and retransmitted.</li><li>Adds head-of-line blocking, because a lost segment stalls everything behind it on that connection.</li><li>Its connection state is what makes least-connections load balancing meaningful.</li></ul>
+
+
+<h3>UDP</h3>
+<ul><li>Connectionless and unreliable: no handshake, no ordering guarantee, no retransmission.</li><li>Lower overhead and no head-of-line blocking, which suits latency-sensitive traffic such as voice, games, and DNS queries.</li><li>Any reliability must be built in the application when it is needed.</li><li>HTTP/3 runs over QUIC, which is UDP-based and adds reliability in user space.</li></ul>
+
+
+<h3>Ports</h3>
+<ul><li>Well-known ports signal intent: 80 for HTTP, 443 for HTTPS, 53 for DNS, 22 for SSH.</li><li>Servers listen on a fixed port; clients use a random ephemeral port.</li><li>Two services cannot bind the same IP and port on the same host, which is a common deployment conflict.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Layers 5 and 6: Session and Presentation</h2>
+<p class="lede">These two layers are less visible in modern internet systems because application frameworks and libraries absorb their responsibilities.</p>
+<ul><li>Layer 5, <strong>Session</strong>, creates, maintains, and closes communication sessions between applications.</li><li>Session concerns now appear as cookies, session stores, TLS session resumption, and WebSocket connection lifetime.</li><li>Layer 6, <strong>Presentation</strong>, decides how data is represented: serialization format, compression, character encoding, and encryption.</li><li>JSON versus Protobuf is a presentation-layer decision; so is gzip or TLS.</li><li>Because these concerns moved into libraries, a bug here looks like an application bug: wrong charset, broken decompression, or failed certificate validation.</li><li>The practical lesson is that “the network” includes serialization and encryption, and both cost CPU and latency.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Layer 7: Application</h2>
+<ul><li>The layer closest to your code, defining how applications communicate: HTTP, HTTPS, DNS, WebSocket, gRPC.</li><li>At this layer you care about <strong>meaning</strong>: method, path, headers, status code, and body.</li><li>It is where most system design components live: reverse proxies, API gateways, CDNs, and caches.</li><li>A Layer 7 load balancer can route on hostname, path, headers, or cookies, which Layer 4 cannot.</li><li>It is also the most expensive layer to inspect, because parsing requests costs CPU and memory.</li><li>Most user-visible failures are reported at Layer 7 even when the cause is lower: a 502 usually means the upstream connection failed.</li></ul>
+<h3>System design components at Layer 7</h3>
+<ul><li><strong>Reverse proxy</strong> — terminates client connections and forwards requests to backends.</li><li><strong>Layer 7 load balancer</strong> — chooses a backend using path, header, or cookie rules.</li><li><strong>API gateway</strong> — adds authentication, rate limiting, and routing per route.</li><li><strong>CDN</strong> — caches responses close to users using HTTP cache semantics.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Following a request through the layers</h2>
+<p class="lede">Opening a page exercises the whole stack twice: down on the client, then up on the server.</p>
+<ul><li>The browser builds an <strong>HTTP request</strong> at Layer 7, and uses DNS to resolve the hostname to an IP address.</li><li>For HTTPS it establishes a TCP connection to port 443 and then negotiates TLS.</li><li>Layer 4 carries the bytes in TCP segments; Layer 3 places them in IP packets with source and destination addresses.</li><li>Layer 2 wraps each packet in a frame for the current link, for example laptop to Wi-Fi router.</li><li>Layer 1 transmits the frame as electrical, optical, or radio signals.</li><li>Across the internet, routers forward packets and each link re-frames them; the IP addresses stay the same.</li><li>The server reverses the process: signals, frames, packets, TCP, TLS, then the HTTP request handed to the application.</li></ul>
+
+<div class="flow"><span class="flow-step">DNS resolves hostname to IP</span><span class="flow-arrow">→</span><span class="flow-step">TCP handshake to port 443</span><span class="flow-arrow">→</span><span class="flow-step">TLS handshake</span><span class="flow-arrow">→</span><span class="flow-step">HTTP request travels down the stack</span><span class="flow-arrow">→</span><span class="flow-step">Routers forward packets hop by hop</span><span class="flow-arrow">→</span><span class="flow-step">Server walks back up the stack</span><span class="flow-arrow">→</span><span class="flow-step">Application handles the request</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>OSI vs TCP/IP</h2>
+<ul><li>The internet does not implement seven strict layers; the <strong>TCP/IP model</strong> is what actually runs.</li><li>TCP/IP collapses OSI into four layers: link, internet, transport, and application.</li><li>OSI's session and presentation layers are absorbed into the TCP/IP application layer.</li><li>OSI is better for teaching and debugging because it is more granular.</li><li>TCP/IP is better for describing real deployments and real protocol boundaries.</li><li>Interview answers should use OSI vocabulary for diagnosis but acknowledge that implementations follow TCP/IP.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>OSI layer</th><th>TCP/IP layer</th><th>Typical example</th></tr></thead><tbody><tr><td>7 Application</td><td>Application</td><td>HTTP, DNS, gRPC</td></tr>
+<tr><td>6 Presentation</td><td>Application</td><td>TLS, JSON, gzip</td></tr>
+<tr><td>5 Session</td><td>Application</td><td>Session cookies, WebSocket</td></tr>
+<tr><td>4 Transport</td><td>Transport</td><td>TCP, UDP, QUIC</td></tr>
+<tr><td>3 Network</td><td>Internet</td><td>IP, ICMP, routing</td></tr>
+<tr><td>2 Data Link</td><td>Link</td><td>Ethernet, Wi-Fi, ARP</td></tr>
+<tr><td>1 Physical</td><td>Link</td><td>Fiber, copper, radio</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Using the OSI model to debug</h2>
+<p class="lede">The model earns its place when something is broken and you need to localise the fault quickly.</p>
+<ul><li>Hostname does not resolve — suspect <strong>Layer 7 / DNS</strong> first.</li><li>Packets never arrive — suspect <strong>Layer 3</strong>: IP addresses, routes, subnets, security groups.</li><li>Host reachable but connection refused or times out — suspect <strong>Layer 4</strong>: port, listener, firewall, connection limits.</li><li>Connection works but HTTPS fails — suspect <strong>Layer 6</strong>: certificates, TLS versions, cipher mismatch.</li><li>Requests reach the system but land on the wrong backend — suspect <strong>Layer 7</strong>: reverse proxy, gateway, or load balancer rules.</li><li>Slow but correct responses — look above the network at queueing, database latency, and application work.</li><li>Walk bottom-up when nothing works and top-down when the symptom is already specific.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Symptom</th><th>Most likely layer</th><th>First thing to check</th></tr></thead><tbody><tr><td>Name does not resolve</td><td>7 (DNS)</td><td>Resolver, record, TTL</td></tr>
+<tr><td>No route to host</td><td>3</td><td>Subnet, route table, security group</td></tr>
+<tr><td>Connection refused</td><td>4</td><td>Is anything listening on that port?</td></tr>
+<tr><td>TLS handshake failure</td><td>6</td><td>Certificate chain, SNI, expiry</td></tr>
+<tr><td>502 from gateway</td><td>7</td><td>Upstream health and timeout</td></tr>
+<tr><td>High latency, no errors</td><td>Above L7</td><td>Queue depth, DB, CPU</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Layer 7 inspection</strong> enables routing and caching decisions on URL and headers but costs CPU and adds a hop that can fail.</li><li><strong>Layer 4 load balancing</strong> is fast and protocol-agnostic but cannot route on path, tenant, or content type.</li><li><strong>Encapsulation</strong> gives clean separation of concerns but adds header overhead at every layer.</li><li><strong>TCP</strong> buys reliability and ordering but pays with handshake latency and head-of-line blocking.</li><li><strong>UDP</strong> avoids connection overhead but pushes reliability, ordering, and congestion handling into your application.</li><li><strong>Strict layering</strong> keeps the model teachable but hides cross-layer effects such as TLS on latency or MTU on throughput.</li><li><strong>Extra proxy layers</strong> add observability and control but lengthen the request path and create more failure domains.</li><li><strong>Debugging top-down</strong> is fast for specific symptoms but can miss a lower-layer cause that only appears under load.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does the OSI model solve?</summary><div class="answer"><p>It gives a shared, layered vocabulary for network communication so each responsibility can be designed, replaced, and debugged independently. In practice it helps you decide whether a failure is about naming, routing, connection, encryption, or application logic.</p></div></details>
+<details><summary>2. What is encapsulation and why does it matter?</summary><div class="answer"><p>Each layer wraps the data from the layer above in its own header before passing it down, and the receiver removes headers on the way up. It matters because it explains why a single request carries nested addressing: ports for the process, IP for the host, MAC for the local link.</p></div></details>
+<details><summary>3. How do Layer 2 and Layer 3 differ?</summary><div class="answer"><p>Layer 2 delivers a frame within one local network using MAC addresses; Layer 3 delivers a packet across networks using IP addresses. The destination MAC changes at every hop, while the destination IP normally survives to the end unless NAT or a proxy rewrites it.</p></div></details>
+<details><summary>4. What does Layer 4 add that Layer 3 does not?</summary><div class="answer"><p>Layer 3 gets the packet to the right machine; Layer 4 gets the bytes to the right process on that machine using ports, and optionally adds reliability, ordering, and flow control through TCP.</p></div></details>
+<details><summary>5. When would you use UDP instead of TCP?</summary><div class="answer"><p>When low latency matters more than guaranteed delivery and the application can tolerate or handle loss, such as voice, games, or telemetry. DNS queries also use UDP for small responses because the round-trip savings outweigh the rare retry.</p></div></details>
+<details><summary>6. Why does a Layer 7 load balancer need more resources than a Layer 4 one?</summary><div class="answer"><p>It must parse the application protocol, buffer requests, and possibly terminate TLS before it can route on path or headers. A Layer 4 balancer only reads address and port fields, so it can forward packets with far less state and CPU per connection.</p></div></details>
+<details><summary>7. What actually happens when you type a URL and press Enter?</summary><div class="answer"><p>The browser resolves the hostname via DNS, opens a TCP connection to port 443, negotiates TLS, and sends an HTTP request. That request is encapsulated into segments, packets, and frames, crosses multiple networks, and is unwrapped by the server before your application sees it.</p></div></details>
+<details><summary>8. Connection succeeds but HTTPS fails. Where do you look?</summary><div class="answer"><p>Layer 6: certificate validity and chain, SNI and hostname mismatch, TLS version or cipher support, and expiry. A working TCP connection proves routing and the listener are fine, so the fault is in the encryption negotiation, not the network path.</p></div></details>
+<details><summary>9. How does the OSI model help during an incident?</summary><div class="answer"><p>It narrows the search space. Resolve failures point at DNS, unreachable hosts at routing, refused connections at ports and firewalls, TLS errors at certificates, and wrong-backend responses at proxy or gateway configuration.</p></div></details>
+<details><summary>10. Is the internet actually built on seven layers?</summary><div class="answer"><p>No. Real deployments follow the four-layer TCP/IP model, and OSI's session and presentation responsibilities are handled by application libraries and protocols. OSI remains useful as an analytical framework rather than an implementation blueprint.</p></div></details>
+<details><summary>11. Where do reverse proxies and API gateways sit, and why?</summary><div class="answer"><p>At Layer 7, because they need to understand HTTP: method, path, headers, and body. That lets them do path-based routing, authentication, rate limiting, and response caching, which a packet-level device cannot do.</p></div></details>
+<details><summary>12. What breaks if you forget the lower layers when designing?</summary><div class="answer"><p>You get designs that ignore connection limits, ephemeral port exhaustion, cross-zone latency, or TLS overhead. Application-level retries also cannot fix a routing failure, so you build resilience in the wrong place and still go down.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Saying “the network is slow” without naming a layer — it hides whether the cause is DNS, routing, TLS, or the application.</li><li>Assuming a Layer 4 load balancer can route on URL path or headers; it cannot see them.</li><li>Forgetting that the destination MAC changes at every hop while the IP usually does not.</li><li>Treating OSI as a literal implementation and then being confused that session and presentation are missing from real stacks.</li><li>Blaming the network for latency that is actually queueing, database time, or serialization cost.</li><li>Ignoring that TLS and compression live in the request path and therefore cost CPU and latency.</li><li>Diagnosing a 502 as a client problem when it usually indicates an upstream connection or health failure.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="cap-theorem.html"><span>← Previous</span><strong>CAP Theorem</strong></a><a class="next" href="ip-address.html"><span>Next →</span><strong>IP Address</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/osi">AlgoMaster — OSI Model</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

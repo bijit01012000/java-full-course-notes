@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>B-Trees and B+ Trees — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 43 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>B-Trees and B+ Trees</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/b-trees">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why a full table scan is not acceptable</a>
+<a href="#s2">What a B-tree is</a>
+<a href="#s3">Why disks favor wide, shallow trees</a>
+<a href="#s4">Anatomy of a node</a>
+<a href="#s5">Search</a>
+<a href="#s6">Insert and node split</a>
+<a href="#s7">Delete and rebalance</a>
+<a href="#s8">B+ trees versus classic B-trees</a>
+<a href="#s9">Range scans and ordered access</a>
+<a href="#s10">Clustered and secondary indexes</a>
+<a href="#s11">What a B-tree costs on writes</a>
+<a href="#s12">Variants and tuning</a>
+<a href="#s13">When a B-tree is the wrong choice</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A B-tree is a wide, shallow, self-balancing search tree whose nodes are disk pages, so a lookup needs only a few page reads instead of a table scan — and its sorted order also makes range queries cheap, at the price of write amplification on splits.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Page</dt><dd>The fixed-size block a database reads from and writes to disk; a B-tree node is sized to fit one page.</dd></div><div class="term"><dt>Fanout</dt><dd>The number of child pointers a node holds; large fanout is what keeps the tree shallow.</dd></div><div class="term"><dt>Balanced tree</dt><dd>A tree in which every root-to-leaf path has the same length, so lookup cost is predictable.</dd></div><div class="term"><dt>Internal node</dt><dd>A node holding separator keys and child pointers; it routes the search but stores no rows.</dd></div><div class="term"><dt>Leaf node</dt><dd>The bottom-level node that holds the actual index entries — keys plus row references or rows.</dd></div><div class="term"><dt>Node split</dt><dd>Dividing an overfull node into two and promoting a separator key to the parent, which increases the tree's width, not its order.</dd></div><div class="term"><dt>B+ tree</dt><dd>A B-tree variant where all entries live in leaves and leaves are linked, so internal nodes hold only separators.</dd></div><div class="term"><dt>Clustered index</dt><dd>An index whose leaf level <em>is</em> the table rows, physically ordered by the index key.</dd></div><div class="term"><dt>Covering index</dt><dd>An index containing every column a query reads, so the engine never fetches the base row.</dd></div><div class="term"><dt>Range scan</dt><dd>Reading a contiguous run of index entries in key order, such as all orders in a date interval.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why a full table scan is not acceptable</h2>
+<p class="lede">A query such as <code>SELECT * FROM users WHERE id = 5000000</code> must not examine every row. Without an index the engine has no idea where that id lives, so it reads the table page by page.</p>
+<ul><li>A scan costs time proportional to <strong>table size</strong>, so it gets slower every month as data grows.</li><li>It also reads pages it does not need into the buffer pool, evicting useful pages and hurting other queries.</li><li>An index adds a small, sorted structure that maps key values to row locations.</li><li>With an index the engine can <strong>navigate</strong> to the key in a few page reads instead of touching the whole table.</li><li>Most relational engines build these indexes with a <strong>B-tree</strong> or the closely related <strong>B+ tree</strong>.</li><li>The same structure keeps keys sorted, so it also answers range and ordering queries, not just equality lookups.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a B-tree is</h2>
+<ul><li>A B-tree is a <strong>balanced, multiway</strong> search tree: each node holds many sorted keys and many child pointers, not just two.</li><li>Keys inside a node are sorted, and a child between two keys contains only values in that interval.</li><li>Every root-to-leaf path has the same length, so the worst case equals the average case — no degenerate tree.</li><li>The tree stays balanced by construction: inserts and deletes rebalance locally rather than rebuilding the index.</li><li>Each node is sized to fill one disk page, so reading a node is one I/O operation.</li><li>Because one node can hold many keys, the tree stays <strong>shallow</strong> even for very large tables.</li><li>The index is much smaller than the table, so its upper levels usually stay cached in memory.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Why disks favor wide, shallow trees</h2>
+<ul><li>Disk and SSD reads happen in <strong>pages</strong>; fetching one byte costs the same as fetching a whole page.</li><li>So the goal is to minimize the <em>number of pages touched</em>, not the number of comparisons.</li><li>A binary search tree has fanout two, so its height grows with the logarithm of the row count in base two — far too many levels for a large table.</li><li>A B-tree with large fanout reduces height to a logarithm in a much larger base, so a handful of levels covers a huge key space.</li><li>This is why <strong>fanout, not comparison count</strong>, is the design variable of an on-disk index.</li><li>The top levels are tiny and almost always in the buffer pool, so a lookup typically costs one or two real I/Os at the leaf.</li><li>The same reasoning explains why in-memory indexes can afford different structures: there is no page-fetch penalty to amortize.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Structure</th><th>Height behavior</th><th>Pages per lookup</th></tr></thead><tbody><tr><td>Binary search tree</td><td>One key per node, grows tall</td><td>One page per level, many levels</td></tr>
+<tr><td>B-tree</td><td>Hundreds of keys per node, very shallow</td><td>A few pages, most cached</td></tr>
+<tr><td>Hash index</td><td>No tree; direct bucket</td><td>One or two pages, equality only</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Anatomy of a node</h2>
+<ul><li>A node stores an ordered array of <strong>keys</strong> and an ordered array of <strong>child pointers</strong>, with the pointers interleaved between keys.</li><li>With <em>k</em> keys a node has <em>k+1</em> children: one before the first key, one between each pair, one after the last.</li><li>Internal nodes hold <strong>separator keys</strong> only — copies of keys used for routing, not the data itself.</li><li>Leaf nodes hold the index entries: the key plus either the row itself or a pointer to it.</li><li>Leaves also carry sibling pointers in a B+ tree, which turns range reads into a sequential walk.</li><li>Nodes are kept at least half full (except the root), which bounds height and wasted space.</li><li>Slot arrays and free space inside the page make inserts and deletes possible without rewriting the whole page.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Search</h2>
+<ul><li>Start at the root and <strong>binary search</strong> the node's keys to choose the child whose interval contains the target.</li><li>Descend one level and repeat until a leaf is reached.</li><li>At the leaf, binary search finds the entry; then follow its row reference if the query needs columns the index lacks.</li><li>The number of page reads is the tree height, not the number of rows.</li><li>Equality lookups, <code>IN</code> lists, and prefix lookups on the leading column all use the same descent.</li><li>An unsuccessful lookup is just as cheap: it stops at the leaf position where the key would be.</li><li>Because the top levels are cached, the dominant cost is usually the leaf page plus the row fetch.</li></ul>
+
+<div class="flow"><span class="flow-step">Read root page</span><span class="flow-arrow">→</span><span class="flow-step">Binary search keys, choose child</span><span class="flow-arrow">→</span><span class="flow-step">Descend to next level</span><span class="flow-arrow">→</span><span class="flow-step">Reach leaf, locate entry</span><span class="flow-arrow">→</span><span class="flow-step">Follow row pointer if needed</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Insert and node split</h2>
+<ul><li>Locate the target leaf by the same descent as a search.</li><li>Insert the key in sorted position if the page has free space.</li><li>If the page is full, <strong>split</strong> it into two roughly half-full pages and <strong>promote</strong> the middle key to the parent.</li><li>The parent now needs one more child pointer; if it overflows too, it splits as well, and the effect propagates upward.</li><li>If the root splits, a new root is created and the tree grows one level taller — the only way height increases.</li><li>Splits are local, so an insert touches a bounded number of pages rather than rewriting the index.</li><li>Random insert order scatters writes across the tree; monotonic keys such as timestamps concentrate them at the right edge.</li></ul>
+
+<div class="flow"><span class="flow-step">Descend to leaf</span><span class="flow-arrow">→</span><span class="flow-step">Insert key in order</span><span class="flow-arrow">→</span><span class="flow-step">Page full? split and promote</span><span class="flow-arrow">→</span><span class="flow-step">Parent full? split upward</span><span class="flow-arrow">→</span><span class="flow-step">Root split? add a level</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Delete and rebalance</h2>
+<ul><li>Find the entry and remove it from its leaf.</li><li>If the leaf falls below the minimum occupancy, the tree repairs it by <strong>borrowing</strong> an entry from a sibling or <strong>merging</strong> with one.</li><li>Merging removes a separator from the parent, which can cascade upward; if the root empties, the tree shrinks a level.</li><li>Deletes therefore cost more than a simple removal and can touch sibling pages.</li><li>Many engines defer the physical work: they mark the entry deleted and reclaim space later, which keeps deletes fast.</li><li>Frequent delete-and-insert churn leaves pages underfilled, so indexes need maintenance to stay compact.</li><li>A shrinking tree is a sign of healthy rebalancing, not of data loss.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>B+ trees versus classic B-trees</h2>
+<ul><li>In a classic B-tree, an entry can live in an internal node as well as a leaf.</li><li>In a <strong>B+ tree</strong>, all entries live in the leaves; internal nodes hold only separator keys for routing.</li><li>Because internal nodes carry no row pointers, they pack in more keys per page, which raises fanout and lowers height.</li><li>Leaves are linked in key order, so a range query finds the start and then walks sequentially instead of re-descending.</li><li>Every lookup reaches a leaf, so search cost is uniform, which makes performance easier to predict.</li><li>The price is that a key may be stored twice — once as a separator, once in a leaf — and that internal nodes cannot answer a lookup alone.</li><li>Most relational indexes — and most key-value engines built on B-trees — use the B+ layout for exactly these reasons.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>B-tree</th><th>B+ tree</th></tr></thead><tbody><tr><td>Where entries live</td><td>Internal nodes and leaves</td><td>Leaves only</td></tr>
+<tr><td>Internal node content</td><td>Keys plus row references</td><td>Separator keys only</td></tr>
+<tr><td>Leaf links</td><td>Usually none</td><td>Linked in key order</td></tr>
+<tr><td>Range scan</td><td>Tree traversal</td><td>Find start, then walk leaves</td></tr>
+<tr><td>Lookup cost</td><td>Can stop early at an internal node</td><td>Always reaches a leaf</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Range scans and ordered access</h2>
+<ul><li>A range predicate such as <code>WHERE created_at BETWEEN a AND b</code> descends to the first matching key.</li><li>From there the engine walks the leaf level in order until the range ends, using sibling pointers.</li><li>That turns a scattered set of rows into one <strong>sequential</strong> read pattern, which storage handles well.</li><li>The same mechanism satisfies <code>ORDER BY</code> on the index's leading columns without a sort step.</li><li>Prefix queries on strings work because the index is ordered lexicographically.</li><li>Ordering only helps if the query's sort order matches the index definition, including direction.</li><li>A range that matches most of the table is cheaper as a scan, which is why the planner compares costs.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Clustered and secondary indexes</h2>
+<ul><li>A <strong>clustered</strong> index stores the table rows in leaf pages, ordered by the index key — the index and the table are the same structure.</li><li>Because rows can be physically ordered only one way, a table has at most one clustered index.</li><li>A <strong>secondary</strong> index stores the key plus a row locator — the primary key or a physical address — and needs a second lookup to fetch the row.</li><li>If the clustered key is wide or changes, every secondary index must carry it, which makes them larger.</li><li>A <strong>covering</strong> index includes all columns a query needs, so the second lookup disappears.</li><li>Secondary lookups that return many rows cause many random row fetches, sometimes slower than a sequential scan.</li><li>The choice of clustered key therefore affects every query and every other index, not just one access path.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>What a B-tree costs on writes</h2>
+<ul><li>Every insert, update, and delete must also update every index on the table.</li><li>A split writes two pages and updates a parent, so one logical insert can become several physical writes — <strong>write amplification</strong>.</li><li>Updates that change an indexed column relocate the entry, which may split a different leaf.</li><li>Random key order scatters these writes across the file, causing more I/O than an append-only structure would.</li><li>The write-ahead log must record page changes, so index maintenance also adds log volume and replication traffic.</li><li>Leaving a <strong>fill factor</strong> below full trades disk space for fewer future splits.</li><li>Indexes left unmaintained accumulate bloat and fragmentation, which raises read cost as well.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Variants and tuning</h2>
+<ul><li><strong>Prefix compression</strong> and suffix truncation shrink keys in internal nodes, raising fanout.</li><li><strong>Copy-on-write</strong> B-trees never modify a page in place; they write a new page and switch a pointer, which gives cheap snapshots.</li><li>Some engines use a B-epsilon tree that buffers small updates in internal nodes to reduce write amplification.</li><li><strong>Hash indexes</strong> beat B-trees for pure equality lookups but cannot serve ranges or ordering.</li><li>For very low-cardinality columns, a <strong>bitmap</strong> index can be far more compact than a B-tree.</li><li>Buffer pool size decides how much of the upper tree stays in memory, which dominates lookup latency.</li><li>Measure with <code>EXPLAIN</code> and index statistics; guessing which index the planner will use is unreliable.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When a B-tree is the wrong choice</h2>
+<ul><li><strong>Write-heavy append workloads</strong> — event logs, sensor streams — fit an LSM tree better because sequential writes beat scattered page updates.</li><li><strong>Full-text and similarity search</strong> need inverted indexes or vector indexes, not ordered key lookup.</li><li><strong>Analytical scans</strong> over most of a table prefer columnar storage and zone maps over row-by-row index fetches.</li><li>A query returning a large fraction of the table is cheaper as a sequential scan; the index only adds random I/O.</li><li>Too many indexes turn a fast write path into a slow one, so index only columns that queries actually filter or sort on.</li><li>Low-selectivity predicates — a status column with three values — rarely benefit, because the index still matches most rows.</li><li>Ordering a clustered index badly makes every insert land on the same page, creating a contention hotspot.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>High fanout</strong> keeps the tree shallow and lookups cheap but makes each page split merge more keys, so splits cost more work.</li><li><strong>Sorted keys</strong> enable range scans and ordering but make random inserts scatter page writes across the file.</li><li><strong>B+ tree leaves linked in order</strong> make ranges sequential reads but duplicate separator keys and force every lookup to reach a leaf.</li><li><strong>Clustered indexes</strong> make primary-key range reads fast but allow only one per table and make non-key updates expensive.</li><li><strong>Secondary indexes</strong> speed up more queries but add a row lookup per match and enlarge every write.</li><li><strong>Covering indexes</strong> remove row fetches but duplicate data into the index and must be updated on every column change.</li><li><strong>Low fill factor</strong> reduces future splits but wastes space and lengthens scans.</li><li><strong>More indexes</strong> improve read coverage but multiply write amplification, log volume, and storage.</li><li><strong>Keeping the upper levels cached</strong> makes lookups fast but competes with data pages for buffer pool memory.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why do databases use B-trees instead of binary search trees?</summary><div class="answer"><p>Disk reads happen in pages, so cost is measured in pages touched. A binary tree has one key per node, so its height is large. A B-tree packs hundreds of keys into one page, which makes the tree very shallow and keeps the upper levels in memory, so a lookup needs only a few page reads.</p></div></details>
+<details><summary>2. What does the fanout of a node control?</summary><div class="answer"><p>Fanout is the number of children per node, set by how many keys fit in a page. Higher fanout reduces tree height logarithmically, so fewer pages are read per lookup. It is bounded by page size, key size, and the space taken by child pointers.</p></div></details>
+<details><summary>3. Walk through what happens on insert.</summary><div class="answer"><p>The engine descends to the correct leaf, inserts the key in sorted order, and splits the page if it is full. The split promotes a separator key to the parent, which may split too, cascading upward. If the root splits, a new root is created and the tree gains one level.</p></div></details>
+<details><summary>4. Why is a B+ tree usually preferred for indexes?</summary><div class="answer"><p>Because internal nodes hold only separators, they pack more keys per page, raising fanout and lowering height. All entries live in linked leaves, so range scans find the start once and then walk sequentially. The cost is that keys may be stored twice and every lookup reaches a leaf.</p></div></details>
+<details><summary>5. What is the difference between a clustered and a secondary index?</summary><div class="answer"><p>A clustered index stores the rows themselves in its leaves in key order, so it is the table. A secondary index stores the key plus a row locator and needs a second lookup to fetch the row. A table can have only one clustered index but many secondary ones.</p></div></details>
+<details><summary>6. How does an index serve a range query?</summary><div class="answer"><p>It descends to the first key in the range, then follows leaf sibling pointers in key order until the range ends. That produces a sequential read pattern and also satisfies matching <code>ORDER BY</code> clauses without a sort. If the range is most of the table, a scan is usually cheaper.</p></div></details>
+<details><summary>7. What is write amplification in a B-tree?</summary><div class="answer"><p>One logical row change can force several page writes: the leaf, a sibling if it splits, a parent, plus log records for each. Indexes multiply this, since every index must be maintained. That is why write-heavy workloads often prefer append-oriented structures like LSM trees.</p></div></details>
+<details><summary>8. Why does random insert order hurt?</summary><div class="answer"><p>Random keys land on random leaves, so each insert dirties a different page and defeats sequential write patterns, and the buffer pool cannot hold all the touched pages. Monotonic keys concentrate inserts at one edge, which is friendlier for writes but can create a hot rightmost page.</p></div></details>
+<details><summary>9. When would the optimizer ignore your index?</summary><div class="answer"><p>When the predicate matches a large fraction of rows, when statistics say the index is not selective, or when the query needs columns the index does not cover. A sequential scan then reads fewer pages than many random index-plus-row lookups. <code>EXPLAIN</code> shows which plan was chosen.</p></div></details>
+<details><summary>10. What is a covering index and its cost?</summary><div class="answer"><p>It contains every column the query reads, so the engine answers from the index alone and skips the row fetch. The cost is duplicated data and extra write work whenever any covered column changes, plus more storage and memory pressure.</p></div></details>
+<details><summary>11. How does deletion keep the tree balanced?</summary><div class="answer"><p>If a leaf drops below minimum occupancy, the engine borrows an entry from a sibling or merges the two pages, removing a separator from the parent. That can cascade upward, and an emptied root is dropped so the tree shrinks a level. Many engines defer the physical work and reclaim space later.</p></div></details>
+<details><summary>12. When is a B-tree the wrong index?</summary><div class="answer"><p>For append-heavy write streams, full-text search, and similarity search, other structures dominate. For analytical queries scanning most of a table, columnar storage without per-row lookups wins. And for pure equality lookups on small keys, a hash index is simpler and faster.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Saying a B-tree is fast because it uses binary search, instead of because it minimizes page reads.</li><li>Forgetting that an index must be maintained on every write, and adding one for each column that appears in a query.</li><li>Assuming a secondary index lookup is free, when each match costs an extra row fetch.</li><li>Confusing a B-tree with a B+ tree when asked where the entries actually live.</li><li>Choosing a random UUID as a clustered key and then wondering why inserts scatter across the index.</li><li>Expecting a low-selectivity index on a status column to speed up a query that matches most rows.</li><li>Leaving every page completely full, so the next insert forces a split.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="acid-transactions.html"><span>← Previous</span><strong>ACID Transactions</strong></a><a class="next" href="lsm-trees.html"><span>Next →</span><strong>LSM Trees</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/b-trees">AlgoMaster — B-Trees and B+ Trees</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

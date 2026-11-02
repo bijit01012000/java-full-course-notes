@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kappa Architecture — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 107 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Kappa Architecture</h1>
+    <p class="dek">Big Data Processing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/kappa-architecture">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem Kappa addresses</a>
+<a href="#s2">What Kappa is</a>
+<a href="#s3">The log as the system of record</a>
+<a href="#s4">How reprocessing works</a>
+<a href="#s5">Why versioned output is mandatory</a>
+<a href="#s6">Correctness: offsets, checkpoints, and sinks</a>
+<a href="#s7">Event time, windows, and late data</a>
+<a href="#s8">State size and performance</a>
+<a href="#s9">When the log cannot hold enough history</a>
+<a href="#s10">Trade-offs against Lambda</a>
+<a href="#s11">Failure modes and operational requirements</a>
+<a href="#s12">Choosing Kappa in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Kappa architecture keeps one streaming pipeline and treats the retained event log as the system of record, so historical reprocessing is just a new job replaying the log from the beginning.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Event log</dt><dd>An append-only, ordered, partitioned store of events that keeps history for a retention period and can be read from any offset.</dd></div><div class="term"><dt>Offset</dt><dd>The position of an event within a partition, which lets a reader start, resume, or rewind processing at an exact point.</dd></div><div class="term"><dt>Replay</dt><dd>Reading the log again from an earlier offset, usually into a new version of the job, to rebuild results with corrected logic.</dd></div><div class="term"><dt>Retention</dt><dd>How long the log keeps events; it bounds how far back a replay can go without an external archive.</dd></div><div class="term"><dt>Versioned job</dt><dd>A new deployment of the streaming application writing to a new output location, run alongside the old one until cutover.</dd></div><div class="term"><dt>Cutover</dt><dd>The moment readers switch from the old output to the reprocessed output once the new job has caught up.</dd></div><div class="term"><dt>Checkpoint</dt><dd>A durable snapshot of operator state and input positions that lets a job restart without losing or repeating work.</dd></div><div class="term"><dt>Watermark</dt><dd>A progress claim about event time that tells operators when a window is unlikely to receive more late events.</dd></div><div class="term"><dt>Idempotent sink</dt><dd>A write path where repeating the same output record has no additional effect, which makes replay and retries safe.</dd></div><div class="term"><dt>Log compaction</dt><dd>A retention mode that keeps only the latest record per key, which preserves current state but destroys full event history.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem Kappa addresses</h2>
+<ul><li>A streaming pipeline gives fresh results but has no natural way to recompute the past when the logic was wrong.</li><li>Lambda solves that with a second, batch pipeline, which means two codebases and two sets of results that can disagree.</li><li>The duplication is not just code: it is two deployments, two test suites, two on-call rotations, and two consistency stories.</li><li>Kappa asks a simpler question: if the input events are retained and replayable, why not <strong>reprocess with the same streaming code</strong>?</li><li>Then there is exactly one implementation of the business logic and one processing model to reason about.</li><li>The architecture is therefore a statement about the log: the log is the source of truth, and every derived store is disposable.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What Kappa is</h2>
+<ul><li>One streaming pipeline consumes the log, maintains state, and writes derived outputs such as tables, indexes, or caches.</li><li>There is <strong>no batch layer</strong>; the same code path handles live traffic and historical replays.</li><li>The log retains events long enough to cover the reprocessing horizon the business needs.</li><li>Derived outputs are treated as caches of the log, so they can be rebuilt rather than repaired.</li><li>Readers query the derived store, not the log, so query latency is decoupled from stream processing.</li><li>The design depends on three things being true: the log is durable, replay is fast enough, and outputs are safe to rebuild.</li></ul>
+
+<div class="flow"><span class="flow-step">Producers append events to the log</span><span class="flow-arrow">→</span><span class="flow-step">Streaming job reads from an offset</span><span class="flow-arrow">→</span><span class="flow-step">Operators update keyed state</span><span class="flow-arrow">→</span><span class="flow-step">Job writes derived output idempotently</span><span class="flow-arrow">→</span><span class="flow-step">Readers query the derived store</span><span class="flow-arrow">→</span><span class="flow-step">On a logic change, a new job replays from offset zero</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The log as the system of record</h2>
+<ul><li>Events are appended in order within a partition and are immutable once written.</li><li>Partitioning by an entity key preserves per-key order, which matters for stateful operations such as sessions or accounts.</li><li>Consumers track offsets independently, so one slow or broken consumer does not hold back the others.</li><li>Retention is time-based or size-based; the log is not infinite, so the <strong>retention window</strong> is a design parameter.</li><li>Durability comes from replication across brokers; losing the log means losing the ability to recompute.</li><li>The log decouples producers from consumers, which is also what makes adding a second, reprocessing consumer cheap.</li></ul>
+
+
+<div class="note">Treat retention as a budget: it determines how far back you can fix a mistake without restoring from an archive.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>How reprocessing works</h2>
+<ul><li>Deploy the corrected job as a <strong>new version</strong> pointed at a new output location, not in place over the old one.</li><li>Start it at the earliest retained offset and let it consume the backlog as fast as the cluster allows.</li><li>While it catches up, the old job continues serving live traffic and writing the current output.</li><li>When the new job reaches the head of the log, it is processing live events at the same rate as the old one.</li><li>Compare outputs for a period, then switch readers to the new output and stop the old job.</li><li>The old output is kept briefly for rollback, then deleted; the log itself is never rewritten.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Phase</th><th>Old job</th><th>New job</th></tr></thead><tbody><tr><td>Startup</td><td>Serving live traffic</td><td>Replaying from earliest offset</td></tr>
+<tr><td>Catch-up</td><td>Writes current output</td><td>Building new output from history</td></tr>
+<tr><td>Validation</td><td>Still authoritative</td><td>Compared against old output</td></tr>
+<tr><td>Cutover</td><td>Stopped</td><td>Authoritative, readers switched</td></tr>
+<tr><td>Cleanup</td><td>Output removed after rollback window</td><td>Continues normally</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Why versioned output is mandatory</h2>
+<ul><li>Replaying into the live output table would make readers see a mixture of old and corrected results.</li><li>A separate output prefix or table lets the new job write freely without disturbing production reads.</li><li>Atomic cutover needs a pointer, alias, or view that readers resolve, so the switch is one change rather than a data migration.</li><li>Dual writing during replay doubles output storage and write throughput for the duration, which must be provisioned.</li><li>A rollback is trivial while the old output still exists, which is why cleanup waits until the new version is proven.</li><li>Schema changes are safer because the new output can use a new schema while the old one keeps serving.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Correctness: offsets, checkpoints, and sinks</h2>
+<ul><li>A checkpoint records both operator state and the input offsets that state corresponds to.</li><li>On restart, the job restores state and resumes from the checkpointed offset instead of the latest one.</li><li>Checkpointed offsets alone do not prevent duplicates: output written after the last checkpoint may be produced again.</li><li>An <strong>idempotent sink</strong> keyed by a deterministic event or window identifier makes the repeat harmless.</li><li>Transactional sinks commit output and offsets together, which gives exactly-once only if the sink and the source can participate in the same transaction boundary.</li><li>Replay magnifies any non-determinism: timestamps taken from the wall clock, random keys, or lookups of mutable tables produce different results on rerun.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Event time, windows, and late data</h2>
+<ul><li>Kappa does not remove the hard parts of streaming; it concentrates them in one pipeline.</li><li>Aggregations use <strong>event time</strong>, the time the event happened, not the time it was processed, or replays would produce different results.</li><li>Windows need a watermark policy so the operator knows when to emit a result and stop holding state.</li><li>Late events either update an already-emitted window, land in a side output for correction, or are dropped by policy.</li><li>A replay must use the same watermark and allowed-lateness settings, or the rebuilt result will not match the original.</li><li>Changing window semantics is a logic change like any other: it requires a replay, not a configuration tweak on live state.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>State size and performance</h2>
+<ul><li>Stateful operators keep working sets on local disk or memory, backed by a changelog or snapshot for recovery.</li><li>Replay reads history far faster than real time in many setups, but the operators still perform the same per-event work.</li><li>A replay that must rebuild a large join or dedup state is bounded by state size and shuffle throughput, not by log read speed.</li><li>Unbounded state, such as retaining every user forever, makes both normal operation and replay expensive.</li><li>Use TTLs, windowing, and incremental cleanup so state tracks the business horizon rather than all history.</li><li>A replay competes with live processing for the same cluster, so capacity planning must include reprocessing headroom.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>When the log cannot hold enough history</h2>
+<ul><li>Retention is finite, so the replay horizon is finite unless history is archived somewhere cheaper.</li><li>A common pattern is tiered storage: recent events in the log, older events in object storage, both readable by the same job API.</li><li>An archive of raw events in open files can be re-ingested into the log for a one-off rebuild.</li><li>If the log is <strong>compacted</strong> rather than retained, only the latest record per key survives, so full event history is gone and replay can only rebuild current state.</li><li>Deletes and tombstones interact badly with audits: a compacted log cannot prove what happened historically.</li><li>Teams that need long-horizon correction must budget for archive storage and a tested restore path.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Trade-offs against Lambda</h2>
+<ul><li>Kappa has one codebase, one processing model, and no batch-versus-stream divergence.</li><li>Lambda can recompute from cold storage cheaply and is not bounded by log retention.</li><li>Kappa's reprocessing cost is streaming compute over the whole history, which can be more expensive than a batch scan.</li><li>Kappa requires a mature streaming platform: durable log, checkpointing, state backends, and idempotent sinks.</li><li>Lambda tolerates a weaker streaming story because the batch layer is the safety net; Kappa has no such net.</li><li>For a fixed, audited reporting cadence, batch is still simpler; for continuously derived state, one pipeline is simpler.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Lambda</th><th>Kappa</th></tr></thead><tbody><tr><td>Pipelines</td><td>Batch plus streaming</td><td>Streaming only</td></tr>
+<tr><td>Reprocessing</td><td>Batch rerun over stored history</td><td>Replay the log with a new job</td></tr>
+<tr><td>History limit</td><td>Storage capacity</td><td>Log retention or archive</td></tr>
+<tr><td>Duplicate logic</td><td>Yes, two implementations</td><td>No, one implementation</td></tr>
+<tr><td>Operational risk</td><td>Divergence between layers</td><td>Replay cost and platform maturity</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes and operational requirements</h2>
+<ul><li>Replay takes longer than the retention window, so the job can never catch up before old data expires.</li><li>A replay saturates the cluster and delays live processing, causing consumer lag and stale outputs.</li><li>Non-deterministic logic makes the rebuilt result differ from production, and the difference is discovered only at cutover.</li><li>A cutover without a rollback pointer leaves no way back if the new output is wrong.</li><li>Unmonitored consumer lag means the derived store silently falls behind while dashboards look healthy.</li><li>Schema evolution in the log breaks old job versions during replay unless the reader handles every historical version.</li><li>Deleting the old output too early removes the evidence needed to debug a discrepancy.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Choosing Kappa in an interview</h2>
+<ul><li>Confirm that the business can tolerate the replay horizon implied by log retention and archive cost.</li><li>Confirm that reprocessing the full history through the streaming engine fits the time and compute budget.</li><li>Confirm that the team can operate checkpointing, state backends, and idempotent sinks reliably.</li><li>Describe the reprocessing runbook: new output, replay, validate, cut over, roll back window, cleanup.</li><li>Explain how late data and event time are handled, since that is where streaming correctness actually lives.</li><li>Say plainly when you would still pick Lambda or plain batch: audited periodic reporting, or history too large to replay affordably.</li></ul>
+
+<div class="flow"><span class="flow-step">Detect a logic bug</span><span class="flow-arrow">→</span><span class="flow-step">Deploy a new job version to a new output</span><span class="flow-arrow">→</span><span class="flow-step">Replay from the earliest needed offset</span><span class="flow-arrow">→</span><span class="flow-step">Catch up to the head of the log</span><span class="flow-arrow">→</span><span class="flow-step">Compare outputs, then cut readers over</span><span class="flow-arrow">→</span><span class="flow-step">Keep the old output until the rollback window closes</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>One pipeline</strong> removes batch-versus-stream divergence, but leaves no independent layer to cross-check results against.</li><li><strong>The log as system of record</strong> makes replay natural, but ties the correction horizon to retention and archive policy.</li><li><strong>Replay through the streaming engine</strong> reuses the same code, but usually costs more compute than a batch scan over cold files.</li><li><strong>Versioned outputs</strong> make cutover safe and reversible, but double storage and write throughput during the rebuild.</li><li><strong>Longer retention</strong> widens the fixable window, but increases broker storage and replay time.</li><li><strong>Compacted logs</strong> keep storage bounded and preserve current state, but destroy the event history needed for true recomputation.</li><li><strong>Exactly-once sinks</strong> remove duplicate output on retries, but require sink support, deterministic keys, and transactional coordination.</li><li><strong>Single pipeline simplicity</strong> lowers code cost but raises the platform bar: checkpointing, state management, and lag monitoring become critical.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the Kappa architecture?</summary><div class="answer"><p>A streaming-only design in which the retained, replayable event log is the system of record. All derived state is produced by one streaming pipeline, and corrections are made by replaying history through a new version of that same job.</p></div></details>
+<details><summary>2. How does Kappa reprocess history without a batch layer?</summary><div class="answer"><p>It starts a new job version at an earlier offset, often the earliest retained one, and lets it consume the backlog into a new output location. When it catches up and the outputs are validated, readers are switched over and the old job is retired.</p></div></details>
+<details><summary>3. Why must the reprocessed output go somewhere new?</summary><div class="answer"><p>Writing corrections into the live table would expose readers to a mix of old and new results during the replay. A separate output plus an atomic pointer or alias makes the switch instant and gives a clean rollback path.</p></div></details>
+<details><summary>4. What limits how far back Kappa can replay?</summary><div class="answer"><p>Log retention and archive availability. If events older than the retention window matter, they must be archived cheaply and re-ingested, or the correction is simply impossible. Retention is therefore a business decision, not only an ops setting.</p></div></details>
+<details><summary>5. What is the difference between a retained log and a compacted log for replay?</summary><div class="answer"><p>A retained log keeps every event, so replay can rebuild any derived result. A compacted log keeps only the latest record per key, so replay can rebuild current state but not history, counts, or audits.</p></div></details>
+<details><summary>6. How do you avoid duplicates when replaying?</summary><div class="answer"><p>Checkpoint state and offsets together, and make the sink idempotent using a deterministic key such as event id or window end. Duplicates from a restart or replay then overwrite the same record instead of adding a second one.</p></div></details>
+<details><summary>7. Why is determinism critical in Kappa?</summary><div class="answer"><p>Replay must reproduce what the original run would have produced with the new logic. Wall-clock timestamps, random identifiers, or lookups of changing reference data make the rebuild differ, and you cannot tell a genuine fix from a replay artefact.</p></div></details>
+<details><summary>8. What happens to state during a big replay?</summary><div class="answer"><p>The job rebuilds state from the beginning, so joins, dedup tables, and aggregates grow to their full size. That makes state size and shuffle throughput the practical limits, and it competes with live processing for cluster capacity.</p></div></details>
+<details><summary>9. When is Kappa a bad fit?</summary><div class="answer"><p>When history is too large or too old to replay affordably, when audited periodic reporting needs a batch snapshot, or when the team cannot operate checkpointing, state backends, and idempotent sinks. Then Lambda or plain batch is safer.</p></div></details>
+<details><summary>10. How does Kappa handle late-arriving events?</summary><div class="answer"><p>With event-time windows, watermarks, and an explicit allowed-lateness policy. Late events either update already-emitted windows, go to a side output, or are dropped. Replays must use the same policy or results will not match.</p></div></details>
+<details><summary>11. What do you monitor in a Kappa system?</summary><div class="answer"><p>Consumer lag and its trend, checkpoint duration and failures, state size, watermark progress, sink write errors, and output freshness. During replay, also monitor catch-up rate against remaining backlog and the retention deadline.</p></div></details>
+<details><summary>12. How would you compare Kappa and Lambda to an interviewer?</summary><div class="answer"><p>Both solve fresh-plus-correct. Lambda uses two pipelines and pays in duplicated logic; Kappa uses one pipeline and pays in replay cost and platform maturity. The deciding factors are retention horizon, reprocessing budget, and how much the team can trust a single path.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming the log is infinite and discovering at the first incident that the retention window is too short.</li><li>Replaying into the live output table and exposing readers to half-corrected data.</li><li>Using a compacted topic as the system of record and then trying to recompute historical counts.</li><li>Leaving non-deterministic logic in the job, so replay cannot reproduce the original result.</li><li>Sizing the cluster for steady-state traffic and having no headroom for a full replay.</li><li>Cutting over and deleting the old output in the same step, removing the rollback path.</li><li>Treating exactly-once as a configuration flag while the sink is not idempotent.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="lambda-architecture.html"><span>← Previous</span><strong>Lambda Architecture</strong></a><a class="next" href="streaming-engines.html"><span>Next →</span><strong>Streaming Engines</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/kappa-architecture">AlgoMaster — Kappa Architecture</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

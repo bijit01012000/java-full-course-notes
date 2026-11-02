@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dead Letter Queues — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 34 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Dead Letter Queues</h1>
+    <p class="dek">Communication Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/dead-letter-queues">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The poison message problem</a>
+<a href="#s2">Why not simply discard it</a>
+<a href="#s3">What a dead letter queue is</a>
+<a href="#s4">How messages reach a DLQ</a>
+<a href="#s5">Designing the retry path before the DLQ</a>
+<a href="#s6">What to record with a dead-lettered message</a>
+<a href="#s7">Monitoring and triage</a>
+<a href="#s8">Replay</a>
+<a href="#s9">DLQ topology</a>
+<a href="#s10">Capacity and retention</a>
+<a href="#s11">Failure modes to design against</a>
+<a href="#s12">When a DLQ is not the right answer</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A dead letter queue is a quarantine for messages that fail repeatedly, so one poison message cannot stall a stream or be silently thrown away.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Dead letter queue</dt><dd>A separate queue that receives messages after they fail processing a configured number of times.</dd></div><div class="term"><dt>Poison message</dt><dd>A message that fails every attempt, usually because of malformed data or a bug in the handler.</dd></div><div class="term"><dt>Dead letter exchange</dt><dd>The routing component that diverts rejected, expired, or over-limit messages to the dead letter queue.</dd></div><div class="term"><dt>Redelivery</dt><dd>The broker handing an unacknowledged message to a consumer again, which is how poison messages loop.</dd></div><div class="term"><dt>Max delivery attempts</dt><dd>The threshold of failures after which a message is moved instead of retried again.</dd></div><div class="term"><dt>Retry queue</dt><dd>An intermediate queue with a delay that re-injects a failed message later with an incremented attempt count.</dd></div><div class="term"><dt>Parking lot</dt><dd>An alternative name for the holding area where failed messages wait for human or automated triage.</dd></div><div class="term"><dt>Replay</dt><dd>Re-injecting messages from the DLQ into the original destination after the cause is fixed.</dd></div><div class="term"><dt>Head-of-line blocking</dt><dd>A single unprocessable message preventing later messages in an ordered stream from being processed.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The poison message problem</h2>
+<p class="lede">An order consumer reads messages that validate an order, reserve inventory, and update the database. Almost all messages succeed. One day a message arrives with a product ID that does not exist, and the handler throws.</p>
+<ul><li>Because the message was never acknowledged, the broker delivers it again.</li><li>The consumer fails again, and under at-least-once delivery the cycle repeats indefinitely.</li><li>A message that consistently fails is called a <strong>poison message</strong>.</li><li>It burns worker capacity that could be processing valid messages.</li><li>It floods logs with identical errors, hiding unrelated problems.</li><li>In ordered systems — a Kafka partition or an SQS FIFO message group — it also blocks every message behind it.</li></ul>
+
+
+<div class="note">One bad message can hold up an entire stream of healthy ones, which is why this needs a structural fix, not more retries.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why not simply discard it</h2>
+<ul><li>Discarding after a few attempts is easy and stops the loop, but it destroys data.</li><li>The failed message may represent a real customer order that still needs fulfilment.</li><li>Deleting it converts a visible error into an invisible loss, which is worse than a backlog.</li><li>Retrying forever preserves the data but converts one bad message into a degraded system.</li><li>The missing third option is to remove the message from the critical path <em>without</em> losing it.</li><li>That is exactly the job a DLQ performs.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What a dead letter queue is</h2>
+<ul><li>A DLQ is a <strong>separate queue</strong> that receives messages after they exceed a failure threshold.</li><li>The main queue keeps processing everything else normally, so throughput recovers immediately.</li><li>Failed messages wait in the DLQ where engineers can inspect them, understand the cause, fix it, and resend.</li><li>It acts as a <em>quarantine area</em>: isolation for the bad message, preservation for the data.</li><li>It also creates an audit trail of what could not be processed and when.</li><li>The DLQ is not a graveyard; a DLQ nobody reads is just a slower way of losing messages.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Option</th><th>Data kept?</th><th>Main queue healthy?</th><th>Verdict</th></tr></thead><tbody><tr><td>Retry forever</td><td>Yes</td><td>No — blocked or degraded</td><td>Unacceptable</td></tr>
+<tr><td>Discard after N tries</td><td>No</td><td>Yes</td><td>Silent data loss</td></tr>
+<tr><td>Move to a DLQ</td><td>Yes</td><td>Yes</td><td>Correct default</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>How messages reach a DLQ</h2>
+<ul><li>Brokers divert a message when it exceeds a <strong>maximum delivery attempt</strong> count.</li><li>Some also divert on a <strong>rejection without requeue</strong>: a consumer explicitly says the message is unprocessable.</li><li>Message <strong>expiry</strong> — a TTL that elapses before successful processing — is another common trigger.</li><li>A <strong>queue length limit</strong> can push overflow messages to the dead letter destination rather than dropping them.</li><li>Routing is usually expressed as a dead letter exchange, policy, or queue attribute, not as application code.</li><li>The consumer must not swallow the error and acknowledge anyway, or the message never reaches the DLQ.</li></ul>
+
+<div class="flow"><span class="flow-step">Consumer receives message and processing throws</span><span class="flow-arrow">→</span><span class="flow-step">Negative acknowledgment or no acknowledgment at all</span><span class="flow-arrow">→</span><span class="flow-step">Broker increments the delivery count</span><span class="flow-arrow">→</span><span class="flow-step">Count exceeds the threshold</span><span class="flow-arrow">→</span><span class="flow-step">Broker routes the message to the dead letter destination</span><span class="flow-arrow">→</span><span class="flow-step">Main queue continues with the next message</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Designing the retry path before the DLQ</h2>
+<ul><li>Not every failure is permanent; transient failures deserve retries with delay.</li><li>Separate <strong>immediate retries</strong> (in-process, tiny count) from <strong>delayed retries</strong> (via a retry queue).</li><li>Use exponential backoff with jitter so a downstream outage does not produce a synchronized retry wave.</li><li>Cap total attempts; beyond the cap, the message belongs in the DLQ.</li><li>Distinguish <strong>retryable</strong> errors such as timeouts from <strong>permanent</strong> ones such as schema violations.</li><li>Permanent errors should go straight to the DLQ instead of consuming the whole retry budget.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Error class</th><th>Example</th><th>Action</th></tr></thead><tbody><tr><td>Transient</td><td>Timeout, connection reset, throttling</td><td>Retry with backoff and jitter</td></tr>
+<tr><td>Dependency outage</td><td>Downstream service unavailable</td><td>Delayed retry, then DLQ if it persists</td></tr>
+<tr><td>Permanent data error</td><td>Unknown product ID, bad schema</td><td>DLQ immediately with the reason recorded</td></tr>
+<tr><td>Code bug</td><td>Null pointer in the handler</td><td>DLQ, fix, then replay</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>What to record with a dead-lettered message</h2>
+<ul><li>The <strong>original payload</strong> untouched, so replay is possible without reconstruction.</li><li>The <strong>failure reason</strong> and error class, ideally as a short machine-readable code plus the message.</li><li>The <strong>attempt count</strong> and timestamps of the first and last attempt.</li><li>The <strong>source queue or topic</strong>, partition, offset, and the consumer group that failed.</li><li>A <strong>trace ID</strong> and correlation ID so the failure can be reconstructed across services.</li><li>Preserving metadata in headers or an envelope keeps the body replayable as originally produced.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Monitoring and triage</h2>
+<ul><li>Alert on <strong>DLQ depth increasing</strong>, not only on absolute size; a steady trickle is still a bug.</li><li>Treat a non-zero inflow rate as a signal that a producer, a schema, or a dependency changed.</li><li>Group failures by error class so one dominant cause is visible instead of thousands of individual messages.</li><li>Watch DLQ age as well as count: old messages mean nobody is triaging.</li><li>Ownership must be explicit — a named team and a runbook, or the queue becomes an unowned dumping ground.</li><li>Dashboards should show main-queue depth next to DLQ inflow to distinguish a systemic failure from an isolated bad message.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Replay</h2>
+<ul><li>Replay is only safe after the root cause is fixed; otherwise the messages fail again and re-enter the DLQ.</li><li>Replay tooling should support filtering so one corrected subset is re-driven rather than the whole queue.</li><li>Re-inject slowly with rate limiting; a large replay is a synthetic traffic spike for downstream systems.</li><li>Replay must respect idempotency, because some failed messages may have partially applied effects.</li><li>Keep the DLQ message until replay is confirmed, then archive or delete deliberately.</li><li>Test replay in a lower environment first when the volume or the blast radius is large.</li></ul>
+
+<div class="flow"><span class="flow-step">Fix the bug or the data</span><span class="flow-arrow">→</span><span class="flow-step">Select affected dead-lettered messages</span><span class="flow-arrow">→</span><span class="flow-step">Re-inject at a controlled rate</span><span class="flow-arrow">→</span><span class="flow-step">Monitor the main queue and error rate</span><span class="flow-arrow">→</span><span class="flow-step">Archive or delete the confirmed messages</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>DLQ topology</h2>
+<ul><li>A <strong>per-consumer</strong> DLQ keeps ownership and triage clear; a <strong>shared</strong> DLQ reduces clutter but mixes causes.</li><li>A per-source DLQ preserves the original routing context and makes replay straightforward.</li><li>Do not point many unrelated streams at one queue unless you also carry source metadata in every message.</li><li>Consider a DLQ per environment so test failures never mix with production triage.</li><li>Naming should identify the source and purpose, for example <code>orders.validated.dlq</code>.</li><li>Retention on the DLQ should be longer than the main queue, since failures are investigated later.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Capacity and retention</h2>
+<ul><li>A DLQ with no retention limit grows forever and eventually becomes a storage incident.</li><li>Set retention long enough for investigation, then archive older messages to cheaper storage.</li><li>Size the DLQ for the worst realistic failure, such as a downstream outage dead-lettering every message.</li><li>A large backlog can also be a symptom that the threshold is too low or retries are misconfigured.</li><li>Include DLQ storage in capacity planning; it is usually forgotten until it fills a disk.</li><li>Archiving preserves the audit trail without keeping the queue hot.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes to design against</h2>
+<ul><li><strong>DLQ recursion:</strong> a broken dead-letter route dead-letters its own failures forever.</li><li><strong>Silent DLQ:</strong> messages are moved but nobody is alerted, so loss is only deferred.</li><li><strong>Wrong threshold:</strong> too low dead-letters transient blips; too high wastes capacity on hopeless retries.</li><li><strong>Lost context:</strong> the payload is kept but the reason and attempt count are dropped, making triage guesswork.</li><li><strong>Replay without idempotency:</strong> partially applied effects are applied a second time.</li><li><strong>Ordering loss:</strong> dead-lettering one message in an ordered stream gaps the sequence for later messages.</li><li><strong>Permission errors:</strong> the consumer cannot publish to the DLQ destination, so the message loops anyway.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When a DLQ is not the right answer</h2>
+<ul><li>For a bulk outage affecting every message, pausing the consumer is safer than dead-lettering the whole stream.</li><li>For purely transient overload, backpressure or throttling solves the problem without moving data.</li><li>For data that is genuinely disposable, dropping with a metric may be more honest than accumulating a DLQ nobody reads.</li><li>For long-running human workflows, a workflow or saga engine with explicit state may fit better than a queue.</li><li>If the failure is a bug in the consumer, fixing and redeploying is the remedy — the DLQ only buys time.</li><li>Choose a DLQ when individual messages can fail in isolation and someone will actually triage them.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Isolating poison messages</strong> restores throughput, but adds a second queue and a triage process to own.</li><li><strong>Longer retention on the DLQ</strong> preserves evidence, but grows storage and cost indefinitely if unmanaged.</li><li><strong>Immediate dead-lettering</strong> of permanent errors speeds triage, but risks discarding messages that were momentarily unlucky.</li><li><strong>Generous retry budgets</strong> absorb flakiness, but delay detection and consume capacity on hopeless messages.</li><li><strong>Per-consumer DLQs</strong> clarify ownership, but multiply queues and dashboards to operate.</li><li><strong>Automatic replay</strong> restores throughput quickly, but can re-inject a bug at scale before it is understood.</li><li><strong>Dead-lettering in an ordered stream</strong> unblocks later messages, but leaves a gap in the sequence.</li><li><strong>Recording rich failure metadata</strong> improves debuggability, but grows message size and must be preserved by every hop.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a dead letter queue?</summary><div class="answer"><p>A separate queue that receives messages which failed processing too many times. It removes a poison message from the main flow without deleting it, so the pipeline keeps running while the data stays available for inspection and replay.</p></div></details>
+<details><summary>2. What is a poison message and why is it dangerous?</summary><div class="answer"><p>A message that fails every attempt, typically due to bad data or a handler bug. Under at-least-once delivery it returns forever, consuming worker capacity, flooding logs, and in ordered systems blocking every message behind it.</p></div></details>
+<details><summary>3. Why not just delete messages that keep failing?</summary><div class="answer"><p>Deleting hides a real problem and can lose business-critical data, such as a customer order. Retrying forever is equally bad because it degrades the pipeline. A DLQ is the option that preserves data while protecting throughput.</p></div></details>
+<details><summary>4. What events typically route a message to a DLQ?</summary><div class="answer"><p>Exceeding a maximum delivery count, an explicit rejection without requeue, a message TTL expiring before successful processing, or a queue length limit being hit. These are usually configured as broker policy rather than application code.</p></div></details>
+<details><summary>5. How should retries be structured?</summary><div class="answer"><p>A small number of immediate in-process retries for blips, then delayed retries through a retry queue with exponential backoff and jitter. Cap the attempts, and send permanent errors such as schema violations straight to the DLQ rather than burning the budget.</p></div></details>
+<details><summary>6. What metadata should travel with a dead-lettered message?</summary><div class="answer"><p>The untouched payload, the failure reason and error class, the attempt count, timestamps, the source queue, partition and offset, and a trace ID. Without that context, triage becomes guesswork and replay becomes risky.</p></div></details>
+<details><summary>7. How do you know a DLQ needs attention?</summary><div class="answer"><p>Alert on the inflow rate and depth, and track the age of the oldest message. A steady trickle indicates a producer or schema change, while a spike usually indicates an outage or a bad deploy.</p></div></details>
+<details><summary>8. How do you replay safely?</summary><div class="answer"><p>Fix the root cause first, then replay a filtered subset at a controlled rate, because a large replay is a traffic spike. Ensure the consumer is idempotent since some messages may have partially applied effects, and archive only after replay is confirmed.</p></div></details>
+<details><summary>9. Why does a DLQ interact badly with ordering?</summary><div class="answer"><p>In an ordered partition or FIFO group, removing one message unblocks the rest but leaves a gap in the sequence. Downstream consumers may then see a state that assumes the missing message was applied, so the gap must be handled explicitly.</p></div></details>
+<details><summary>10. What is DLQ recursion and how do you prevent it?</summary><div class="answer"><p>If the dead-letter route itself fails, those failures can be dead-lettered again, creating an infinite loop. Prevent it by giving the DLQ route its own bounded handling, such as parking failures in local storage or a separate error topic with alerting.</p></div></details>
+<details><summary>11. Should the DLQ be shared or per consumer?</summary><div class="answer"><p>Per consumer is usually better: ownership is clear, causes are not mixed, and replay is straightforward. A shared DLQ is acceptable only if every message carries source metadata so it can be routed back correctly.</p></div></details>
+<details><summary>12. When is pausing the consumer better than dead-lettering?</summary><div class="answer"><p>When a systemic outage makes every message fail. Dead-lettering the entire stream just relocates the problem and can lose ordering. Pausing, applying backpressure, and resuming after recovery preserves the stream intact.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Building a DLQ with no alerting, so it becomes a silent data graveyard.</li><li>Dropping the payload's failure metadata, making triage and replay guesswork.</li><li>Replaying a full DLQ without rate limiting or idempotent consumers.</li><li>Dead-lettering messages in an ordered stream without accounting for the gap.</li><li>Configuring a dead-letter route that can itself fail into a recursion loop.</li><li>Leaving DLQ retention unlimited and discovering it as a storage incident.</li><li>Treating the DLQ as a fix for a consumer bug rather than a quarantine until the bug is fixed.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="delivery-semantics.html"><span>← Previous</span><strong>Delivery Semantics</strong></a><a class="next" href="what-is-caching.html"><span>Next →</span><strong>What is Caching?</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/dead-letter-queues">AlgoMaster — Dead Letter Queues</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

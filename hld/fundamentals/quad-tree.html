@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quad Trees — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 90 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Quad Trees</h1>
+    <p class="dek">Data Structures for Scale · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/quad-tree">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with one fixed grid</a>
+<a href="#s2">What a quadtree is</a>
+<a href="#s3">Node layout and capacity</a>
+<a href="#s4">Subdivision</a>
+<a href="#s5">Insertion</a>
+<a href="#s6">Range and radius search</a>
+<a href="#s7">Nearest-neighbor search</a>
+<a href="#s8">Deletion and rebalancing</a>
+<a href="#s9">Variants worth knowing</a>
+<a href="#s10">Limitations</a>
+<a href="#s11">Tuning and operating it</a>
+<a href="#s12">Where it fits</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A quadtree subdivides a map into four children per node, splitting only where the data is dense — so a nearby search can skip whole regions that cannot contain a match.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Quadtree</dt><dd>A tree in which each node covers a rectangular region and has up to four children, one per quadrant, created only when the node holds too many items.</dd></div><div class="term"><dt>Node capacity</dt><dd>The maximum number of items a leaf may hold before it splits; the main tuning knob of a quadtree.</dd></div><div class="term"><dt>Bounding box</dt><dd>The rectangle a node covers; searches use it to decide whether a subtree can possibly contain an answer.</dd></div><div class="term"><dt>Quadrant</dt><dd>One of the four equal sub-rectangles produced by splitting a node at its center point.</dd></div><div class="term"><dt>Max depth</dt><dd>The hard limit on subdivision, which prevents infinite splitting when many points share nearly identical coordinates.</dd></div><div class="term"><dt>Leaf</dt><dd>A node with no children that stores the actual items; internal nodes only route.</dd></div><div class="term"><dt>Region quadtree</dt><dd>A variant that subdivides a grid or image by uniform value rather than by item count, used for compression and raster data.</dd></div><div class="term"><dt>Linear quadtree</dt><dd>An encoding of quadtree cells as Morton-order integers, which allows the tree to be stored and indexed without pointers.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with one fixed grid</h2>
+<p class="lede">A nearby-places app holds a very large number of places, each with a latitude and longitude, and must answer "what is closest to this point?" quickly.</p>
+<ul><li>The obvious structure is a uniform grid: divide the map into equal cells, assign each place to its cell, then search the user's cell and its neighbors.</li><li>Places are <strong>not evenly distributed</strong>: one downtown cell can hold thousands of places while a desert cell of the same size holds none.</li><li>Large cells make dense-city searches return far too many candidates to filter.</li><li>Small cells create a huge number of empty cells and force rural searches to walk many of them.</li><li>Scanning every point works for a small dataset but collapses when the count reaches millions.</li><li>What is needed is a grid that <strong>adapts to the data</strong>: fine where places are packed, coarse where they are sparse.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a quadtree is</h2>
+<ul><li>A quadtree is a tree whose root covers the whole map and whose nodes cover nested rectangles.</li><li>Each node has at most four children, one for each quadrant: north-west, north-east, south-west, south-east.</li><li>A node splits only when it holds more than its capacity, so subdivision follows density rather than a global rule.</li><li>Dense areas therefore end up with small, deep cells; empty areas stay as large shallow leaves.</li><li>Every item lives in exactly one leaf, which avoids the duplication that cell-based indexes suffer with shapes.</li><li>Search descends only into subtrees whose bounding box can intersect the query, which is where the speedup comes from.</li><li>The structure is a spatial analogue of a binary search tree, generalized from two branches to four.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Node layout and capacity</h2>
+<ul><li>A leaf stores a small list of items plus the rectangle it covers.</li><li>An internal node stores four child pointers and no items of its own; routing replaces storage.</li><li>The capacity is a configured constant, typically small, chosen so that scanning a leaf is cheap.</li><li>A larger capacity means a shorter tree and fewer pointer hops, but more work per leaf.</li><li>A smaller capacity means deeper trees and more memory overhead per item.</li><li>Many implementations store the rectangle implicitly, deriving it from the path from the root, which saves memory.</li><li>Whether items live only in leaves or also in internal nodes is an implementation choice that affects insertion and deletion code.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Subdivision</h2>
+<ul><li>When a leaf exceeds capacity, it is split at the midpoint of both axes, producing four equal quadrants.</li><li>Each stored item is re-bucketed into the quadrant that contains it.</li><li>The split is local: only that node's contents move, not the whole tree.</li><li>A <strong>max depth</strong> is required, otherwise a cluster of identical or near-identical coordinates splits forever.</li><li>At max depth the leaf simply grows beyond capacity, accepting a slower scan for that small region.</li><li>Points exactly on a split line need a deterministic tie-break rule, or the same point can migrate between quadrants.</li><li>Splitting is cheap in isolation but repeated splits during a bulk load are the main construction cost.</li></ul>
+
+<div class="flow"><span class="flow-step">Leaf receives an insert</span><span class="flow-arrow">→</span><span class="flow-step">Count exceeds capacity</span><span class="flow-arrow">→</span><span class="flow-step">Compute midpoint of the node's rectangle</span><span class="flow-arrow">→</span><span class="flow-step">Create four child quadrants</span><span class="flow-arrow">→</span><span class="flow-step">Redistribute items, then continue the insert</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Insertion</h2>
+<ul><li>Start at the root and compare the point against each node's midpoint to choose a quadrant.</li><li>Descend until a leaf is reached, then append the item to that leaf.</li><li>If the leaf is now over capacity and depth remains, split and continue routing the overflowing items.</li><li>Insertion cost is proportional to tree depth, which is logarithmic when the data is reasonably spread.</li><li>Skewed or duplicate-heavy data degrades the tree toward a linear chain of splits.</li><li>Bulk loading is much faster when points are sorted into Morton order first, because locality reduces repeated splitting.</li><li>An update that moves a point is a delete followed by an insert, since its quadrant may change entirely.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Range and radius search</h2>
+<ul><li>A query carries a region — a rectangle for a bounding-box search, or a circle for a radius search.</li><li>At each node, test whether the node's rectangle can intersect the query region.</li><li>If it cannot, prune the entire subtree without touching its contents.</li><li>If it can, recurse into children and test individual items only at leaves.</li><li>For a circle, the cheap test is against the circle's bounding square; the exact distance check happens on the surviving candidates.</li><li>Pruning is what makes the structure fast: empty space is skipped in large blocks.</li><li>A query whose region covers everything degenerates to a full scan, which is expected but worth knowing.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Nearest-neighbor search</h2>
+<ul><li>Exact k-nearest-neighbor search explores nodes in order of the <strong>minimum possible distance</strong> from the query point to the node's rectangle.</li><li>A priority queue ordered by that lower bound gives best-first traversal.</li><li>Once the queue's best bound is farther than the current worst of the k results, the search stops.</li><li>This avoids visiting subtrees that cannot beat an already-found answer.</li><li>A simpler alternative is an expanding ring search: start at the leaf, then widen through neighbors until k results are found.</li><li>Ring search is easier to implement but can visit far more nodes than best-first when density varies.</li><li>Both approaches depend on the leaf's contents being small enough to scan cheaply.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Deletion and rebalancing</h2>
+<ul><li>Locate the item by descending to its leaf, then remove it from that leaf's list.</li><li>Store a parent pointer or keep the path, otherwise deletion requires a fresh search.</li><li>After a removal, a parent whose four children together hold few enough items can be collapsed back into a leaf.</li><li>Merging keeps the tree shallow when an area empties out, such as a fleet of drivers dispersing.</li><li>Many production uses skip merging and rebuild the tree periodically instead, because empty nodes are cheap to prune.</li><li>Frequent insert-and-delete churn in the same region is the case where stale structure hurts most.</li><li>Deletion must preserve the invariant that each item sits in the leaf matching its coordinates.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Variants worth knowing</h2>
+<ul><li><strong>Point quadtree:</strong> splits at the inserted point rather than the rectangle center, producing uneven cells.</li><li><strong>Region quadtree:</strong> subdivides an image or grid while a block is not uniform, the basis of quadtree image compression.</li><li><strong>Bucket PR quadtree:</strong> the point-region form with a capacity per leaf, which is what most nearby-search implementations mean by quadtree.</li><li><strong>Linear quadtree:</strong> stores cells as Morton-order integers so the structure becomes a sorted index rather than a pointer graph.</li><li><strong>Octree:</strong> the three-dimensional generalization, splitting each node into eight children.</li><li>The disk-friendly variants matter because pointer-based trees are awkward to persist and page in.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Limitations</h2>
+<ul><li>Performance depends on <strong>data distribution</strong>; a heavily skewed dataset produces deep, unbalanced branches.</li><li>Pointer chasing is cache-unfriendly compared with scanning a flat array of cells.</li><li>The tree lives in memory comfortably; persisting it and querying it from disk is where most implementations stop.</li><li>Rebalancing after large deletions is usually manual or periodic, not automatic.</li><li>It indexes points well but handles polygons and lines badly, because a shape spanning quadrants must be stored in several.</li><li>A fixed grid of geohash strings is simpler when the data is roughly uniform and the database is the source of truth.</li><li>Concurrent updates need locking around splits, which can serialize writers in hot regions.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Tuning and operating it</h2>
+<ul><li>Tune <strong>capacity</strong> against leaf scan cost: it is the difference between a shallow tree with fat leaves and a deep tree with thin ones.</li><li>Set <strong>max depth</strong> deliberately; without it, duplicate coordinates create unbounded depth.</li><li>Rebuild from scratch on a schedule when churn is high, which is cheaper than maintaining perfect balance.</li><li>Measure query candidate counts, not just latency: a bad capacity shows up as many survivors after pruning.</li><li>Keep the tree per shard or per region rather than one global tree, so updates stay local.</li><li>Snapshot or rebuild on restart rather than serializing the pointer graph.</li><li>Log depth and node count, because silent skew is the failure mode that appears only under real traffic.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Where it fits</h2>
+<ul><li>In-memory spatial indexes: nearby places, nearby drivers, points of interest in a game world.</li><li>Collision detection, where only objects in overlapping quadrants need pairwise tests.</li><li>Image and terrain compression through region quadtrees, plus level-of-detail rendering.</li><li>Spatial joins and analytics over unevenly distributed point data.</li><li>Choose a quadtree when density varies widely and the index can live in memory or be rebuilt cheaply.</li><li>Choose a geohash when the index must be a plain database column, and an R-tree when the objects are shapes rather than points.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Quadtree</th><th>Geohash</th><th>R-tree</th></tr></thead><tbody><tr><td>Adapts to density</td><td>Yes, by splitting</td><td>No, fixed grid</td><td>Partly, by grouping</td></tr>
+<tr><td>Indexed value</td><td>Tree node</td><td>Sortable string</td><td>Nested rectangles</td></tr>
+<tr><td>Shape support</td><td>Poor</td><td>Poor</td><td>Good</td></tr>
+<tr><td>Storage</td><td>In-memory, custom</td><td>Any ordered index</td><td>Spatial database</td></tr>
+<tr><td>Best fit</td><td>Uneven point data</td><td>Nearby search on a normal DB</td><td>Polygons and overlap</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Adaptive subdivision</strong> keeps candidate sets small in dense areas but makes the tree shape depend on the data.</li><li><strong>Larger leaf capacity</strong> shortens the tree and improves cache behavior but increases the scan at each leaf.</li><li><strong>Smaller leaf capacity</strong> prunes more precisely but adds depth, pointers, and split work.</li><li><strong>Deep subdivision</strong> separates nearby points but risks unbounded depth on duplicate coordinates without a cap.</li><li><strong>Best-first nearest-neighbor search</strong> visits the fewest nodes but needs a priority queue and distance-to-box math.</li><li><strong>Periodic rebuild</strong> is simpler than incremental merging but costs a full reconstruction window.</li><li><strong>In-memory indexes</strong> answer fast but must be rebuilt or warmed after a restart.</li><li><strong>Per-shard trees</strong> keep writes local but make global queries fan out across shards.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does a quadtree solve that a fixed grid does not?</summary><div class="answer"><p>Data density varies enormously across a map, so no single cell size is right everywhere. A quadtree splits only where items accumulate, giving small cells in cities and large cells in empty regions. The result is that a search prunes large empty areas while still keeping dense-area candidate sets modest.</p></div></details>
+<details><summary>2. How does a quadtree decide when to split?</summary><div class="answer"><p>A leaf splits when it holds more than its configured capacity. It is divided at the midpoints of both axes into four quadrants, and the existing items are redistributed. A max depth stops the process when items share nearly identical coordinates.</p></div></details>
+<details><summary>3. Walk through a radius query.</summary><div class="answer"><p>Start at the root and test whether each node's rectangle can intersect the circle's bounding box. Rectangles that cannot are pruned entirely; the rest are descended recursively. At each leaf the stored points are distance-checked exactly, and the survivors are filtered by the radius.</p></div></details>
+<details><summary>4. How does nearest-neighbor search differ from a range query?</summary><div class="answer"><p>A range query tests every subtree that could intersect a fixed region. Nearest-neighbor search instead explores nodes in order of the minimum distance from the query point to their rectangle, then stops when no unexplored node can beat the current k-th result. That bound ordering is what keeps it from visiting the whole tree.</p></div></details>
+<details><summary>5. What happens if you set no maximum depth?</summary><div class="answer"><p>Many points with identical or nearly identical coordinates can never be separated by further subdivision, so the leaf splits forever. A depth cap makes the node stop splitting and accept a larger bucket, trading a slower local scan for termination.</p></div></details>
+<details><summary>6. Why does deletion often trigger a merge?</summary><div class="answer"><p>When an area empties, its internal nodes keep four children with almost nothing in them, which wastes memory and traversal time. If a parent's children together hold few enough items, collapsing them back into one leaf restores the adaptive shape. Many systems defer this and rebuild periodically instead.</p></div></details>
+<details><summary>7. Is a quadtree a good choice for delivery-zone polygons?</summary><div class="answer"><p>Usually not. A polygon that spans several quadrants must be stored in several nodes or pushed up to a node where more queries must inspect it. An R-tree, which groups shapes by bounding rectangle, handles overlapping and intersecting shapes far better.</p></div></details>
+<details><summary>8. Quadtree or geohash for nearby search?</summary><div class="answer"><p>Choose a quadtree when the data is very uneven and the index can live in memory or be rebuilt. Choose a geohash when the index must be an ordinary database column, when the data is roughly uniform, or when the same key also serves for sharding and aggregation.</p></div></details>
+<details><summary>9. What is a linear quadtree and why does it exist?</summary><div class="answer"><p>It encodes each cell as an integer in Morton order, so the tree's structure becomes a sortable key rather than a graph of pointers. That makes the index storable in a database or file and range-scannable, at the cost of losing cheap incremental splits.</p></div></details>
+<details><summary>10. Why is bulk loading faster than repeated insertion?</summary><div class="answer"><p>Repeated insertion re-splits the same nodes as points arrive in arbitrary order, and each split redistributes items. Sorting points by spatial locality first lets the loader build leaves in one pass and touch each node once.</p></div></details>
+<details><summary>11. What workload makes a quadtree degrade?</summary><div class="answer"><p>Heavily skewed data plus churn: a few hot regions receive most inserts and deletes, producing deep branches that are edited constantly. Duplicate coordinates at max depth and a stale structure after mass deletion are the other common degradations.</p></div></details>
+<details><summary>12. How would you scale a quadtree across servers?</summary><div class="answer"><p>Partition the map into regions, keep one tree per region, and route queries to the regions the search area overlaps. Global queries fan out and merge results, so keep regions balanced by splitting hot ones — the same skew problem the tree solves locally reappears at the partition level.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming a quadtree always balances itself; it is shaped by insertion order and density.</li><li>Omitting a max depth and letting duplicate coordinates split forever.</li><li>Storing polygons in a point-oriented quadtree and duplicating them across quadrants.</li><li>Treating bounding-box intersection as the final answer instead of filtering by exact distance.</li><li>Forgetting to re-bucket items after a split, which leaves points in the wrong quadrant.</li><li>Using a quadtree as a disk-backed index and paying for pointer chasing on every page fault.</li><li>Never merging emptied nodes, so the tree stays deep long after the data moved away.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="geohash.html"><span>← Previous</span><strong>Geohash</strong></a><a class="next" href="r-trees.html"><span>Next →</span><strong>R-Trees</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/quad-tree">AlgoMaster — Quad Trees</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

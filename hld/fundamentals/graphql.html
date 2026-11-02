@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GraphQL Fundamentals — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 23 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>GraphQL Fundamentals</h1>
+    <p class="dek">API Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>10</strong> sections</span>
+      <span class="pill">11 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/graphql">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with fixed responses</a>
+<a href="#s2">How GraphQL works</a>
+<a href="#s3">The schema and type system</a>
+<a href="#s4">Queries and field selection</a>
+<a href="#s5">Resolvers and execution</a>
+<a href="#s6">Mutations and subscriptions</a>
+<a href="#s7">The N+1 problem</a>
+<a href="#s8">Caching and performance</a>
+<a href="#s9">Query cost, abuse, and security</a>
+<a href="#s10">GraphQL vs REST, and when to use it</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>GraphQL lets the <strong>client describe the response shape</strong> against a typed schema, which removes over-fetching and multiple round trips but moves cost, caching, and abuse control onto the server.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Schema</dt><dd>The typed contract of a GraphQL API: the types, fields, arguments, and operations clients may use.</dd></div><div class="term"><dt>Query</dt><dd>A read operation whose selection set describes exactly which fields the response should contain.</dd></div><div class="term"><dt>Mutation</dt><dd>A write operation defined in the schema, executed in order and usually returning the changed fields.</dd></div><div class="term"><dt>Resolver</dt><dd>The function that supplies the data for one field, called as the server walks the selection set.</dd></div><div class="term"><dt>Selection set</dt><dd>The nested list of fields a client requests inside a query or mutation.</dd></div><div class="term"><dt>Over-fetching</dt><dd>Receiving more data than the client needs, a common cost of fixed REST response shapes.</dd></div><div class="term"><dt>Under-fetching</dt><dd>Needing several round trips because one endpoint does not return everything a screen requires.</dd></div><div class="term"><dt>N+1 problem</dt><dd>Issuing one query per parent item in a list, turning a single request into many backend calls.</dd></div><div class="term"><dt>DataLoader</dt><dd>A batching and caching utility that collects per-item lookups within a tick and issues one batched call.</dd></div><div class="term"><dt>Persisted query</dt><dd>A pre-registered query identified by a hash so clients send a small identifier instead of the full document.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with fixed responses</h2>
+<p class="lede">In a REST API the server decides the response shape for each endpoint, so the client must fit its needs to that shape.</p>
+<ul><li>A mobile screen needs a name and avatar but the endpoint returns the full profile, so bandwidth and parsing work are wasted: <strong>over-fetching</strong>.</li><li>A screen needs an order plus its customer plus line items, but no single endpoint returns all three, so the client makes several calls: <strong>under-fetching</strong>.</li><li>Each new screen shape encourages either a new bespoke endpoint or a bloated general one.</li><li>Versioning accelerates because every client-specific shape becomes part of the contract.</li><li>BFF layers and response-shaping parameters are common workarounds, and they add servers to maintain.</li><li>GraphQL's answer is to let the client declare the shape it needs from one typed graph.</li><li>The trade is explicit: flexibility for clients, more variability and cost on the server.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>How GraphQL works</h2>
+<ul><li>The client sends a document containing an operation and a nested selection of fields.</li><li>The server validates the document against the <strong>schema</strong> before executing anything.</li><li>Execution walks the selection set and calls a resolver for each field, assembling the response shape.</li><li>The response mirrors the query's shape, so the client knows exactly what it will receive.</li><li>A single endpoint, usually <code>POST /graphql</code>, serves all reads and writes.</li><li>The transport is usually HTTP with JSON, but GraphQL itself specifies no transport.</li><li>Errors can appear per field alongside partial data, so one failed field does not necessarily fail the request.</li></ul>
+
+
+<pre class="code"><code>query OrderSummary($id: ID!) {
+  order(id: $id) {
+    id
+    total { amount currency }
+    customer { name avatarUrl }
+    items { sku quantity }
+  }
+}</code></pre>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The schema and type system</h2>
+<ul><li>The schema is the contract, written in the schema definition language and served for introspection.</li><li>Types are object, scalar, enum, interface, union, and input types; fields may take arguments.</li><li>Nullability is explicit: <code>String!</code> means non-null, and it is a promise the resolvers must keep.</li><li>Interfaces and unions let one field return several concrete types, which clients handle with fragments.</li><li>Enums constrain values so clients get validation instead of free-form strings.</li><li>Schema-first design makes the API reviewable before implementation and enables code generation.</li><li>Evolving the schema means adding fields and deprecating old ones with <code>@deprecated</code>, not deleting them abruptly.</li><li>Introspection is powerful for tooling and also a disclosure surface you may need to restrict in production.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Queries and field selection</h2>
+<ul><li>A query names an operation, optionally takes variables, and lists the fields to return.</li><li>Variables keep documents static so clients can cache and servers can persist them.</li><li><strong>Fragments</strong> reuse selection sets across queries and across union or interface types.</li><li><strong>Aliases</strong> let one query fetch the same field with different arguments, such as two products by ID.</li><li><strong>Directives</strong> such as <code>@include</code> and <code>@skip</code> make parts of a selection conditional.</li><li>The response shape follows the query exactly, which is why clients can rely on it without defensive mapping.</li><li>Deeply nested selections are legal, which is precisely why depth limits exist.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Resolvers and execution</h2>
+<ul><li>Each field has a resolver: a function receiving the parent value, arguments, and context.</li><li>Execution is breadth-first over the selection tree, and sibling fields may resolve concurrently.</li><li>A trivial resolver reads a property from the parent object; a complex one calls a service or database.</li><li>The context object carries per-request state such as the authenticated user and data loaders.</li><li>Resolvers are where authorisation belongs, per field, because the client chooses which fields to request.</li><li>Errors thrown in a resolver surface on that field, with data for the rest of the tree when possible.</li><li>Because the client controls the traversal, resolver cost is not fixed by the endpoint design.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Mutations and subscriptions</h2>
+<ul><li>Mutations are writes declared in the schema, and their top-level fields execute <strong>serially</strong> in document order.</li><li>They return a selection set, usually the changed object, so the client can update its cache without a second read.</li><li>Input types group mutation arguments into one object, which keeps signatures stable as fields are added.</li><li>Mutations are not automatically idempotent; a retried create behaves like a retried POST.</li><li>Subscriptions push updates over a long-lived connection such as WebSocket, driven by server-side events.</li><li>Subscriptions need authorisation per topic and backpressure handling, or they become an unbounded fan-out.</li><li>Many teams skip subscriptions and use webhooks or polling, which are simpler to operate.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The N+1 problem</h2>
+<p class="lede">The most common performance failure in GraphQL is a list field whose child field resolves once per item.</p>
+<ul><li>A query for 50 orders, each with a customer, can trigger 50 separate customer lookups after the initial list query.</li><li>The client sees one HTTP request, but the server issues dozens or hundreds of backend calls.</li><li>The fix is batching: collect the keys needed within one execution tick and fetch them in a single call.</li><li><strong>DataLoader</strong> is the standard pattern, giving per-key batching plus per-request caching.</li><li>Batch loaders must be per request, not global, or users can see each other's cached data.</li><li>Join or prefetch at the data layer where possible, so the batch is one query rather than many.</li><li>Monitor resolver-level timing and backend call counts, because HTTP-level metrics hide this cost.</li></ul>
+
+<div class="flow"><span class="flow-step">Resolve the order list</span><span class="flow-arrow">→</span><span class="flow-step">Child customer resolver queues key 7</span><span class="flow-arrow">→</span><span class="flow-step">More keys queue within the same tick</span><span class="flow-arrow">→</span><span class="flow-step">Loader issues one batched lookup</span><span class="flow-arrow">→</span><span class="flow-step">Results are mapped back per parent</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Caching and performance</h2>
+<ul><li>HTTP caching assumes one URL per resource; GraphQL uses one URL for everything, so CDN caching mostly disappears.</li><li>Clients still cache normalised objects by type and ID, which is why Apollo-style clients feel fast on repeat navigation.</li><li><strong>Persisted queries</strong> restore some CDN-ability: the client sends a hash and the server maps it to a query.</li><li>Server-side response caching must be keyed on the operation plus variables plus user scope.</li><li>Field-level caching inside resolvers can help, but invalidation becomes the hard part.</li><li>Depth and complexity limits are performance controls, not just security controls.</li><li>Because one query can touch many services, tracing per resolver is essential for finding the slow part.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Query cost, abuse, and security</h2>
+<ul><li>A client can request a very expensive graph traversal in a single legal query, so rate limiting by request count is not enough.</li><li>Enforce <strong>depth limits</strong>, complexity budgets, and pagination requirements on list fields.</li><li>Use persisted or allowlisted queries in production so only known documents can execute.</li><li>Disable or restrict introspection outside development to reduce schema disclosure.</li><li>Authorise at the field level: hiding a field in the UI is not access control.</li><li>Timeout and cancel long executions, and cap the total resolvers a single request may invoke.</li><li>Aliases can multiply the same expensive field, so cost calculation must account for repetition.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>GraphQL vs REST, and when to use it</h2>
+<ul><li>Choose GraphQL when many clients need different shapes of the same data, especially mobile plus web plus partners.</li><li>Choose it when the domain is a highly connected graph that would otherwise need many bespoke endpoints.</li><li>Prefer REST for simple public APIs, for file uploads and downloads, and where HTTP caching is central.</li><li>Prefer gRPC for internal service-to-service calls where schema and performance matter more than client flexibility.</li><li>GraphQL shifts complexity: simpler clients, harder server operations, caching, and rate limiting.</li><li>A BFF with REST is often enough when only one or two clients need shaping.</li><li>You can mix styles: GraphQL at the edge, REST or gRPC behind it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>REST</th><th>GraphQL</th></tr></thead><tbody><tr><td>Response shape</td><td>Server decides per endpoint</td><td>Client selects fields</td></tr>
+<tr><td>Round trips</td><td>Often several per screen</td><td>One query for a graph</td></tr>
+<tr><td>Caching</td><td>Native HTTP and CDN caching</td><td>Client normalised cache, persisted queries</td></tr>
+<tr><td>Rate limiting</td><td>Per endpoint and request</td><td>Per query cost and complexity</td></tr>
+<tr><td>Tooling</td><td>Simple, universal</td><td>Rich, but requires schema and client libraries</td></tr>
+<tr><td>Failure surface</td><td>Whole request fails</td><td>Partial data with field-level errors</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Client-selected fields</strong> remove over-fetching but make response size and cost unpredictable to the server.</li><li><strong>Single endpoint</strong> simplifies the surface but removes URL-based CDN caching.</li><li><strong>One query per screen</strong> cuts round trips but can hide N+1 work behind a single HTTP call.</li><li><strong>Strong typing</strong> enables code generation and validation but requires schema discipline and review.</li><li><strong>Introspection</strong> helps tooling but exposes your data model unless restricted.</li><li><strong>Subscriptions</strong> give real-time updates but add connection state, authorisation, and backpressure work.</li><li><strong>Persisted queries</strong> restore caching and reduce abuse but require a build-time registration step.</li><li><strong>Field-level resolvers</strong> keep concerns separated but multiply backend calls if not batched.</li><li><strong>Flexible queries</strong> serve diverse clients but make cost limits and capacity planning harder.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does GraphQL solve?</summary><div class="answer"><p>It removes fixed response shapes by letting the client request exactly the fields it needs from one typed graph. That eliminates over-fetching and reduces the multiple round trips typical of composing a screen from several REST endpoints.</p></div></details>
+<details><summary>2. How does a GraphQL request actually execute?</summary><div class="answer"><p>The server parses and validates the document against the schema, then walks the selection set calling a resolver per field. The response mirrors the query shape, and field errors can coexist with partial data.</p></div></details>
+<details><summary>3. What is the N+1 problem in GraphQL?</summary><div class="answer"><p>A list field's child resolver runs once per item, so one client request can trigger dozens of backend queries. Batching keys within an execution tick, usually with a per-request DataLoader, collapses those into a single call.</p></div></details>
+<details><summary>4. Why is caching harder in GraphQL than in REST?</summary><div class="answer"><p>REST gives each resource its own URL, which HTTP caches and CDNs understand. GraphQL sends everything to one URL with different bodies, so shared caching needs persisted queries or server-side caching keyed on operation, variables, and user.</p></div></details>
+<details><summary>5. How do you protect a GraphQL endpoint from expensive queries?</summary><div class="answer"><p>Enforce depth limits, complexity budgets, required pagination, and timeouts, and consider allowlisting persisted queries in production. Rate limiting by request count alone fails because one legal query can be arbitrarily expensive.</p></div></details>
+<details><summary>6. Where should authorisation live in GraphQL?</summary><div class="answer"><p>In the field resolvers, because the client chooses which fields to request and the same object may expose fields with different permissions. Hiding fields in the client or relying on query-level checks leaves holes.</p></div></details>
+<details><summary>7. Are mutations idempotent?</summary><div class="answer"><p>No, not automatically. A retried create mutation behaves like a retried POST and can duplicate the resource, so idempotency keys or explicit deduplication are still needed.</p></div></details>
+<details><summary>8. What is the difference between a query and a mutation in execution terms?</summary><div class="answer"><p>Query fields may resolve concurrently. Mutation top-level fields execute serially in document order, which lets a client rely on one write completing before the next begins.</p></div></details>
+<details><summary>9. Would you use GraphQL for internal service-to-service calls?</summary><div class="answer"><p>Usually not. Internal calls benefit more from a compact, strongly typed RPC protocol such as gRPC with predictable performance, while GraphQL's flexibility pays off mainly when diverse clients shape their own responses.</p></div></details>
+<details><summary>10. How do you evolve a GraphQL schema without breaking clients?</summary><div class="answer"><p>Add fields and types rather than removing or renaming them, mark retiring fields with <code>@deprecated</code>, and monitor field usage to know when removal is safe. Because clients select fields explicitly, unused fields can often be removed after telemetry confirms they are unused.</p></div></details>
+<details><summary>11. When is REST the better choice?</summary><div class="answer"><p>When the API is simple and public, when endpoints map cleanly to resources, when file transfer or HTTP caching dominates, or when you want the lowest operational complexity. GraphQL repays its cost only when client flexibility is a real requirement.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming one GraphQL request means one backend query; N+1 resolver calls hide behind a single HTTP call.</li><li>Sharing a DataLoader cache across requests, which leaks one user's data into another's response.</li><li>Rate limiting by request count on a single endpoint, where one query can be arbitrarily expensive.</li><li>Treating introspection as harmless in production and exposing the entire schema.</li><li>Enforcing access control at the query level while fields have different permissions.</li><li>Deleting schema fields instead of deprecating them, breaking clients that still select them.</li><li>Expecting CDN caching to work as it does for REST URLs.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="rest-api-design.html"><span>← Previous</span><strong>REST Fundamentals</strong></a><a class="next" href="grpc.html"><span>Next →</span><strong>gRPC Fundamentals</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/graphql">AlgoMaster — GraphQL Fundamentals</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

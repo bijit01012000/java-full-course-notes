@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LSM Trees — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 44 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>LSM Trees</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/lsm-trees">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with updating in place</a>
+<a href="#s2">What an LSM tree is</a>
+<a href="#s3">The write path</a>
+<a href="#s4">Levels and runs</a>
+<a href="#s5">The read path</a>
+<a href="#s6">Deletes and tombstones</a>
+<a href="#s7">Compaction</a>
+<a href="#s8">Compaction strategies</a>
+<a href="#s9">The three amplifications</a>
+<a href="#s10">Bloom filters and block indexes</a>
+<a href="#s11">Durability and crash recovery</a>
+<a href="#s12">LSM trees versus B-trees</a>
+<a href="#s13">Operating an LSM store</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>An LSM tree turns random writes into sequential ones by buffering changes in memory and flushing sorted immutable files, then merging those files in the background — which makes writes fast and reads more complicated.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>LSM tree</dt><dd>Log-structured merge tree: a storage design that collects writes in memory, flushes them as sorted files, and merges those files in the background.</dd></div><div class="term"><dt>Memtable</dt><dd>The in-memory sorted structure that absorbs writes; when it fills, it is flushed to disk as a new file.</dd></div><div class="term"><dt>SSTable</dt><dd>A sorted string table — an immutable, sorted file of key-value entries written once and never modified in place.</dd></div><div class="term"><dt>Write-ahead log</dt><dd>An append-only log written before the memtable so an unflushed write survives a crash.</dd></div><div class="term"><dt>Compaction</dt><dd>The background merge of several sorted files into fewer, larger ones, discarding overwritten values and tombstones.</dd></div><div class="term"><dt>Tombstone</dt><dd>A delete marker written as a value so the deletion can hide older versions until compaction removes them all.</dd></div><div class="term"><dt>Bloom filter</dt><dd>A compact probabilistic structure that answers <em>definitely not here</em> or <em>maybe here</em>, letting reads skip files that cannot hold the key.</dd></div><div class="term"><dt>Write amplification</dt><dd>The ratio of bytes physically written to bytes logically written; compaction rewrites data repeatedly, which inflates it.</dd></div><div class="term"><dt>Read amplification</dt><dd>The number of files or blocks a read must consult before the newest version of a key is found.</dd></div><div class="term"><dt>Leveled compaction</dt><dd>A strategy with non-overlapping sorted runs per level, each level larger than the one above, which keeps reads cheap but rewrites data more often.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with updating in place</h2>
+<p class="lede">A B-tree updates pages where they already live. That is excellent for reads, but poor at absorbing a constant stream of writes.</p>
+<ul><li>Each write dirties a page somewhere in the file, so writes arrive as <strong>random</strong> I/O rather than sequential.</li><li>A single logical insert can touch a leaf, a parent, and several index pages — the tree's own write amplification.</li><li>Random page updates are expensive on spinning disks and still costly on SSDs, which prefer large sequential writes.</li><li>Write-heavy systems — metrics, events, messages, logs — can outrun what in-place updates sustain.</li><li>The alternative is to stop updating in place entirely and append new sorted data instead.</li><li>That is the core idea of the LSM tree: make every write sequential and defer the tidying up.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What an LSM tree is</h2>
+<ul><li>Writes land in an in-memory sorted buffer and are also appended to a log for durability.</li><li>When the buffer fills, it is written out as one <strong>immutable sorted file</strong> — an SSTable.</li><li>Files are never modified after they are written; a change to a key becomes a new entry in a newer file.</li><li>A background <strong>compaction</strong> process merges files, keeping only the newest version of each key.</li><li>So the structure is a set of sorted runs, newest first, rather than one tree of pages.</li><li>Sequential appends make writes cheap; merging keeps the number of files from growing without bound.</li><li>This design powers engines such as LevelDB, RocksDB, Cassandra, ScyllaDB, and HBase.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The write path</h2>
+<ul><li>Append the record to the <strong>write-ahead log</strong> so it survives a crash before it reaches disk as data.</li><li>Insert the key and value into the <strong>memtable</strong>, an in-memory sorted structure such as a skip list.</li><li>When the memtable reaches its size threshold, it becomes immutable and a fresh memtable takes new writes.</li><li>The immutable memtable is flushed to disk as a new SSTable, typically at level zero.</li><li>The flush is a <strong>sequential</strong> write of already-sorted data, which is the cheapest kind of disk write.</li><li>The write is acknowledged after the log append, not after the flush, so latency does not include compaction.</li><li>A group commit batches many log appends into one flush, which keeps throughput high under concurrency.</li></ul>
+
+<div class="flow"><span class="flow-step">Append to WAL</span><span class="flow-arrow">→</span><span class="flow-step">Insert into memtable</span><span class="flow-arrow">→</span><span class="flow-step">Memtable full: freeze it</span><span class="flow-arrow">→</span><span class="flow-step">Flush frozen memtable to L0 SSTable</span><span class="flow-arrow">→</span><span class="flow-step">Compaction merges files in the background</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Levels and runs</h2>
+<ul><li><strong>Level zero</strong> holds freshly flushed files whose key ranges usually overlap, so a read may have to check several of them.</li><li>Deeper levels hold <strong>non-overlapping</strong> sorted runs, so a read can pick the one file whose key range contains the target.</li><li>Each deeper level is larger than the one above, so data migrates downward as it ages.</li><li>Compaction takes files from one level, merges them with the overlapping files in the next, and writes new files.</li><li>Because each level's ranges do not overlap, lookups at deeper levels need one binary search plus one file read.</li><li>The hierarchy bounds the number of files a read must consider, which is what keeps read cost predictable.</li><li>A <strong>manifest</strong> records which files belong to which level so the set can be recovered after a crash.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The read path</h2>
+<ul><li>Check the mutable <strong>memtable</strong> first, since it holds the newest writes.</li><li>Then check any frozen memtables waiting to be flushed.</li><li>Then search level-zero files newest to oldest, because their ranges overlap.</li><li>Then, at each deeper level, binary search the file ranges and read the single candidate file.</li><li>Use a <strong>Bloom filter</strong> per file to skip files that certainly do not contain the key.</li><li>Inside a file, a sparse index or fence pointers locate the block, and a block cache may already hold it.</li><li>The first version found wins, because newer data always lives in newer files.</li><li>A read that must consult many files is slow, which is exactly what compaction exists to prevent.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Step</th><th>Where to look</th><th>Why</th></tr></thead><tbody><tr><td>1</td><td>Mutable memtable</td><td>Newest writes live here</td></tr>
+<tr><td>2</td><td>Frozen memtables</td><td>Flush is pending</td></tr>
+<tr><td>3</td><td>Level-zero files, newest first</td><td>Overlapping ranges</td></tr>
+<tr><td>4</td><td>Deeper levels</td><td>One non-overlapping file per level</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Deletes and tombstones</h2>
+<ul><li>Files are immutable, so a delete cannot remove an entry in place.</li><li>Instead the engine writes a <strong>tombstone</strong> for the key in the newest file.</li><li>A read stops at the tombstone and reports the key as missing, even though older values still exist on disk.</li><li>The old values are physically removed only when compaction merges the tombstone with the files below it.</li><li>Until then the deleted data still occupies space — the source of <strong>space amplification</strong>.</li><li>A tombstone cannot be dropped at a level above the oldest surviving version, or a deleted value would reappear.</li><li>TTL expiry works the same way: an expired entry is hidden immediately but reclaimed later.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Compaction</h2>
+<ul><li>Compaction reads several sorted files, merges them in key order, and writes the result back out.</li><li>During the merge it drops values superseded by a newer version and drops tombstones once nothing older remains.</li><li>The output is fewer, larger, non-overlapping files, so future reads touch less data.</li><li>It runs in the background so writes are not blocked, but it competes for disk bandwidth and CPU.</li><li>If writes arrive faster than compaction can keep up, the engine applies back-pressure and <strong>write stalls</strong> appear.</li><li>Compaction is where LSM write amplification comes from: the same bytes are rewritten at every level they pass through.</li><li>Its scheduling — how many threads, which files, when — is the main operational knob of an LSM store.</li></ul>
+
+<div class="flow"><span class="flow-step">Pick overlapping files</span><span class="flow-arrow">→</span><span class="flow-step">Merge in key order</span><span class="flow-arrow">→</span><span class="flow-step">Drop obsolete versions and tombstones</span><span class="flow-arrow">→</span><span class="flow-step">Write new sorted files</span><span class="flow-arrow">→</span><span class="flow-step">Update the manifest and delete old files</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Compaction strategies</h2>
+<ul><li><strong>Size-tiered</strong> compaction merges files of similar size into a larger one, so each byte is rewritten a limited number of times — cheap writes, more temporary space.</li><li><strong>Leveled</strong> compaction keeps each level non-overlapping and small relative to the next, which reduces read amplification at the cost of more rewriting.</li><li><strong>Tiered</strong> variants keep several runs per level and merge them in batches, trading read cost for lower write amplification.</li><li>The choice is really a choice of which amplification to minimize.</li><li>Workloads that read a lot of point lookups favor leveled; ingest-heavy workloads favor tiered or size-tiered.</li><li>Some engines let you tune the strategy per table or per column family.</li><li>Changing strategy on a live system triggers a large rewrite, so plan capacity for it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Write cost</th><th>Read cost</th><th>Space</th></tr></thead><tbody><tr><td>Size-tiered</td><td>Low</td><td>Higher: several overlapping runs</td><td>Higher: duplicates wait for a merge</td></tr>
+<tr><td>Leveled</td><td>High: repeated rewrites</td><td>Low: one file per level</td><td>Lower: bounded overlap</td></tr>
+<tr><td>Tiered</td><td>Low to moderate</td><td>Moderate</td><td>Moderate</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>The three amplifications</h2>
+<ul><li><strong>Write amplification:</strong> bytes written to storage divided by bytes the application wrote.</li><li><strong>Read amplification:</strong> files or blocks consulted to answer one read.</li><li><strong>Space amplification:</strong> disk used divided by the logical size of live data.</li><li>The three pull against each other: making reads cheap with leveled compaction rewrites data more often.</li><li>Aggressive compaction lowers read and space amplification but spends write bandwidth and can stall ingestion.</li><li>Lazy compaction lowers write cost but leaves more files to check and more garbage on disk.</li><li>So tuning is choosing which resource you have spare — usually disk bandwidth or read latency.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Bloom filters and block indexes</h2>
+<ul><li>A <strong>Bloom filter</strong> summarizes the keys in one file in a few bits per key.</li><li>It can prove a key is absent, which lets the read skip that file without any I/O.</li><li>It can never prove presence — a false positive sends the read to a file that does not hold the key.</li><li>More bits per key lowers the false-positive rate at the cost of memory.</li><li>Bloom filters do not help <strong>range</strong> scans, which must read a span of keys rather than test membership.</li><li>For ranges, the engine uses the sorted order plus fence pointers and a block index to seek and then scan.</li><li>Caching filters and index blocks in memory is what keeps point-read latency stable as data grows.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Durability and crash recovery</h2>
+<ul><li>Writes are durable once appended to the log, even though the data is still only in memory.</li><li>On restart the engine replays the log to rebuild the memtable.</li><li>Flushed SSTables are installed through a <strong>manifest</strong> update, so a half-written file is never referenced.</li><li>Files are written under a temporary name and renamed only when complete, which makes installation atomic.</li><li>Old files are deleted only after the manifest no longer references them, so a crash mid-compaction is recoverable.</li><li>Durability can be relaxed by acknowledging before the log is flushed, which risks losing the last writes.</li><li>Snapshots and backups must account for compaction: copying files while they are being merged yields an inconsistent set.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>LSM trees versus B-trees</h2>
+<ul><li>B-trees update in place: predictable point reads, but random writes and page splits.</li><li>LSM trees append: very fast writes, but reads may consult several files and compaction runs constantly.</li><li>LSM space grows during compaction, so capacity planning needs headroom that a B-tree does not require.</li><li>B-tree range scans walk linked leaves; LSM range scans merge several sorted runs through an iterator.</li><li>B-trees have a single version per key; LSM trees may hold several versions until compaction catches up.</li><li>Most write-heavy, distributed stores choose LSM; most transactional, read-latency-sensitive engines choose B-trees.</li><li>The question is rarely which is better in general, but which amplification your workload can afford.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>B-tree</th><th>LSM tree</th></tr></thead><tbody><tr><td>Write pattern</td><td>Random page updates</td><td>Sequential appends</td></tr>
+<tr><td>Point read</td><td>One tree descent</td><td>Memtable plus several files</td></tr>
+<tr><td>Range read</td><td>Walk linked leaves</td><td>Merge sorted runs</td></tr>
+<tr><td>Write amplification</td><td>Page splits and index updates</td><td>Repeated compaction rewrites</td></tr>
+<tr><td>Space behavior</td><td>Stable, with fill factor slack</td><td>Grows until compaction reclaims</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Operating an LSM store</h2>
+<ul><li>Watch <strong>compaction backlog</strong> and write stalls; both mean ingest is outrunning the merge pipeline.</li><li>Keep disk headroom, because compaction needs space for both its inputs and its outputs.</li><li>Very large values inflate compaction work; storing big blobs separately keeps the LSM small.</li><li>A hot key still writes to the same place, so compaction cannot fix a skewed access pattern.</li><li>Range scans over old data may read many files; iterator merging makes them correct but not free.</li><li>Tune compaction threads and file sizes to the storage: sequential-friendly devices reward larger files.</li><li>Choose an LSM store when writes dominate and you can accept background work; choose a B-tree when read latency and simplicity dominate.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Sequential writes</strong> make ingestion cheap but leave many overlapping files that reads must search.</li><li><strong>Leveled compaction</strong> keeps reads fast and space low but rewrites data repeatedly, raising write amplification.</li><li><strong>Size-tiered compaction</strong> lowers write cost but leaves more overlapping runs and more temporary garbage.</li><li><strong>Bloom filters</strong> skip irrelevant files cheaply but consume memory and cannot help range scans.</li><li><strong>Tombstones</strong> make deletes append-only and fast but hold space until compaction meets the oldest version.</li><li><strong>Larger memtables</strong> reduce flush frequency but increase memory pressure and the replay cost after a crash.</li><li><strong>Durability via WAL</strong> protects acknowledged writes but adds a flush per commit unless commits are grouped.</li><li><strong>Background compaction</strong> keeps the write path fast but competes with foreground reads for disk bandwidth and causes latency spikes.</li><li><strong>Deferred cleanup</strong> keeps writes cheap but means deleted data is still readable at the storage layer until compaction runs.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why do write-heavy systems use LSM trees?</summary><div class="answer"><p>Because every write becomes a sequential append — to the log and then to a new sorted file — instead of a random update to an existing page. Sequential I/O is far cheaper, and compaction tidies up in the background. The cost is later paid in read amplification and compaction bandwidth.</p></div></details>
+<details><summary>2. Walk through a write end to end.</summary><div class="answer"><p>The record is appended to the write-ahead log and inserted into the in-memory memtable. When the memtable fills, it is frozen and flushed as a new sorted SSTable at level zero. Later, compaction merges that file with overlapping files in deeper levels.</p></div></details>
+<details><summary>3. How does a read find the newest value?</summary><div class="answer"><p>It checks the mutable memtable, then frozen memtables, then level-zero files newest first, then one file per deeper level located by binary search. The first version found wins. Bloom filters and cached index blocks let it skip files that cannot contain the key.</p></div></details>
+<details><summary>4. What is a tombstone and why does it matter?</summary><div class="answer"><p>Because files are immutable, a delete is written as a marker rather than by removing data. Reads stop at the marker and report the key as gone, but the older value stays on disk until compaction merges the tombstone down to it. That leftover data is space amplification.</p></div></details>
+<details><summary>5. What does compaction actually do?</summary><div class="answer"><p>It merges several sorted files into fewer, larger non-overlapping ones, keeping only the newest version of each key and dropping tombstones once nothing older remains. It bounds read amplification and reclaims space, but it rewrites data, which is where LSM write amplification comes from.</p></div></details>
+<details><summary>6. Compare size-tiered and leveled compaction.</summary><div class="answer"><p>Size-tiered merges files of similar size, so each byte is rewritten fewer times — cheap writes, more overlapping runs and temporary space. Leveled keeps each level non-overlapping and progressively larger, so reads touch one file per level but data is rewritten more often.</p></div></details>
+<details><summary>7. What are the three amplifications?</summary><div class="answer"><p>Write amplification is bytes written to storage per byte the application wrote. Read amplification is how many files or blocks a read must consult. Space amplification is disk used versus live logical data. They trade against each other, so tuning picks which one to accept.</p></div></details>
+<details><summary>8. Why do reads get slower as an LSM tree grows?</summary><div class="answer"><p>More data means more files and deeper levels, so a lookup may consult more candidates unless compaction keeps the level structure tight. Bloom filters skip absent keys, and block caches hide repeated reads, but a cold cache plus a compaction backlog shows up as read latency.</p></div></details>
+<details><summary>9. What causes write stalls?</summary><div class="answer"><p>Writes arrive faster than compaction can drain level zero, so the engine throttles or pauses ingestion until files are merged. The usual fixes are more compaction throughput, a different strategy, higher write capacity, or reducing the write rate.</p></div></details>
+<details><summary>10. Are LSM deletes immediately durable?</summary><div class="answer"><p>The tombstone is durable as soon as it is logged, so the key reads as deleted right away. What is not immediate is physical reclamation — the old bytes remain until compaction. Backups taken before that point can still contain the old value, which matters for compliance.</p></div></details>
+<details><summary>11. B-tree or LSM: how do you choose?</summary><div class="answer"><p>Choose an LSM when writes dominate, the data set is large, and you can absorb compaction work — event logs, metrics, messages, time-ordered data. Choose a B-tree when read latency must be predictable and simple, or when the workload is transactional with random point updates.</p></div></details>
+<details><summary>12. Why not put large blobs in the LSM store?</summary><div class="answer"><p>Compaction rewrites every byte it merges, so a large value is copied at every level it passes through. Keeping blobs in object storage and the LSM entry holding only a pointer keeps compaction work proportional to the metadata, not the payload.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Saying LSM reads are always faster because writes are sequential — reads may consult many files.</li><li>Forgetting that deletes are tombstones, so disk usage does not drop when rows are deleted.</li><li>Tuning compaction for write throughput and then blaming the database for slow point reads.</li><li>Assuming a Bloom filter can accelerate range scans; it only proves absence of a specific key.</li><li>Running an LSM store near full disk, where compaction has no room for its temporary output.</li><li>Treating compaction as free background work instead of IO and CPU that competes with foreground traffic.</li><li>Backing up files during compaction and assuming the copied set is consistent.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="b-trees.html"><span>← Previous</span><strong>B-Trees and B+ Trees</strong></a><a class="next" href="relational-databases.html"><span>Next →</span><strong>Relational Databases</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/lsm-trees">AlgoMaster — LSM Trees</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

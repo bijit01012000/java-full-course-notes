@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vector Databases — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 52 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Vector Databases</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/vector-databases">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem vector databases solve</a>
+<a href="#s2">What a vector database is</a>
+<a href="#s3">Embeddings</a>
+<a href="#s4">Distance metrics</a>
+<a href="#s5">Approximate nearest-neighbor indexes</a>
+<a href="#s6">Recall versus latency</a>
+<a href="#s7">Metadata filtering</a>
+<a href="#s8">Updates, deletes, and index maintenance</a>
+<a href="#s9">Hybrid search and reranking</a>
+<a href="#s10">Scaling</a>
+<a href="#s11">Architecture choices</a>
+<a href="#s12">Evaluating quality</a>
+<a href="#s13">When to use one, and how it fails</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A vector database stores embeddings and answers <em>what is most similar to this?</em> with an approximate nearest-neighbor index, trading exactness for speed — and it only works if the embedding model, distance metric, and filters are designed together.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Embedding</dt><dd>A fixed-length numeric vector produced by a model to represent the meaning of text, an image, or audio.</dd></div><div class="term"><dt>Dimension</dt><dd>The number of components in a vector; it fixes index size and must match between ingestion and query.</dd></div><div class="term"><dt>Cosine similarity</dt><dd>A measure of the angle between two vectors, which ignores magnitude and suits normalized embeddings.</dd></div><div class="term"><dt>Approximate nearest neighbor</dt><dd>A search strategy that returns most of the true nearest vectors quickly instead of guaranteeing the exact set.</dd></div><div class="term"><dt>HNSW</dt><dd>A layered proximity graph that searches by greedily walking toward closer neighbors, giving fast high-recall queries.</dd></div><div class="term"><dt>IVF</dt><dd>Inverted file index: vectors are clustered, and a query searches only the few closest clusters.</dd></div><div class="term"><dt>Product quantization</dt><dd>Compressing vectors into short codes so the index fits in memory, at the cost of approximate distances.</dd></div><div class="term"><dt>Recall@k</dt><dd>The fraction of the true top-k neighbors that an approximate search actually returned.</dd></div><div class="term"><dt>Metadata filter</dt><dd>A structured predicate applied alongside vector similarity, such as tenant, language, or date.</dd></div><div class="term"><dt>Hybrid search</dt><dd>Combining keyword scoring with vector similarity and merging the two ranked lists.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem vector databases solve</h2>
+<p class="lede">Users search for <em>how do I stop my laptop battery draining</em>, and the best document says <em>reduce power consumption on portable computers</em>. Keyword matching sees almost no overlap.</p>
+<ul><li>Keyword search matches tokens, so it misses paraphrase, synonyms, and language differences.</li><li>The meaning of a piece of text can be represented as a numeric vector, and similar meanings produce nearby vectors.</li><li>Finding the nearest vectors answers <em>what is semantically closest to this?</em> rather than <em>what contains this word?</em></li><li>Comparing a query against every stored vector is exact but scales linearly with corpus size and dimension.</li><li>At millions of vectors, exact comparison per query becomes too slow and too expensive.</li><li>The answer is an index that returns almost the same neighbors much faster.</li><li>That is the job of a vector database: store vectors, index them, and filter by metadata.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a vector database is</h2>
+<ul><li>It stores records consisting of an id, an <strong>embedding</strong>, and optional structured metadata or payload.</li><li>Queries supply a query vector and ask for the k most similar stored vectors.</li><li>It maintains an <strong>approximate nearest-neighbor</strong> index rather than scanning every vector.</li><li>It supports metadata filters, updates, deletes, and usually persistence, replication, and sharding.</li><li>Many engines also store the original text or a pointer to it, so results can be returned without a second lookup.</li><li>The database does not understand meaning; the embedding model does, and the database only compares numbers.</li><li>So the quality of results depends on the model, the chunking, and the metric — not only on the index.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Embeddings</h2>
+<ul><li>An embedding model maps content into a vector so that semantically similar content lands nearby.</li><li>The same model must embed both the stored content and the query, and both must use the same preprocessing.</li><li>Vectors are often normalized to unit length so that ranking depends only on direction.</li><li>The <strong>dimension</strong> is fixed by the model and directly multiplies storage and distance-computation cost.</li><li>Different models capture different notions of similarity, so a model trained for code will behave poorly on prose.</li><li>Changing the model invalidates existing vectors: the whole corpus must be re-embedded and reindexed.</li><li>Store the model name and version beside each vector so a mixed index is detectable rather than silently wrong.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Distance metrics</h2>
+<ul><li><strong>Cosine similarity</strong> compares direction and ignores magnitude, which suits text embeddings.</li><li><strong>Dot product</strong> also rewards larger magnitude, which some models are trained to use deliberately.</li><li><strong>Euclidean distance</strong> compares absolute positions, which suits embeddings trained with that objective.</li><li>For unit-normalized vectors, cosine, dot product, and Euclidean ranking become equivalent, so normalization is a common simplification.</li><li>The metric must match how the model was trained; a mismatch degrades quality without any error.</li><li>Distance functions are the inner loop of search, so cheaper metrics directly buy throughput.</li><li>Document the metric per collection, because changing it later requires rebuilding the index.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Metric</th><th>Measures</th><th>Typical use</th></tr></thead><tbody><tr><td>Cosine</td><td>Angle between vectors</td><td>Text embeddings, normalized vectors</td></tr>
+<tr><td>Dot product</td><td>Angle weighted by magnitude</td><td>Models trained with inner-product objectives</td></tr>
+<tr><td>Euclidean (L2)</td><td>Straight-line distance</td><td>Image and audio embeddings</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Approximate nearest-neighbor indexes</h2>
+<ul><li><strong>HNSW</strong> builds a multi-layer proximity graph and searches by moving toward closer neighbors; it gives high recall and low latency but costs memory.</li><li><strong>IVF</strong> clusters vectors and probes only the nearest clusters, which is cheap to build but sensitive to how many clusters are probed.</li><li><strong>Product quantization</strong> compresses vectors into short codes so billions fit in memory, trading distance accuracy for footprint.</li><li><strong>LSH</strong> hashes similar vectors into shared buckets, which is simple and streaming-friendly but often needs many tables.</li><li>Graph indexes favor query speed; cluster indexes favor build speed and memory; quantized indexes favor scale.</li><li>Indexes are built in memory and persisted, so build time and memory are first-class capacity concerns.</li><li>A single engine may combine them — an IVF or quantized coarse stage followed by a graph or exact refinement.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Index</th><th>Idea</th><th>Strength</th><th>Cost</th></tr></thead><tbody><tr><td>HNSW</td><td>Navigable layered graph</td><td>High recall, low latency</td><td>Memory and build time</td></tr>
+<tr><td>IVF</td><td>Cluster then probe near clusters</td><td>Cheap builds, tunable</td><td>Misses vectors in unprobed clusters</td></tr>
+<tr><td>Product quantization</td><td>Compressed vector codes</td><td>Huge indexes in memory</td><td>Approximate distances</td></tr>
+<tr><td>LSH</td><td>Hash similar vectors together</td><td>Simple, streaming updates</td><td>Many tables for good recall</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Recall versus latency</h2>
+<ul><li>Approximate search may miss a true nearest neighbor, and <strong>recall@k</strong> measures how often it finds the real top k.</li><li>Every tuning knob trades recall for speed: graph breadth, number of probes, or candidate list size.</li><li>Raising recall means visiting more candidates, which increases latency and CPU per query.</li><li>The honest way to tune is to compute exact neighbors on a sample and measure what the index returns.</li><li>Recall also depends on the data: clustered, high-dimensional, or heavily filtered sets are harder.</li><li>A fast index with poor recall produces plausible but wrong answers, which is worse than an obvious error.</li><li>So recall is a product requirement, not an implementation detail, and it belongs in monitoring.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Metadata filtering</h2>
+<ul><li>Real queries combine similarity with constraints: this tenant, this language, this date range.</li><li>A <strong>post-filter</strong> searches first and discards non-matching results, which can return fewer than k items.</li><li>A <strong>pre-filter</strong> restricts the candidate set first, which is correct but can shrink the graph search into a scan.</li><li>Filtered graph search often loses recall because the filtered subgraph is poorly connected.</li><li>Partitioning by a dominant filter — tenant or namespace — keeps each index small and avoids the problem.</li><li>Payload indexes on filter fields make the selection step cheap.</li><li>Filtering strategy is a design decision; the same query can be fast or unusable depending on it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Updates, deletes, and index maintenance</h2>
+<ul><li>Graph indexes are expensive to mutate, so many engines write immutable segments and merge them in the background.</li><li>An update is usually a new vector plus a tombstone for the old one, not an in-place edit.</li><li>Deletes are logical until a merge or rebuild reclaims the space, so the index can be larger than the live data.</li><li>Frequent re-embedding of the same ids creates version churn and needs a stable deduplication key.</li><li>Rebuilding is required after a model change, a metric change, or a major index-parameter change.</li><li>Plan for a shadow index and an alias switch so a rebuild does not take search offline.</li><li>Write-heavy workloads therefore suit engines with segment-based merges, while read-heavy static corpora can use compact immutable builds.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Hybrid search and reranking</h2>
+<ul><li>Vector search handles meaning; keyword search handles exact names, codes, and rare tokens that embeddings blur.</li><li>Hybrid search runs both and merges the ranked lists, often with reciprocal rank fusion so scores need not be comparable.</li><li>A weighted blend is simpler but requires normalizing scores that mean different things.</li><li><strong>Reranking</strong> takes the top candidates from the fast stage and rescores them with a slower, more accurate model.</li><li>Two-stage retrieval is standard because an expensive model cannot run over the whole corpus per query.</li><li>Reranking improves precision noticeably when the first stage is broad enough to include the right answer.</li><li>Hybrid plus rerank is usually the strongest quality configuration, at the cost of more moving parts.</li></ul>
+
+<div class="flow"><span class="flow-step">Query</span><span class="flow-arrow">→</span><span class="flow-step">Vector search top N</span><span class="flow-arrow">→</span><span class="flow-step">Keyword search top N</span><span class="flow-arrow">→</span><span class="flow-step">Merge and deduplicate</span><span class="flow-arrow">→</span><span class="flow-step">Rerank shortlist</span><span class="flow-arrow">→</span><span class="flow-step">Return top k</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Scaling</h2>
+<ul><li>Raw vectors dominate memory: size grows with vector count times dimension times bytes per component.</li><li>Quantization trades a little accuracy for a large reduction in memory.</li><li>Sharding by tenant or namespace keeps each index small and makes filters unnecessary.</li><li>Sharding by vector count requires scatter-gather across shards and a merge of partial top-k results.</li><li>Replication adds query throughput and availability; the index is read-mostly, so replicas are effective.</li><li>Index build and merge consume CPU and memory, so ingest bursts can starve query latency.</li><li>Query throughput and index size are separate capacity dimensions, and both need their own headroom.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Architecture choices</h2>
+<ul><li>A dedicated vector database offers mature indexes, filtering, and scaling, at the cost of another system.</li><li>Extensions inside a relational database keep vectors beside the source of truth, which removes a sync problem entirely.</li><li>A search engine with vector support gives hybrid search in one place, which is attractive when keyword search already exists.</li><li>An in-process library suits small, static corpora where the index fits in the application's memory.</li><li>The two-store design has the usual consequence: the vector index is derived, and it must be rebuilt from the source of truth.</li><li>For retrieval-augmented generation, the store also needs the source text or a pointer, so results can be assembled.</li><li>Start with the smallest option that meets recall and scale targets, and move only when a measured limit appears.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Option</th><th>Strength</th><th>Cost</th></tr></thead><tbody><tr><td>Dedicated vector database</td><td>Mature ANN indexes and filtering</td><td>Another system to run and sync</td></tr>
+<tr><td>Database extension</td><td>Vectors beside the source of truth</td><td>Fewer index choices and tuning knobs</td></tr>
+<tr><td>Search engine with vectors</td><td>Hybrid search in one system</td><td>Heavier indexing pipeline</td></tr>
+<tr><td>In-process library</td><td>No extra service</td><td>Limited scale and durability</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Evaluating quality</h2>
+<ul><li>Build a golden set of queries with known relevant results, then measure recall and ranking quality.</li><li>Retrieval quality depends on <strong>chunking</strong>: chunks too large blur meaning, chunks too small lose context.</li><li>Overlapping chunks preserve context across boundaries at the cost of duplicate hits.</li><li>Include the document title or section heading in the chunk text so the embedding carries context.</li><li>Evaluate end-to-end behavior, because a correct retrieval can still be presented badly.</li><li>Track embedding model drift: a model upgrade changes every vector and every ranking.</li><li>Measure latency at the percentile users feel, not the average, since tail latency defines perceived speed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use one, and how it fails</h2>
+<ul><li>Good fits: semantic search, retrieval-augmented generation, similar-item recommendations, near-duplicate detection, and image or audio similarity.</li><li>Poor fits: exact lookups, transactional records, aggregations, and anything needing joins.</li><li>Weak fits: small corpora where exact search is fast enough and simpler to reason about.</li><li>A stale index is the main failure mode: new content is invisible and deleted content still surfaces.</li><li>A model or chunking change silently degrades quality unless vectors are regenerated together.</li><li>Returning plausible but irrelevant results erodes trust faster than returning nothing, so recall and relevance need monitoring.</li><li>The system needs both halves: retrieval quality from the model and pipeline, and operational quality from the index.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Approximate indexes</strong> make large-scale search fast but can miss true neighbors, so recall becomes a tunable product decision.</li><li><strong>Higher recall</strong> means visiting more candidates, which costs latency and CPU on every query.</li><li><strong>Quantization</strong> cuts memory dramatically but makes distance comparisons approximate and can need a refinement pass.</li><li><strong>Larger chunks</strong> preserve context but blur meaning; smaller chunks sharpen meaning but lose surrounding detail.</li><li><strong>Pre-filtering</strong> respects constraints exactly but can shrink a graph search into a scan; post-filtering stays fast but returns fewer than k results.</li><li><strong>Hybrid search</strong> improves quality on names and rare terms but doubles the retrieval work and needs score fusion.</li><li><strong>Reranking</strong> raises precision but adds a second, slower model in the query path.</li><li><strong>A dedicated vector store</strong> offers better indexes but adds sync lag and another system to operate.</li><li><strong>Keeping the index beside the source of truth</strong> avoids sync but limits index choice and scale.</li><li><strong>Frequent re-embedding</strong> keeps quality current but multiplies index build cost and churn.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does a vector database solve?</summary><div class="answer"><p>It finds items whose meaning is similar to a query rather than items sharing exact words. Content is embedded into vectors, and the database indexes them so a nearest-neighbor query returns semantically close results quickly, even when the wording differs.</p></div></details>
+<details><summary>2. Why not compare the query against every vector?</summary><div class="answer"><p>Exact comparison is correct but costs one distance computation per stored vector per query, multiplied by dimension. At millions of vectors and high query rates that is too slow. An approximate index returns nearly the same neighbors while touching only a small fraction of the data.</p></div></details>
+<details><summary>3. What is an embedding and what fixes its dimension?</summary><div class="answer"><p>An embedding is a vector produced by a model to represent the content's meaning. The model architecture fixes the dimension, which then fixes storage per vector and the cost of each distance computation. Using a different model changes the dimension and the geometry, so old vectors cannot be mixed in.</p></div></details>
+<details><summary>4. How do you choose a distance metric?</summary><div class="answer"><p>Match the metric the embedding model was trained with: cosine for direction-only similarity, dot product when magnitude is meaningful, Euclidean for position-based models. With unit-normalized vectors the three rank identically, so normalization removes the choice — but only if the model tolerates it.</p></div></details>
+<details><summary>5. Compare HNSW, IVF, and product quantization.</summary><div class="answer"><p>HNSW is a layered proximity graph giving high recall at low latency but costing memory and build time. IVF clusters vectors and probes only nearby clusters, which builds cheaply but misses unprobed ones. Product quantization compresses vectors into short codes so enormous indexes fit in memory, at the price of approximate distances.</p></div></details>
+<details><summary>6. What does recall@k mean and why does it matter?</summary><div class="answer"><p>It is the fraction of the true k nearest neighbors that the approximate search actually returned. Because the index is approximate, a fast setting can silently miss the best answer. Measuring recall against exact search on a sample is the only reliable way to tune the speed-accuracy trade-off.</p></div></details>
+<details><summary>7. How should metadata filters be applied?</summary><div class="answer"><p>Prefer partitioning by the dominant filter, such as tenant, so each index is already scoped. Otherwise pre-filter carefully, because restricting a graph search to a small subset can break its connectivity and lose recall, while post-filtering can return fewer than k results.</p></div></details>
+<details><summary>8. Why are deletes and updates expensive?</summary><div class="answer"><p>Graph indexes are hard to mutate in place, so engines write new segments and mark old vectors deleted. Space is reclaimed only when segments merge or the index is rebuilt. Heavy churn therefore produces tombstones, extra memory, and periodic rebuild cost.</p></div></details>
+<details><summary>9. What is hybrid search and when is it worth it?</summary><div class="answer"><p>It runs keyword and vector retrieval and merges the ranked lists, often with reciprocal rank fusion. It is worth it when queries mix concepts with exact tokens — product codes, names, error strings — that embeddings blur. The cost is double retrieval work and a fusion step.</p></div></details>
+<details><summary>10. Why is chunking a retrieval decision?</summary><div class="answer"><p>Each chunk is embedded as one unit, so its size decides what counts as one meaning. Large chunks blur distinct topics together, while small chunks lose the context that makes them interpretable. Overlap and including headings are the usual ways to keep context across boundaries.</p></div></details>
+<details><summary>11. Dedicated vector database or an extension in the existing database?</summary><div class="answer"><p>An extension keeps vectors beside the source of truth, removes sync work, and is usually enough at moderate scale. A dedicated store offers more index choices, filtering strategies, and horizontal scale, but it is a derived copy that must be kept current and operated separately.</p></div></details>
+<details><summary>12. What is the most common production failure?</summary><div class="answer"><p>A stale or mismatched index: new content is never embedded, deleted content keeps surfacing, or a new model version is mixed with old vectors. Because results still look plausible, nobody notices. The fix is versioning embeddings, an explicit ingestion pipeline, and monitoring for drift.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Embedding documents with one model and queries with another, then blaming the index for bad results.</li><li>Mixing vectors from different model versions in one collection and comparing them as if they were compatible.</li><li>Tuning for latency without measuring recall, so the system confidently returns the wrong neighbors.</li><li>Post-filtering by tenant and returning fewer results than requested, or pre-filtering into a near-scan.</li><li>Re-embedding on every edit without a stable id, leaving duplicate and stale vectors in the index.</li><li>Assuming an approximate index gives exact nearest neighbors, then debugging a ranking bug that is really recall.</li><li>Changing chunking or the embedding model in place without rebuilding the whole corpus.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="graph-databases.html"><span>← Previous</span><strong>Graph Databases</strong></a><a class="next" href="indexing.html"><span>Next →</span><strong>Indexing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/vector-databases">AlgoMaster — Vector Databases</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

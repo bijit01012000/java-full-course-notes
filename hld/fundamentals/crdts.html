@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRDTs — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 85 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>CRDTs</h1>
+    <p class="dek">Distributed System Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/crdts">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: concurrent writes on multiple replicas</a>
+<a href="#s2">What a CRDT is</a>
+<a href="#s3">State-based versus operation-based</a>
+<a href="#s4">The merge algebra</a>
+<a href="#s5">Counters</a>
+<a href="#s6">Sets</a>
+<a href="#s7">Registers and maps</a>
+<a href="#s8">Sequences and text</a>
+<a href="#s9">Causality and metadata</a>
+<a href="#s10">Deletes, tombstones, and garbage collection</a>
+<a href="#s11">Choosing between CRDT, OT, and consensus</a>
+<a href="#s12">Where CRDTs are used in practice</a>
+<a href="#s13">Limits and a practical checklist</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A CRDT is a data type whose concurrent updates can be merged deterministically, so every replica accepts writes locally and still ends up in the same state without agreeing first.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>CRDT</dt><dd>Conflict-free Replicated Data Type: a structure whose merge function always converges without coordination.</dd></div><div class="term"><dt>Strong eventual consistency</dt><dd>Replicas that have received the same set of updates hold the same state, regardless of delivery order.</dd></div><div class="term"><dt>State-based CRDT</dt><dd>Replicas ship their whole state or a delta and merge it with a join function (CvRDT).</dd></div><div class="term"><dt>Operation-based CRDT</dt><dd>Replicas ship individual operations that must be delivered causally and exactly once (CmRDT).</dd></div><div class="term"><dt>Join</dt><dd>The least-upper-bound merge of two states; it must be commutative, associative, and idempotent.</dd></div><div class="term"><dt>Tombstone</dt><dd>A marker recording that an element was deleted, retained so late-arriving adds do not resurrect it.</dd></div><div class="term"><dt>Version vector</dt><dd>A per-replica counter map that summarises which updates a replica has seen.</dd></div><div class="term"><dt>Causal delivery</dt><dd>Delivering an operation only after everything it depends on, which op-based CRDTs require.</dd></div><div class="term"><dt>OR-Set</dt><dd>An observed-remove set that tags each add so a remove only deletes the adds it actually saw.</dd></div><div class="term"><dt>Causal stability</dt><dd>The point at which no future update can still depend on an old one, allowing metadata to be discarded.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: concurrent writes on multiple replicas</h2>
+<ul><li>With multiple replicas accepting writes, two users can update the same item before either sees the other's change.</li><li>A last-write-wins rule silently discards one update, which is unacceptable for counters, sets, and shared documents.</li><li>Serialising every write through a leader or quorum adds a round trip and makes the system unavailable without a majority.</li><li>Offline and multi-region clients need to write locally and reconcile later, not block on the network.</li><li>The requirement is a merge that is <strong>deterministic</strong>: every replica computes the same result from the same updates, in any order.</li><li>CRDTs satisfy that by constraining the data type itself rather than the network or the coordination protocol.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a CRDT is</h2>
+<ul><li>A CRDT is a data structure with a <strong>merge function</strong> that always produces the same state regardless of order or duplication.</li><li>Each replica applies updates locally and immediately; no lock, quorum, or leader is consulted.</li><li>Replicas exchange updates asynchronously, and any two that have seen the same updates are identical.</li><li>The guarantee is <strong>strong eventual consistency</strong>: convergence is deterministic, not merely likely.</li><li>Conflicts are not resolved by a human or a timestamp alone; the data type encodes the resolution rule.</li><li>This gives availability during partitions and low-latency local writes, at the cost of richer metadata and constrained operations.</li><li>CRDTs solve data convergence, not business invariants; those still need coordination.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>State-based versus operation-based</h2>
+<ul><li><strong>State-based (CvRDT):</strong> a replica sends its state, or a delta, and the receiver merges with join.</li><li>State-based designs tolerate loss, duplication, and reordering because merging is idempotent and order-independent.</li><li>Their cost is state size: merging requires sending something at least as large as the difference.</li><li>Delta-state CRDTs send only the changed portion, keeping the tolerance while cutting bandwidth.</li><li><strong>Operation-based (CmRDT):</strong> a replica broadcasts operations, which are usually much smaller.</li><li>Op-based designs require causal, exactly-once delivery, which a reliable broadcast layer must provide.</li><li>In practice: state-based is simpler to make correct, op-based is cheaper on the wire.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>State-based</th><th>Operation-based</th></tr></thead><tbody><tr><td>Message</td><td>State or delta</td><td>Operation</td></tr>
+<tr><td>Delivery needs</td><td>Any order, duplicates fine</td><td>Causal, exactly once</td></tr>
+<tr><td>Bandwidth</td><td>Higher</td><td>Lower</td></tr>
+<tr><td>Implementation</td><td>Simpler to reason about</td><td>Needs a broadcast layer</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The merge algebra</h2>
+<ul><li>Merging must be <strong>commutative</strong>: merging A with B equals merging B with A.</li><li>It must be <strong>associative</strong>: grouping of merges does not change the result, so gossip paths do not matter.</li><li>It must be <strong>idempotent</strong>: merging the same state twice changes nothing, which makes duplicate delivery harmless.</li><li>Formally the states form a join-semilattice and merge is the least upper bound.</li><li>A monotonic growth rule — states only move up the lattice — guarantees that information is never lost by merging.</li><li>These properties are what let CRDTs ride on unreliable, unordered gossip instead of a reliable ordered log.</li><li>If a merge function lacks one property, replicas can diverge permanently and silently.</li></ul>
+
+
+<div class="note">Idempotence is the property most often broken by hand-rolled merges — for example, a counter that adds instead of taking a maximum.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Counters</h2>
+<ul><li>A <strong>G-Counter</strong> keeps one count per replica and merges by taking the maximum per replica; the value is their sum.</li><li>Taking the maximum makes duplicate increments harmless, because each replica's contribution is remembered once.</li><li>A <strong>PN-Counter</strong> pairs two G-Counters, one for increments and one for decrements, and the value is their difference.</li><li>PN-Counters cannot enforce a floor: concurrent decrements can drive the result negative even when every individual operation was valid.</li><li>Counters track totals, not identities, so they cannot answer questions like <em>did user 42 like this</em>.</li><li>Per-replica components mean metadata grows with the number of replicas, not with the number of increments.</li><li>Removing a departed replica's component requires knowing its updates are causally stable.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Sets</h2>
+<ul><li><strong>G-Set</strong> is grow-only: merge is union, so it can never remove an element.</li><li><strong>2P-Set</strong> uses an add set and a remove set; an element disappears when it is in both, and can never be re-added.</li><li><strong>LWW-Element-Set</strong> timestamps adds and removes and keeps the latest, which needs a tie-break rule for equal timestamps.</li><li><strong>OR-Set</strong> tags each add with a unique identifier, so a remove only deletes the adds it observed.</li><li>In an OR-Set, a concurrent add and remove resolves in favour of <strong>add</strong>, matching most user expectations.</li><li>Set variants differ in how badly they handle the re-add case, which is common in real workloads.</li><li>Choose based on semantics, not convenience: <em>remove wins</em> versus <em>add wins</em> is a product decision.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Type</th><th>Allows re-add</th><th>Concurrent add/remove</th></tr></thead><tbody><tr><td>G-Set</td><td>No removal at all</td><td>Not applicable</td></tr>
+<tr><td>2P-Set</td><td>No</td><td>Remove wins permanently</td></tr>
+<tr><td>LWW-Element-Set</td><td>Yes</td><td>Determined by timestamp</td></tr>
+<tr><td>OR-Set</td><td>Yes</td><td>Add wins</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Registers and maps</h2>
+<ul><li>A <strong>LWW-Register</strong> holds one value with a timestamp and keeps the newest, which is simple but silently loses the loser.</li><li>Clock skew makes LWW unsafe where the ordering must reflect causality; a hybrid logical clock reduces but does not remove the risk.</li><li>An <strong>MV-Register</strong> keeps all concurrent values and surfaces them to the application, which resolves the conflict explicitly.</li><li>This is the honest option when silent loss is unacceptable: show both, let the user or a rule choose.</li><li>A <strong>map</strong> is a CRDT of CRDTs: the keys are themselves a replicated structure and each value carries its own merge rule.</li><li>Nested types are what make CRDTs usable for documents — a task board with per-field types, for example.</li><li>Mixing types is legal but beware: a nested LWW inside an OR-Map inherits LWW's silent-loss behaviour.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Sequences and text</h2>
+<ul><li>Collaborative text is a sequence CRDT: characters have stable identifiers and are ordered by those identifiers, not by array index.</li><li>Insertions carry a reference to the identifier they follow, so a concurrent insert stays in the intended place.</li><li><strong>RGA</strong> orders concurrent inserts by identifier to break ties deterministically.</li><li><strong>Logoot and LSEQ</strong> allocate position identifiers between neighbours, which avoids renumbering entirely.</li><li><strong>YATA</strong>, used by Yjs, adds origin-left and origin-right references to keep interleaving natural.</li><li>Sequence CRDTs preserve <strong>intention</strong>: an insert meant for a spot stays near that spot after remote edits.</li><li>The cost is per-character metadata, which is why implementations compress and run-length encode aggressively.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Causality and metadata</h2>
+<ul><li>CRDTs need to know which updates a replica has already seen, or a merge cannot tell old from new.</li><li><strong>Lamport timestamps</strong> give a total order consistent with causality, sufficient for LWW types.</li><li><strong>Version vectors</strong> capture partial order and detect concurrency, but grow with replica count.</li><li><strong>Dotted version vectors</strong> keep the size manageable while preserving precise causality.</li><li>Op-based CRDTs rely on a causal broadcast layer; without it, an operation can be applied before its prerequisite.</li><li>Metadata is the real cost of CRDTs and the main thing to design deliberately.</li><li>Pruning old entries is only safe once causal stability is reached and no future update can reference them.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Deletes, tombstones, and garbage collection</h2>
+<ul><li>A delete must be remembered as a <strong>tombstone</strong>, otherwise a delayed add would resurrect the element.</li><li>Tombstones accumulate forever unless the system can prove no older update will arrive.</li><li><strong>Causal stability</strong> is that proof: once all replicas have seen an update, its metadata can be discarded.</li><li>Practical systems use coordinator acknowledgements, session tracking, or periodic snapshots to establish stability.</li><li>Snapshotting a document and discarding history is a common compromise, at the cost of losing late-merge ability.</li><li>Unbounded tombstones are the most common cause of CRDT memory and sync problems in production.</li><li>Design the GC strategy before shipping; retrofitting it often requires changing the wire format.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Choosing between CRDT, OT, and consensus</h2>
+<ul><li>CRDTs need no coordination and survive partitions, so they excel for offline editing, counters, presence, and carts.</li><li><strong>Operational transformation</strong> needs a central server to order and transform operations, giving tighter control of intention at the cost of a coordinator.</li><li>Consensus gives a single agreed order and supports invariants, but blocks without a majority.</li><li>LWW is simplest but silently drops concurrent writes, so use it only where loss is acceptable.</li><li>CRDTs cannot enforce global rules such as uniqueness or non-negative balances without extra coordination.</li><li>Hybrid designs are common: CRDT state for local editing, a quorum-based check for the invariant that matters.</li><li>Decision rule: does the data need convergence only, or a global truth? Convergence → CRDT, truth → coordination.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>CRDT</th><th>OT</th><th>Consensus</th></tr></thead><tbody><tr><td>Coordination</td><td>None</td><td>Central server</td><td>Majority quorum</td></tr>
+<tr><td>Works partitioned</td><td>Yes</td><td>No</td><td>No</td></tr>
+<tr><td>Invariants</td><td>Not enforceable</td><td>Server can enforce</td><td>Enforceable</td></tr>
+<tr><td>Main cost</td><td>Metadata growth</td><td>Server complexity</td><td>Latency and availability</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Where CRDTs are used in practice</h2>
+<ul><li>Collaborative editors use sequence CRDTs such as Yjs and Automerge to merge offline edits.</li><li>Distributed databases expose counters, sets, maps, and registers as replicated types in multi-region modes.</li><li>Shopping carts and to-do lists often use add-wins sets so concurrent edits never lose items.</li><li>Presence and analytics counters use grow-only or PN counters for cheap, partition-tolerant aggregation.</li><li>CRDTs also appear in local-first apps where the device holds the primary copy and sync is opportunistic.</li><li>Some systems use CRDTs internally for cluster state, combining them with gossip for dissemination.</li><li>The pattern is consistent: user-visible state that can tolerate merge, not money or inventory.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Limits and a practical checklist</h2>
+<ul><li>No global invariants: uniqueness, referential integrity, and balance floors need coordination.</li><li>Metadata can outgrow the payload, especially for text and sets with many deletes.</li><li>Semantic conflicts remain: two people can concurrently rename and delete the same document, and the merge is legal but wrong for the user.</li><li>Authorization is tricky because any replica can produce a valid update; verify at the boundary.</li><li>Schema evolution must be compatible across replicas that may be offline for a long time.</li><li>Pick the weakest type that matches the semantics, define the tie-break rule up front, and plan tombstone GC early.</li><li>Test convergence explicitly: apply the same operation set in many orders and assert identical final states.</li></ul>
+
+<div class="flow"><span class="flow-step">Define the user-visible semantics</span><span class="flow-arrow">→</span><span class="flow-step">Pick types per field, not one type for everything</span><span class="flow-arrow">→</span><span class="flow-step">Confirm the merge is commutative, associative, idempotent</span><span class="flow-arrow">→</span><span class="flow-step">Choose state-based or op-based transport</span><span class="flow-arrow">→</span><span class="flow-step">Plan causality metadata and tombstone GC</span><span class="flow-arrow">→</span><span class="flow-step">Test convergence under reordering and duplication</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Coordination-free writes</strong> give availability and low latency but make global invariants impossible to enforce.</li><li><strong>State-based merging</strong> is robust to any delivery pattern but costs bandwidth proportional to state size.</li><li><strong>Op-based merging</strong> is compact but depends on causal, exactly-once broadcast.</li><li><strong>Rich metadata</strong> preserves intent and enables merges at the cost of storage that grows with history.</li><li><strong>OR-Set semantics</strong> prevent lost additions but keep a tag per add, which is expensive for large sets.</li><li><strong>LWW types</strong> are small and simple but silently discard concurrent writes.</li><li><strong>Tombstone retention</strong> preserves correctness but consumes memory until causal stability is provable.</li><li><strong>Offline-first design</strong> improves user experience but pushes conflict handling onto the data model.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a CRDT?</summary><div class="answer"><p>A replicated data type whose merge function always converges, so replicas can accept writes locally and reconcile later. The guarantee is strong eventual consistency: same updates in, same state out, regardless of order.</p></div></details>
+<details><summary>2. Why do CRDT merges need commutativity, associativity, and idempotence?</summary><div class="answer"><p>Updates arrive in arbitrary order and may be duplicated. Commutativity makes order irrelevant, associativity makes grouping irrelevant, and idempotence makes duplicates harmless. Together they guarantee convergence over an unreliable network.</p></div></details>
+<details><summary>3. State-based or operation-based: how do you choose?</summary><div class="answer"><p>State-based is easier to make correct because it survives any delivery pattern, but messages are larger. Operation-based is compact but requires causal, exactly-once delivery. Delta-state CRDTs are the usual compromise.</p></div></details>
+<details><summary>4. How does a G-Counter work?</summary><div class="answer"><p>Each replica keeps its own counter and increments only its own slot. Merge takes the maximum per slot, and the value is the sum of all slots. Duplicate delivery is harmless because max is idempotent.</p></div></details>
+<details><summary>5. Why can a PN-Counter go negative?</summary><div class="answer"><p>It is two G-Counters whose difference is the value. Concurrent decrements on different replicas are each locally valid but sum to more than the increments, so the merged value can drop below zero. Enforcing a floor needs coordination.</p></div></details>
+<details><summary>6. What does an OR-Set solve?</summary><div class="answer"><p>It stops a remove from deleting an addition it never saw. Each add carries a unique tag, and a remove deletes only the tags it observed, so a concurrent add survives — the usual add-wins behaviour users expect.</p></div></details>
+<details><summary>7. What is a tombstone and why is it a problem?</summary><div class="answer"><p>A marker that records a deletion so a delayed add cannot resurrect the element. Tombstones accumulate indefinitely because the system cannot know when all replicas have seen them, which drives memory growth and slow syncs.</p></div></details>
+<details><summary>8. How do you garbage-collect CRDT metadata?</summary><div class="answer"><p>Wait for causal stability: once every replica has acknowledged an update, nothing can still reference its metadata. Systems establish this with session tracking, coordinator acknowledgements, or periodic snapshots, then prune tombstones and version entries.</p></div></details>
+<details><summary>9. CRDTs versus operational transformation?</summary><div class="answer"><p>OT routes operations through a central server that transforms them against concurrent edits, which keeps intention tight but requires a coordinator. CRDTs are peer-to-peer and partition-tolerant but carry more metadata and resolve conflicts by data-type rules.</p></div></details>
+<details><summary>10. What can a CRDT not do?</summary><div class="answer"><p>It cannot enforce a global invariant such as uniqueness, a non-negative balance, or inventory limits, because no replica has a current global view. Those need quorum coordination or a single authority.</p></div></details>
+<details><summary>11. Why is text hard for CRDTs?</summary><div class="answer"><p>Positions shift on every edit, so characters need stable identifiers and ordering rules to keep concurrent insertions in the intended place. Per-character metadata is large, and naive designs cause interleaving that looks wrong to users.</p></div></details>
+<details><summary>12. How would you test a CRDT implementation?</summary><div class="answer"><p>Generate random operation sets and apply them to replicas in many orders with duplication, then assert all replicas converge to the same state. Also test specific conflict cases such as concurrent add and remove, and measure metadata growth over time.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Using a last-write-wins register where losing a write is unacceptable.</li><li>Assuming convergence also preserves business invariants like uniqueness or non-negative balances.</li><li>Forgetting idempotence, so duplicate delivery double-counts.</li><li>Shipping a CRDT with no tombstone GC plan and watching metadata grow without bound.</li><li>Relying on wall-clock timestamps for ordering when clocks can drift.</li><li>Choosing add-wins or remove-wins semantics without deciding what users expect.</li><li>Testing only happy-path merges and never reordering or duplicating operations.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="gossip-protocol.html"><span>← Previous</span><strong>Gossip Protocol</strong></a><a class="next" href="operational-transformation.html"><span>Next →</span><strong>Operational Transformation</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/crdts">AlgoMaster — CRDTs</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

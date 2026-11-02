@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gossip Protocol — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 84 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Gossip Protocol</h1>
+    <p class="dek">Distributed System Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/gossip-protocol">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: sharing state across a large cluster</a>
+<a href="#s2">Anatomy of a gossip round</a>
+<a href="#s3">Push, pull, and push-pull</a>
+<a href="#s4">How fast information spreads</a>
+<a href="#s5">Membership and incarnation numbers</a>
+<a href="#s6">Failure detection with suspicion</a>
+<a href="#s7">Anti-entropy and reconciliation</a>
+<a href="#s8">Dissemination versus anti-entropy</a>
+<a href="#s9">Consistency guarantees and their limits</a>
+<a href="#s10">Tuning and cost</a>
+<a href="#s11">Where gossip is used</a>
+<a href="#s12">Gossip versus consensus</a>
+<a href="#s13">Operational pitfalls</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Gossip spreads cluster state without a coordinator: every node periodically tells a few random peers what it knows, and the news reaches the whole cluster in a handful of rounds.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Gossip protocol</dt><dd>A peer-to-peer dissemination scheme where each node forwards what it knows to a random subset of peers.</dd></div><div class="term"><dt>Round</dt><dd>One gossip cycle in which a node exchanges state with its chosen peers.</dd></div><div class="term"><dt>Fanout</dt><dd>The number of peers a node contacts per round; the main knob trading traffic for convergence speed.</dd></div><div class="term"><dt>Dissemination</dt><dd>Fast, repeated forwarding of new events so they reach everyone quickly.</dd></div><div class="term"><dt>Anti-entropy</dt><dd>Background reconciliation that compares and repairs differences so lost updates eventually reappear.</dd></div><div class="term"><dt>Merkle tree</dt><dd>A hash tree over data ranges whose differing branches pinpoint what two replicas must exchange.</dd></div><div class="term"><dt>Incarnation number</dt><dd>A per-node version that increases when the node refutes a rumour about itself, ordering conflicting membership claims.</dd></div><div class="term"><dt>SWIM</dt><dd>A membership and failure-detection protocol combining gossip with direct and indirect probes plus suspicion.</dd></div><div class="term"><dt>Seed node</dt><dd>A well-known contact point a joining node uses to discover the rest of the cluster.</dd></div><div class="term"><dt>Strong eventual consistency</dt><dd>A guarantee that replicas which have seen the same updates hold the same state, without requiring coordination on each write.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: sharing state across a large cluster</h2>
+<ul><li>Every node needs a view of the cluster: who is a member, who is alive, and which node owns which data.</li><li>A central registry answers this cheaply for small clusters but becomes a bottleneck and a single point of failure.</li><li>Broadcasting to everyone on every change is worse: message volume grows with the square of the cluster size.</li><li>State also changes constantly — a node joins, crashes, or is suspected — so the view must be continuously refreshed, not fetched once.</li><li>Nodes must converge on a usable answer even when messages are lost, duplicated, or delivered late.</li><li>Gossip solves this with local decisions and no coordinator: each node talks to a few peers, and the cluster converges as a whole.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Anatomy of a gossip round</h2>
+<ul><li>Each node keeps a local record of what it believes about itself and about its peers.</li><li>Every round it selects a small random set of peers and sends its state, a digest, or the recent changes.</li><li>Peers merge what they receive using a rule that must be <strong>commutative and idempotent</strong>, so repeated or reordered delivery is harmless.</li><li>Merged information is then forwarded in the next round, so updates fan out exponentially rather than linearly.</li><li>The randomness is what makes gossip robust: no peer is essential, and no single failure partitions the flow of news.</li><li>Because each node only needs a partial view, memory and per-round work stay bounded as the cluster grows.</li><li>A node that has been offline simply merges the accumulated state when it returns.</li></ul>
+
+<div class="flow"><span class="flow-step">Node selects a few random peers</span><span class="flow-arrow">→</span><span class="flow-step">Exchanges state or digests</span><span class="flow-arrow">→</span><span class="flow-step">Merges with a commutative, idempotent rule</span><span class="flow-arrow">→</span><span class="flow-step">Forwards the merged view next round</span><span class="flow-arrow">→</span><span class="flow-step">Repeat forever to repair losses</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Push, pull, and push-pull</h2>
+<ul><li><strong>Push:</strong> the sender transmits its state and the receiver merges; good when a node has news many peers lack.</li><li><strong>Pull:</strong> the node asks peers for their state; good when a node has just joined or recovered and is behind.</li><li><strong>Push-pull:</strong> both sides exchange digests and send only what the other lacks, which is the most bandwidth-efficient for steady state.</li><li>Pure push wastes bandwidth re-sending state a peer already has.</li><li>Pure pull delays dissemination because the owner must be asked before news moves.</li><li>Most production systems combine rapid push for new events with periodic push-pull anti-entropy.</li><li>The choice also affects latency: push spreads news in the same round it is created, pull waits for a request.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Mode</th><th>Who sends data</th><th>Best for</th></tr></thead><tbody><tr><td>Push</td><td>Initiator</td><td>Fresh events, fast dissemination</td></tr>
+<tr><td>Pull</td><td>Responder</td><td>Joining or recovering nodes</td></tr>
+<tr><td>Push-pull</td><td>Both, after digest exchange</td><td>Steady-state repair with low bandwidth</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>How fast information spreads</h2>
+<ul><li>Gossip is epidemic: the number of informed nodes grows multiplicatively each round while the uninformed pool shrinks.</li><li>With a fixed fanout, the whole cluster is typically covered in a number of rounds that grows only <strong>logarithmically</strong> with cluster size.</li><li>Doubling the cluster adds roughly one more round, which is why gossip scales to large fleets.</li><li>Higher fanout converges faster but costs more messages and CPU per round.</li><li>The tail matters: the last few uninformed nodes take disproportionately long, so practical systems add anti-entropy rather than waiting.</li><li>Round length is a latency floor — news cannot spread faster than one hop per interval.</li><li>Message loss is tolerated but slows convergence; the protocol degrades gradually rather than failing.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Membership and incarnation numbers</h2>
+<ul><li>A joining node contacts a <strong>seed</strong> node, learns the current member list, and announces itself.</li><li>Membership entries carry a state such as alive, suspect, or dead, plus a version.</li><li><strong>Incarnation numbers</strong> let a node refute a false rumour: it increments its own number, and higher numbers win over lower ones.</li><li>Without incarnation numbers, a stale dead rumour could circulate forever and never be corrected.</li><li>Gossip is eventually consistent, so two nodes can briefly disagree about whether a peer is alive.</li><li>Systems bound the damage by requiring confirmation before acting on a death rumour and by expiring dead entries after a retention period.</li><li>Member metadata often rides along: rack, zone, version, and capacity hints used for routing and placement.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Failure detection with suspicion</h2>
+<ul><li>A node pings a random peer each interval; a missing reply is weak evidence, not proof.</li><li>SWIM improves on naive timeouts with an <strong>indirect probe</strong>: if the direct ping fails, ask a few other nodes to probe the target.</li><li>Indirect probes distinguish a genuinely dead node from a congested path between two specific nodes.</li><li>A failed direct and indirect probe produces a <strong>suspicion</strong> rumour rather than an immediate death declaration.</li><li>The suspect can refute the rumour by incrementing its incarnation number, which spreads faster than the suspicion.</li><li>Suspicion then escalates to dead after a timeout if no refutation arrives.</li><li>This layered evidence is the same principle as a heartbeat suspect state: separate cheap doubt from expensive recovery.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Anti-entropy and reconciliation</h2>
+<ul><li>Anti-entropy runs in the background to guarantee that differences are eventually repaired even if push messages were lost.</li><li>Two replicas compare <strong>Merkle trees</strong> of their data ranges: equal roots mean agreement, differing branches identify exactly which ranges to exchange.</li><li>Only the differing leaves are transferred, so repair cost scales with the divergence, not the dataset.</li><li>Digests or version vectors can replace full trees when the data is small or the comparison is frequent.</li><li>Anti-entropy is slower and heavier than push gossip, so it runs on a longer interval.</li><li>It is what turns best-effort dissemination into a real convergence guarantee.</li><li>Rebuilding a Merkle tree over a large dataset is expensive; systems cache and update it incrementally.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Dissemination versus anti-entropy</h2>
+<ul><li><strong>Dissemination</strong> is optimised for latency: forward new events immediately to a few peers.</li><li><strong>Anti-entropy</strong> is optimised for completeness: periodically compare state and fix whatever is missing.</li><li>Dissemination alone leaves a small tail of nodes uninformed, especially after crashes or partitions.</li><li>Anti-entropy alone converges too slowly for time-sensitive membership changes.</li><li>Production designs run both: fast gossip for freshness, background repair for correctness.</li><li>The split also maps to message size: small deltas for dissemination, digest comparisons for repair.</li><li>Choosing only one is a common design mistake that shows up as slow convergence or permanent divergence.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Consistency guarantees and their limits</h2>
+<ul><li>Gossip provides <strong>eventual consistency</strong>: if messages stop, replicas converge, but there is no bound on when.</li><li>There is no global order and no atomic commitment, so gossip cannot by itself decide who owns a lock or a leader.</li><li>Duplicate delivery is normal; merge functions must be idempotent to avoid double counting.</li><li>Conflicting updates are resolved by a deterministic rule such as highest version, latest timestamp, or a CRDT merge.</li><li>Nodes may serve stale membership views, so a request can reach a node that has just been declared dead.</li><li>Reads and writes that need strong guarantees must still go through quorum or consensus, with gossip only supplying hints.</li><li>Treat a gossip view as a cache of cluster state, not as the authority for safety-critical decisions.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Tuning and cost</h2>
+<ul><li>Fanout and interval are the two main knobs: more peers or shorter intervals converge faster and cost more.</li><li>Message size compounds quickly, so send deltas or digests rather than whole state where possible.</li><li>Separate gossip traffic from request traffic, or a busy cluster will starve its own membership updates.</li><li>On very large clusters, shard gossip into pools or racks so each node tracks a bounded set of peers.</li><li>Compress and batch messages, and cap the number of entries sent per round.</li><li>Watch convergence time, message volume per node, and the rate of suspect-to-dead transitions.</li><li>Jitter round start times so the entire cluster does not gossip in lockstep.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Where gossip is used</h2>
+<ul><li><strong>Cassandra</strong> uses gossip to exchange node status, load, schema version, and ownership information.</li><li><strong>Consul</strong> runs separate LAN and WAN gossip pools for membership and failure detection across datacenters.</li><li><strong>Redis Cluster</strong> uses a cluster bus to gossip node state and slot ownership.</li><li><strong>Dynamo-style stores</strong> use gossip for membership and partition detection while quorums handle the data path.</li><li><strong>Serf and memberlist</strong> package SWIM-style gossip as a reusable library.</li><li><strong>Blockchain and peer-to-peer networks</strong> use gossip to propagate transactions and blocks.</li><li>The common pattern: gossip for control-plane state, quorums or consensus for data correctness.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Gossip versus consensus</h2>
+<ul><li>Gossip is cheap, decentralized, and scales, but it cannot guarantee a single agreed order.</li><li>Consensus provides linearizability but needs a majority round trip and a stable leader.</li><li>Gossip tolerates any number of failures for progress, since every node keeps gossiping; consensus stalls without a majority.</li><li>Consensus can confirm a membership change; gossip can only spread a rumour about it.</li><li>Many systems combine them: consensus for configuration and leases, gossip for discovery and health.</li><li>If you find yourself wanting gossip to prevent two nodes owning the same shard, you actually need consensus.</li><li>The decision rule: does a wrong answer cause data loss or split ownership? If yes, use consensus.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Gossip</th><th>Consensus</th></tr></thead><tbody><tr><td>Coordination</td><td>None, local decisions</td><td>Majority quorum</td></tr>
+<tr><td>Guarantee</td><td>Eventual convergence</td><td>Linearizable order</td></tr>
+<tr><td>Availability</td><td>Any reachable node can act</td><td>Needs a majority</td></tr>
+<tr><td>Cost per update</td><td>Small, amortised</td><td>Round trip to a quorum</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Operational pitfalls</h2>
+<ul><li>Assuming convergence is immediate and reading stale membership as truth.</li><li>Letting dead-node rumours persist instead of expiring them, which slowly poisons every view.</li><li>Running gossip over an unencrypted, unauthenticated channel where anyone can inject membership claims.</li><li>Forgetting that partitions heal: reconnecting nodes merge state and must not resurrect deleted data.</li><li>Using gossip to elect a leader or grant a lock, then discovering two owners during a partition.</li><li>Allowing a full-state exchange on every round, so bandwidth grows with dataset size.</li><li>Ignoring seed-node dependency: if all seeds are unreachable, new nodes cannot join.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Higher fanout</strong> speeds convergence but multiplies messages and CPU per node.</li><li><strong>Shorter rounds</strong> reduce propagation latency but increase background traffic.</li><li><strong>Push gossip</strong> is fast but wastes bandwidth on peers that already know the news.</li><li><strong>Pull-based repair</strong> is efficient but converges slowly for fresh events.</li><li><strong>Large messages</strong> carry more context but cost bandwidth on every exchange.</li><li><strong>Longer dead-node retention</strong> avoids premature removal but keeps stale entries in every view.</li><li><strong>Gossip instead of consensus</strong> buys availability and scale at the cost of ordering and split-ownership safety.</li><li><strong>Aggressive suspicion timeouts</strong> detect failures fast but generate false accusations that must be refuted.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a gossip protocol?</summary><div class="answer"><p>A decentralized dissemination scheme where each node periodically shares what it knows with a small random set of peers, and those peers pass it on. Information spreads epidemically, so the whole cluster converges without a coordinator.</p></div></details>
+<details><summary>2. Why does gossip scale better than broadcast or a central monitor?</summary><div class="answer"><p>Each node contacts a constant number of peers per round, so total work grows linearly with cluster size instead of quadratically. There is also no single receiver that must process every message or become a single point of failure.</p></div></details>
+<details><summary>3. How many rounds does gossip need to reach everyone?</summary><div class="answer"><p>With a fixed fanout, coverage grows multiplicatively and the number of rounds needed grows logarithmically with cluster size, so doubling the cluster adds roughly one round. The last few nodes form a slow tail, which anti-entropy cleans up.</p></div></details>
+<details><summary>4. What is the difference between dissemination and anti-entropy?</summary><div class="answer"><p>Dissemination forwards new events immediately for low latency. Anti-entropy periodically compares state, often with Merkle trees, and repairs whatever differs. Dissemination is fast but incomplete; anti-entropy is slow but complete.</p></div></details>
+<details><summary>5. How does SWIM detect failures?</summary><div class="answer"><p>Each node pings a random peer. If the direct ping fails, it asks a few other nodes to probe the target indirectly, which separates a dead node from a bad network path. A failure produces a suspicion rumour that the target can refute by incrementing its incarnation number.</p></div></details>
+<details><summary>6. Why are incarnation numbers needed?</summary><div class="answer"><p>Gossip can spread a false death rumour. A node refutes it by incrementing its own incarnation number, and peers prefer the higher number, so the correction wins over the stale claim. Without versioning, a dead rumour could circulate indefinitely.</p></div></details>
+<details><summary>7. What consistency does gossip give you?</summary><div class="answer"><p>Eventual consistency: if updates stop, replicas converge, but no deadline is guaranteed and there is no global order. Concurrent conflicts are resolved by a deterministic rule, which is why gossip is paired with CRDTs or quorums for data.</p></div></details>
+<details><summary>8. Can gossip elect a leader?</summary><div class="answer"><p>No, not safely. Two partitions could each gossip their way to a different leader and both accept writes. Gossip can spread candidacy hints or membership views, but the election itself needs a quorum-based consensus protocol.</p></div></details>
+<details><summary>9. What happens when a node rejoins after a long absence?</summary><div class="answer"><p>It contacts a seed, receives the current member list, and merges accumulated state. It may briefly hold an outdated view, so it should catch up and be treated as recovering before being trusted with traffic or ownership claims.</p></div></details>
+<details><summary>10. How do you tune a gossip cluster?</summary><div class="answer"><p>Adjust fanout and round interval against convergence time and traffic budget, send deltas or digests instead of full state, jitter start times, and isolate gossip traffic from request traffic. Measure convergence time rather than assuming defaults are fine.</p></div></details>
+<details><summary>11. What are Merkle trees used for here?</summary><div class="answer"><p>They summarise a replica's data by range, so two replicas can compare roots and descend only into differing branches. That makes repair proportional to the divergence rather than the dataset size.</p></div></details>
+<details><summary>12. When would you choose consensus over gossip?</summary><div class="answer"><p>Whenever a wrong answer means split ownership, lost writes, or a violated invariant — leader election, locks, unique keys, configuration commits. Gossip is for state where eventual convergence is acceptable.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Believing gossip gives a strong or immediately consistent view of membership.</li><li>Using gossip to elect a leader or grant exclusive ownership.</li><li>Forgetting that merge functions must be idempotent, so duplicates corrupt counters.</li><li>Never expiring dead nodes, so stale entries accumulate in every view.</li><li>Sending full state every round and letting bandwidth grow with the dataset.</li><li>Leaving the gossip channel unauthenticated so any host can inject membership claims.</li><li>Depending on seed nodes without redundancy, so new nodes cannot join when seeds fail.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="raft-algorithm.html"><span>← Previous</span><strong>Raft Algorithm</strong></a><a class="next" href="crdts.html"><span>Next →</span><strong>CRDTs</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/gossip-protocol">AlgoMaster — Gossip Protocol</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

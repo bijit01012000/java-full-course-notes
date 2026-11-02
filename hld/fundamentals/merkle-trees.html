@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Merkle Trees — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 98 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Merkle Trees</h1>
+    <p class="dek">Data Structures for Scale · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/merkle-trees">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: replicas drift apart</a>
+<a href="#s2">Why the simple approaches fail</a>
+<a href="#s3">The core idea: organize hashes into layers</a>
+<a href="#s4">Building the tree</a>
+<a href="#s5">Comparing two trees</a>
+<a href="#s6">Locating differences efficiently</a>
+<a href="#s7">Proofs: inclusion and consistency</a>
+<a href="#s8">Anti-entropy repair in databases</a>
+<a href="#s9">Git, blockchains, and content addressing</a>
+<a href="#s10">Other practical uses</a>
+<a href="#s11">Limitations and operational concerns</a>
+<a href="#s12">Design choices</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A Merkle tree hashes data into leaves and hashes pairs upward to a single root, so two machines can prove their datasets match with one hash and locate any difference by exchanging only a few more.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Merkle tree</dt><dd>A binary or n-ary tree in which every leaf is a hash of a data block and every parent is a hash of its children's hashes.</dd></div><div class="term"><dt>Leaf hash</dt><dd>The digest of one data block, the smallest unit the tree compares.</dd></div><div class="term"><dt>Internal hash</dt><dd>The digest of the concatenated child hashes, which summarizes an entire subtree.</dd></div><div class="term"><dt>Root hash</dt><dd>The single digest at the top of the tree; equal roots mean equal trees with overwhelming probability.</dd></div><div class="term"><dt>Audit path</dt><dd>The sibling hashes along the path from a leaf to the root, enough to prove that leaf belongs to a given root.</dd></div><div class="term"><dt>Consistency proof</dt><dd>Evidence that a newer tree is an append-only extension of an older one, used in transparency logs.</dd></div><div class="term"><dt>Anti-entropy repair</dt><dd>A background process that compares replicas with Merkle trees and streams only the differing ranges.</dd></div><div class="term"><dt>Merkle DAG</dt><dd>A directed acyclic graph of hashes rather than a strict tree, which is how Git stores commits, trees, and blobs.</dd></div><div class="term"><dt>Fanout</dt><dd>The number of children per node; higher fanout shortens the tree but makes each comparison cover more data.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: replicas drift apart</h2>
+<p class="lede">A distributed database keeps several replicas of the same data. They are supposed to be identical, and in practice they are not.</p>
+<ul><li>A node goes down briefly and misses writes that the others accepted.</li><li>A network partition lets a write reach two replicas but not the third.</li><li>A disk silently corrupts a few blocks without any write occurring.</li><li>Over time these small differences accumulate into real divergence.</li><li>The replicas must compare their contents and repair only what differs.</li><li>With a very large dataset, comparing everything is as expensive as copying it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why the simple approaches fail</h2>
+<ul><li><strong>Send everything:</strong> one replica transfers its entire dataset and the other compares row by row.</li><li>That moves the full data volume over the network even when a handful of rows differ.</li><li>It also loads both nodes with a comparison that is proportional to the whole dataset.</li><li><strong>Compare one hash:</strong> each replica hashes its entire dataset and exchanges the digest.</li><li>If the digests match, the data matches and almost no data moved — this part is good.</li><li>If they differ, the digest says only <em>something</em> changed, not what or where.</li><li>The fallback is a full comparison, which is the cost the hash was supposed to avoid.</li><li>What is needed is a hash structure that narrows the search for differences instead of only detecting them.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Data moved</th><th>Localizes differences</th></tr></thead><tbody><tr><td>Send everything</td><td>Whole dataset</td><td>Yes, but expensive</td></tr>
+<tr><td>One hash</td><td>A few bytes</td><td>No</td></tr>
+<tr><td>Merkle tree</td><td>A few hashes per level</td><td>Yes</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The core idea: organize hashes into layers</h2>
+<ul><li>Split the data into fixed-size blocks and hash each block to produce a <strong>leaf</strong>.</li><li>Hash pairs of leaf hashes to produce parents, and continue upward.</li><li>The top of the tree is a single <strong>root hash</strong> that depends on every block and on their order.</li><li>Change one byte anywhere and every hash on its path to the root changes, including the root.</li><li>Leave the data untouched elsewhere and all other hashes stay the same.</li><li>That property converts "is anything different?" into a root comparison and "where?" into a descent.</li><li>The tree is a summary hierarchy: each node is a commitment to everything beneath it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Building the tree</h2>
+<ul><li>Choose a block size: the unit at which differences are detected and repaired.</li><li>Hash each block in a fixed order to get the leaves.</li><li>Combine children deterministically — for a binary tree, hash the concatenation of the two child hashes.</li><li>Odd counts need a rule, such as duplicating the last node or carrying it up unchanged; the rule must be identical on both sides.</li><li>A domain prefix or length prefix is often included so that leaf hashes and internal hashes cannot be confused.</li><li>The root is published or exchanged; the tree itself can be rebuilt on demand from the data.</li><li>Build cost is linear in the data size, which is why the tree is usually built in the background and cached.</li></ul>
+
+<div class="flow"><span class="flow-step">Split data into blocks</span><span class="flow-arrow">→</span><span class="flow-step">Hash each block into a leaf</span><span class="flow-arrow">→</span><span class="flow-step">Hash pairs into parents</span><span class="flow-arrow">→</span><span class="flow-step">Repeat until one root</span><span class="flow-arrow">→</span><span class="flow-step">Exchange or store the root</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Comparing two trees</h2>
+<ul><li>Exchange the root hashes first. Equal roots mean the datasets match, and the comparison ends.</li><li>If the roots differ, request the children of the root from the other side.</li><li>Compare child hashes pairwise and recurse only into the pairs that differ.</li><li>Subtrees with equal hashes are proven identical and are never examined further.</li><li>At the leaves, the differing hashes identify the exact blocks to repair.</li><li>The cost is proportional to the number of differences times the tree depth, not to the dataset size.</li><li>The exchange is a depth-first comparison driven by hash equality.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Locating differences efficiently</h2>
+<ul><li>A single differing block requires walking one root-to-leaf path, so the number of hashes exchanged is about the tree height.</li><li>Multiple differences share upper levels, so the work grows with the number of distinct affected branches.</li><li>This is why Merkle comparison beats both full transfer and single-hash detection.</li><li>The tree height depends on fanout: wider nodes mean fewer levels but larger comparisons per level.</li><li>Block size sets the repair granularity: smaller blocks localize better but enlarge the tree.</li><li>If the trees have different shapes or block sizes, comparison is meaningless, so both sides must agree on the layout.</li><li>Protocol messages should bound how much of the tree a peer can request, or a malicious node can force a full walk.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Proofs: inclusion and consistency</h2>
+<ul><li>An <strong>audit path</strong> proves a single leaf belongs to a published root: send the leaf plus its sibling at each level.</li><li>The verifier recomputes hashes upward and checks the result equals the root.</li><li>The proof size is logarithmic in the number of leaves, not linear.</li><li>A <strong>consistency proof</strong> shows a new root is an append-only extension of an old one, without revealing all the data.</li><li>These proofs let a client trust a server's data without downloading it.</li><li>Proofs work because each node commits to its children, so any substitution changes the root.</li><li>Verification is cheap and local, which is why the pattern appears in transparency logs and block headers.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Anti-entropy repair in databases</h2>
+<ul><li>Replicas summarize their data ranges with Merkle trees and compare roots per range.</li><li>Differing ranges are narrowed and the actual rows are streamed for reconciliation.</li><li>Only the divergent data crosses the network, plus a bounded amount of hash metadata.</li><li>Cassandra's repair process is the canonical example: it builds trees over token ranges, compares them, and repairs mismatches.</li><li>Repair is background work and competes with normal traffic for disk and network.</li><li>Trees must be built over a consistent snapshot; otherwise the comparison chases writes that moved during the build.</li><li>Repair frequency trades consistency recovery time against operational cost.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Git, blockchains, and content addressing</h2>
+<ul><li><strong>Git</strong> stores blobs, trees, and commits as hashes in a Merkle DAG, so any change produces a new object and a new commit hash.</li><li>That is why Git can compare two repository states by commit hash and detect tampering anywhere in history.</li><li><strong>Bitcoin</strong> commits all transactions in a block to a single Merkle root inside the block header.</li><li>A lightweight client can verify that a transaction is in a block by checking a short audit path instead of the whole block.</li><li>Content-addressed storage names each object by its hash, so identical content deduplicates naturally.</li><li>Any system that must detect silent modification of stored data can use the same construction.</li><li>The common theme is tamper evidence with logarithmic proof size.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Other practical uses</h2>
+<ul><li>File synchronization: compare directory trees by hash and transfer only changed blocks.</li><li>Backup verification: periodically compare stored roots with freshly computed ones to catch bit rot.</li><li>Peer-to-peer distribution: verify chunks received from untrusted peers against a known root.</li><li>Package managers and update systems: sign a root and let clients verify individual artifacts.</li><li>Database consistency checks between primary and replica, or between shards during migration.</li><li>Deduplication pipelines that need to identify identical blocks without comparing bytes.</li><li>Any read-repair path where the question is "which part differs" rather than "does anything differ".</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Limitations and operational concerns</h2>
+<ul><li>Rebuilding the tree after every write is too expensive, so it is built over snapshots and refreshed periodically.</li><li>The tree is stale the moment data changes, which limits how fresh a comparison can be.</li><li>A single changed block invalidates every hash on its path, so fine-grained updates are costly without persistent tree storage.</li><li>Tree shape, block size, and hash function must match exactly on both sides.</li><li>Hash equality is probabilistic: a collision would make different data look identical, so use a strong hash.</li><li>Building a tree over a large dataset costs a full scan and significant CPU.</li><li>A malicious peer can exploit an unbounded comparison protocol, so requests must be rate-limited and structured.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Design choices</h2>
+<ul><li>Pick block size from the repair granularity you can afford, not from the page size by default.</li><li>Pick fanout from the metadata you are willing to exchange: binary trees are simple, wide trees are shallower.</li><li>Store the tree if comparisons are frequent; rebuild it if they are rare.</li><li>Hash a canonical serialization of each block, including ordering, so equal data always hashes equally.</li><li>Use a cryptographically strong hash when adversarial tampering is in scope, and a fast one only for accidental corruption.</li><li>Version the tree layout so incompatible peers fail loudly instead of comparing meaningless hashes.</li><li>Decide whether you need detection only, localization, or proofs, because each demands a different amount of machinery.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Use case</th><th>What is compared</th><th>What is proven</th></tr></thead><tbody><tr><td>Replica repair</td><td>Roots per data range</td><td>Which ranges differ</td></tr>
+<tr><td>Git</td><td>Commit hashes</td><td>Exact content and history</td></tr>
+<tr><td>Blockchain light client</td><td>Block Merkle root</td><td>A transaction is included</td></tr>
+<tr><td>File sync</td><td>Directory tree hashes</td><td>Which blocks changed</td></tr>
+<tr><td>Backup audit</td><td>Stored versus recomputed root</td><td>Data is unmodified</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Root comparison</strong> detects any difference in constant data transfer but says nothing about location.</li><li><strong>Descent into differing branches</strong> localizes changes but requires exchanging hashes level by level.</li><li><strong>Small blocks</strong> pinpoint repairs precisely but enlarge the tree and its metadata.</li><li><strong>Large blocks</strong> keep the tree small but force re-transfer of more data per difference.</li><li><strong>High fanout</strong> shortens the tree but makes every comparison exchange more hashes.</li><li><strong>Cached trees</strong> avoid rebuild cost but go stale as data changes.</li><li><strong>Strong hashes</strong> make tampering infeasible but cost more CPU than a checksum.</li><li><strong>Frequent repair</strong> shortens the divergence window but consumes background bandwidth and disk.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why is comparing one hash of the whole dataset not enough?</summary><div class="answer"><p>It detects that something differs but gives no information about where. Once the hashes disagree, the only options are comparing everything or transferring everything. A Merkle tree keeps a hash per subtree, so the comparison can descend and isolate the difference.</p></div></details>
+<details><summary>2. How is a Merkle tree built?</summary><div class="answer"><p>Split the data into blocks, hash each block into a leaf, then hash pairs of child hashes into parents until one root remains. The root depends on every block and on their order. Any change propagates up its path and alters the root.</p></div></details>
+<details><summary>3. How do two replicas find their differences?</summary><div class="answer"><p>They exchange roots. If equal, they stop. If not, they compare child hashes and recurse only into the branches that differ. Equal subtrees are skipped entirely. At the leaves, the mismatched hashes identify the exact blocks that need repair.</p></div></details>
+<details><summary>4. What is the cost of finding a single differing block?</summary><div class="answer"><p>One root-to-leaf path, so the number of hashes exchanged is proportional to the tree height — logarithmic in the number of blocks. That is the entire win over sending the dataset or comparing it row by row.</p></div></details>
+<details><summary>5. What is an audit path?</summary><div class="answer"><p>It is the list of sibling hashes along the path from a leaf to the root. Given the leaf and the path, a verifier recomputes hashes upward and checks the result against a known root. The proof is logarithmic in size, so a client can verify one item without downloading everything.</p></div></details>
+<details><summary>6. Why do block size and fanout matter?</summary><div class="answer"><p>Block size sets the repair granularity: a difference is found and fixed at block level, so small blocks transfer less data but make the tree larger. Fanout sets the tree height and how many hashes each comparison exchanges. Both must be identical on the peers being compared.</p></div></details>
+<details><summary>7. How does Cassandra-style repair use Merkle trees?</summary><div class="answer"><p>Each replica builds a tree over a token range, and the replicas compare roots to see which ranges differ. They narrow to the differing subtrees and stream only those rows. The tree must be built over a consistent snapshot, otherwise writes during the build create false mismatches.</p></div></details>
+<details><summary>8. How does Git use Merkle trees?</summary><div class="answer"><p>Git hashes file contents into blobs, directories into trees, and commits into commit objects that reference a tree and its parents. That forms a Merkle DAG. Comparing two commits is a hash comparison, and any change anywhere produces a different commit hash.</p></div></details>
+<details><summary>9. How does a blockchain use a Merkle root?</summary><div class="answer"><p>Transactions in a block are hashed into a Merkle tree, and only the root goes into the block header. A light client can verify a transaction with a short audit path against that root instead of downloading the block. Altering any transaction changes the root.</p></div></details>
+<details><summary>10. What happens when the data changes constantly?</summary><div class="answer"><p>The tree goes stale immediately, because every write changes a leaf and its ancestors. Rebuilding per write is too expensive, so systems build over snapshots, cache trees between repairs, or use a tree structure that supports incremental updates. Freshness and cost trade directly.</p></div></details>
+<details><summary>11. Why must both sides agree on tree layout?</summary><div class="answer"><p>Hashes are only comparable if leaves cover the same blocks, in the same order, with the same hash function and padding rules. A different block size or ordering produces different hashes for identical data and makes the comparison meaningless rather than merely slow.</p></div></details>
+<details><summary>12. Is hash equality proof of equal data?</summary><div class="answer"><p>Only with overwhelming probability. A collision would make different data hash identically. With a strong cryptographic hash, the probability is negligible against accidental or adversarial change. For mere corruption detection a fast checksum is often enough.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Exchanging only the root hash and assuming the comparison is finished when they differ — you still need to localize.</li><li>Building the tree over live, changing data so the comparison reports differences that never existed at one instant.</li><li>Using different block sizes or padding rules on the two sides.</li><li>Assuming a Merkle tree gives exact equality rather than probabilistic equality.</li><li>Rebuilding the whole tree on every write and calling repair cheap.</li><li>Leaving the comparison protocol unbounded so a peer can force a full tree walk.</li><li>Using a weak checksum where adversarial tampering is in scope.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="hyperloglog.html"><span>← Previous</span><strong>HyperLogLog</strong></a><a class="next" href="minhash.html"><span>Next →</span><strong>MinHash</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/merkle-trees">AlgoMaster — Merkle Trees</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

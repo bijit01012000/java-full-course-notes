@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lambda Architecture — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 106 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Lambda Architecture</h1>
+    <p class="dek">Big Data Processing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/lambda-architecture">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Two requirements that pull apart</a>
+<a href="#s2">The three layers</a>
+<a href="#s3">The batch layer</a>
+<a href="#s4">The speed layer</a>
+<a href="#s5">The serving layer and the merge</a>
+<a href="#s6">Why the architecture was introduced</a>
+<a href="#s7">The dual-logic problem</a>
+<a href="#s8">Reprocessing and backfill</a>
+<a href="#s9">Failure modes to design for</a>
+<a href="#s10">Variants and alternatives</a>
+<a href="#s11">When Lambda is still the right call</a>
+<a href="#s12">Designing Lambda in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Lambda architecture runs a batch pipeline for correctness and a streaming pipeline for freshness over the same immutable data, then merges their outputs at query time so results are immediate and eventually exact.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Batch layer</dt><dd>The pipeline that reprocesses the full immutable history on a schedule and produces authoritative, corrected views.</dd></div><div class="term"><dt>Speed layer</dt><dd>The streaming pipeline that processes only recent events to produce low-latency views covering the gap since the last batch run.</dd></div><div class="term"><dt>Serving layer</dt><dd>The queryable store that holds batch views plus realtime views and merges them for readers.</dd></div><div class="term"><dt>Master dataset</dt><dd>The append-only, immutable record of all raw events from which every view can be recomputed.</dd></div><div class="term"><dt>Batch view</dt><dd>A precomputed, indexed result built from the full history; accurate but stale by the batch interval.</dd></div><div class="term"><dt>Realtime view</dt><dd>A transient result computed from the newest events; fresh but superseded once the batch layer catches up.</dd></div><div class="term"><dt>Recomputation</dt><dd>Rebuilding views from the master dataset after a logic fix, which is how the batch layer recovers from wrong code.</dd></div><div class="term"><dt>Human fault tolerance</dt><dd>The property that bad code or bad data can be corrected by replaying history rather than patching damaged state in place.</dd></div><div class="term"><dt>Merge rule</dt><dd>The query-time rule that combines a batch view with the corresponding realtime delta for the uncovered time range.</dd></div><div class="term"><dt>Dual implementation</dt><dd>Maintaining the same business logic twice, once in batch code and once in streaming code, which is Lambda's core cost.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Two requirements that pull apart</h2>
+<p class="lede">Analytical systems are asked for a number that is fresh now and also correct in the long run, and those two demands favour different pipelines.</p>
+<ul><li>Batch processing over the full history is <strong>accurate and reprocessable</strong>, but results arrive only when the job finishes, often hours later.</li><li>Stream processing produces results in <strong>seconds</strong>, but a bug in a live pipeline has already emitted wrong output before anyone notices.</li><li>Correcting a streaming pipeline means reprocessing history, which a pure streaming design must build separately.</li><li>Many products need both: an operational dashboard that moves now, and a settled number used for billing, reporting, or reconciliation.</li><li>Lambda answers this by running <strong>both pipelines</strong> over the same source data and combining their outputs.</li><li>The design accepts duplicated computation as the price of getting low latency without giving up the ability to recompute.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The three layers</h2>
+<ul><li><strong>Batch layer</strong> owns the full history, recomputes views on a schedule, and is the source of eventual correctness.</li><li><strong>Speed layer</strong> consumes only the recent stream, fills the gap since the last batch view, and is optimised for latency.</li><li><strong>Serving layer</strong> indexes both outputs and answers queries by combining them.</li><li>All three read from one immutable input, so there is no separate ingestion truth to reconcile.</li><li>Each layer can be scaled, deployed, and tuned independently because their contracts are just views over data.</li><li>The batch layer is authoritative; the speed layer is a temporary compensation that is discarded as batch catches up.</li></ul>
+
+<div class="flow"><span class="flow-step">Events append to the immutable master log</span><span class="flow-arrow">→</span><span class="flow-step">Batch job recomputes full views on schedule</span><span class="flow-arrow">→</span><span class="flow-step">Stream job computes realtime deltas continuously</span><span class="flow-arrow">→</span><span class="flow-step">Batch views load into the serving store</span><span class="flow-arrow">→</span><span class="flow-step">Realtime views load into the serving store</span><span class="flow-arrow">→</span><span class="flow-step">Query merges batch view with the realtime delta</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The batch layer</h2>
+<ul><li>It stores the <strong>master dataset</strong>: raw events appended and never edited, so history is always available for replay.</li><li>A scheduled job reads all or a bounded slice of history and rebuilds the derived tables from scratch.</li><li>Recomputing from scratch is deliberately simple: there is no need to reason about incremental state or partial corrections.</li><li>The output is written as an immutable, versioned batch view that can be swapped in atomically.</li><li>If a business rule was wrong, the fix is a code change plus a rerun, not a manual repair of corrupted aggregates.</li><li>The cost is that the batch layer's latency equals the schedule interval, and full recomputation grows with history size.</li></ul>
+
+
+<div class="note">The batch layer's superpower is not speed; it is the ability to throw everything away and derive it again from raw facts.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The speed layer</h2>
+<ul><li>It reads the live event stream and maintains only the state needed for the period the batch layer has not yet covered.</li><li>Its output is a <strong>realtime view</strong>, usually a small delta: counts, sums, or latest values since a known cutoff.</li><li>Because the window it covers is short, its state is small and can often be held in memory or a local store.</li><li>It must be idempotent or exactly-once enough that a restart does not double-count events.</li><li>When a new batch view covering the same period is published, the corresponding realtime state can be discarded.</li><li>A speed-layer bug produces wrong numbers only for its short window, which the next batch run corrects, provided the merge is designed correctly.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The serving layer and the merge</h2>
+<ul><li>The serving store holds indexed <strong>batch views</strong> keyed for fast lookup, and a smaller store for realtime views.</li><li>A query reads the batch value and adds the realtime delta for the time range the batch view does not include.</li><li>The merge is only correct if the two views represent the <strong>same aggregation</strong> over disjoint, clearly bounded time ranges.</li><li>For additive metrics such as counts and sums, merging is simple addition; for distinct counts or percentiles, it needs mergeable sketches or a different design.</li><li>The cutoff must be explicit: the query needs to know which events the batch view already includes, or it will double-count.</li><li>Common implementations store the batch view with a version or watermark and let the serving API subtract the overlapping realtime window.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Batch view</th><th>Realtime view</th></tr></thead><tbody><tr><td>Coverage</td><td>Full history up to batch cutoff</td><td>Events after batch cutoff</td></tr>
+<tr><td>Latency</td><td>Batch interval</td><td>Seconds</td></tr>
+<tr><td>Accuracy</td><td>Authoritative after recompute</td><td>Provisional, may be corrected</td></tr>
+<tr><td>State size</td><td>Large, grows with history</td><td>Small, bounded by recent window</td></tr>
+<tr><td>Reprocessing</td><td>Replay full history</td><td>Rarely possible; discarded and rebuilt</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Why the architecture was introduced</h2>
+<ul><li>It was a response to the difficulty of making a streaming system both low latency and fully correctable.</li><li>The immutable master dataset provides <strong>human fault tolerance</strong>: fixes are expressed as new code over old data.</li><li>Batch recomputation gives a simple recovery story for bugs, bad deploys, and corrupted derived state.</li><li>The streaming layer exists only to hide batch latency, not to be the system of record.</li><li>This separation lets each layer use the tool best suited to it: a batch engine for full scans, a stream engine for continuous deltas.</li><li>It also predates mature unified engines, when one system could not credibly do both latencies well.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The dual-logic problem</h2>
+<ul><li>The same business rule must be implemented in the batch code and again in the streaming code, in two languages or two APIs.</li><li>The two implementations inevitably drift: a filter, a join, or a rounding rule changes in one and not the other.</li><li>Drift shows up as a <strong>discontinuity</strong>: the number jumps when the batch view replaces the realtime view.</li><li>Tests must compare batch and stream outputs on the same input, which is the only reliable defence against divergence.</li><li>Sharing a library or a declarative transformation layer reduces duplication but rarely removes it entirely.</li><li>Every new metric doubles the work: design, review, deploy, monitor, and debug in two pipelines.</li></ul>
+
+
+<div class="note">If batch and speed logic disagree even slightly, users see the system contradict itself at every batch boundary.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Reprocessing and backfill</h2>
+<ul><li>A logic fix requires rerunning the batch layer over the affected history, which can take hours or days depending on volume.</li><li>Reprocessing should write to a new view version and swap it in only when complete, so readers never see a partial rebuild.</li><li>Backfills compete with scheduled batch work for the same cluster, so they need queueing, prioritisation, or dedicated capacity.</li><li>The speed layer cannot be backfilled the same way; it is simply reset and rebuilt from the new cutoff.</li><li>Downstream consumers may have cached or exported the old numbers, so a correction needs a communication path as well as a technical one.</li><li>Retention of raw events is therefore a hard requirement; if the master dataset is trimmed, recomputation becomes impossible.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Failure modes to design for</h2>
+<ul><li>The batch job fails or runs long, so the realtime window grows and the speed layer must hold more state than planned.</li><li>A speed-layer restart without idempotent writes double-counts the events it replays.</li><li>The cutoff is recorded inconsistently, so a query double-counts or misses the boundary events.</li><li>Batch and stream views use different time semantics, for example ingestion time versus event time, and disagree on late events.</li><li>A schema change reaches one pipeline before the other, and the merge breaks on missing fields.</li><li>Serving-layer indexes fall behind the published views, so readers see a mix of versions.</li><li>Monitoring only the batch job hides a stalled stream, and the dashboard silently freezes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Variants and alternatives</h2>
+<ul><li>Some teams keep the three layers but implement both paths in <strong>one engine</strong>, using the same API for batch and streaming modes.</li><li><strong>Micro-batch</strong> processing collapses the two paths into one pipeline with a short interval, trading some latency for one codebase.</li><li><strong>Kappa architecture</strong> drops the batch layer and reprocesses by replaying the stream log through a new job version.</li><li>A hybrid keeps Lambda for a few critical metrics and uses unified streaming elsewhere, rather than applying one pattern everywhere.</li><li>Unified engines reduce duplicate code but do not remove the need to reason about late data, state, and exactly-once sinks.</li><li>The choice is really about whether replaying history through one pipeline is cheap and reliable enough for the organisation.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>When Lambda is still the right call</h2>
+<ul><li>Choose it when batch recomputation over the full history is the only trusted way to correct results, such as regulated reporting or billing.</li><li>Choose it when the streaming path is genuinely best-effort and the batch path is the contract of record.</li><li>Choose it when the team already has strong batch tooling and the streaming volume is modest.</li><li>Avoid it when two codebases would be maintained by a small team with no capacity to test them against each other.</li><li>Avoid it when the same logic changes weekly, because dual implementations turn into a permanent source of bugs.</li><li>Avoid it when replay through a single streaming pipeline is affordable, which is the case Kappa was designed for.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Designing Lambda in an interview</h2>
+<ul><li>State the freshness target for the speed layer and the correctness target for the batch layer separately.</li><li>Define the cutoff precisely: which timestamp, which offset, and how the query knows where batch ends and stream begins.</li><li>Say how the merge handles non-additive metrics such as distinct users or percentiles.</li><li>Explain how batch and speed logic stay in sync: shared library, generated code, or comparison tests.</li><li>Describe the reprocessing path end to end, including how readers avoid partial results during the swap.</li><li>Name the operational cost: two pipelines, two on-call surfaces, and two sets of dashboards.</li></ul>
+
+<div class="flow"><span class="flow-step">Ingest events into an immutable, retained log</span><span class="flow-arrow">→</span><span class="flow-step">Batch job recomputes authoritative views</span><span class="flow-arrow">→</span><span class="flow-step">Stream job maintains deltas since the last cutoff</span><span class="flow-arrow">→</span><span class="flow-step">Publish both to the serving layer with versions</span><span class="flow-arrow">→</span><span class="flow-step">Query merges batch view and realtime delta</span><span class="flow-arrow">→</span><span class="flow-step">Reprocess by rebuilding a new batch view and swapping it</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Low latency plus full reprocessing</strong> are both achieved, but only by running and maintaining two pipelines over the same data.</li><li><strong>Immutable master data</strong> makes correction and audit possible, but storage grows forever and every rebuild scans more history.</li><li><strong>Batch authority</strong> gives trustworthy numbers, but the batch interval sets the worst-case staleness and the recovery time after a bug.</li><li><strong>Small speed-layer state</strong> keeps streaming cheap, but any batch delay widens the realtime window and can exceed designed capacity.</li><li><strong>Simple additive merges</strong> work well for counts and sums, but distinct counts and percentiles need mergeable sketches or a serving-layer recompute.</li><li><strong>Dual implementations</strong> let each layer use the best engine, but duplicate logic drifts and produces visible discontinuities at batch boundaries.</li><li><strong>Full recomputation</strong> is conceptually simple, but cost and runtime scale with total history rather than with new data.</li><li><strong>Unified engines</strong> reduce code duplication but can blur the boundary between provisional and authoritative results if the design is not explicit.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the Lambda architecture in one sentence?</summary><div class="answer"><p>A design that runs a batch pipeline over full history for correctness and a streaming pipeline over recent events for freshness, then merges their outputs in a serving layer so queries are fast and eventually exact.</p></div></details>
+<details><summary>2. What are the three layers and what does each own?</summary><div class="answer"><p>The batch layer owns immutable history and recomputes authoritative views. The speed layer consumes recent events and produces deltas for the period batch has not covered. The serving layer indexes both and merges them at query time.</p></div></details>
+<details><summary>3. Why does the batch layer recompute from scratch instead of updating incrementally?</summary><div class="answer"><p>Recomputation keeps the logic simple and makes recovery from bugs trivial: change the code and rerun. Incremental state is faster but accumulates errors and requires careful correction logic. The cost is that runtime grows with history.</p></div></details>
+<details><summary>4. How exactly does the query merge batch and realtime results?</summary><div class="answer"><p>The batch view covers history up to a known cutoff, and the realtime view covers events after it. For additive metrics the query adds them. The cutoff must be recorded with the batch view so the boundary is never counted twice or skipped.</p></div></details>
+<details><summary>5. What is the biggest operational problem with Lambda?</summary><div class="answer"><p>Maintaining the same business logic twice. The batch and streaming implementations drift, and the symptom is a jump in the metric whenever the batch view replaces the realtime view. Shared libraries and comparison tests reduce but do not eliminate it.</p></div></details>
+<details><summary>6. How do you correct a bug in the streaming logic?</summary><div class="answer"><p>Fix the batch logic and recompute the affected views, then reset the speed layer from the new cutoff. The wrong realtime numbers are superseded rather than repaired in place, which is why the immutable master data matters.</p></div></details>
+<details><summary>7. Which metrics are hard to merge and why?</summary><div class="answer"><p>Distinct counts, percentiles, and anything non-additive. You cannot simply add a batch distinct count to a realtime distinct count because the same user may appear in both. Use mergeable sketches or compute those metrics only in one layer.</p></div></details>
+<details><summary>8. What happens if the batch job is delayed by a day?</summary><div class="answer"><p>The realtime window grows, so the speed layer must retain and process more state than planned. If it was sized for a few hours, it may fall behind or fail. Alert on window age, not just on job success.</p></div></details>
+<details><summary>9. How does Lambda compare with Kappa?</summary><div class="answer"><p>Kappa keeps one streaming pipeline and reprocesses by replaying a retained log through a new job version. Lambda keeps two pipelines and reprocesses with batch. Kappa removes duplicate logic; Lambda remains stronger when full batch recomputation is the trusted correction path.</p></div></details>
+<details><summary>10. When would you choose Lambda today?</summary><div class="answer"><p>When authoritative reporting or billing requires periodic recomputation over complete history, the streaming path is explicitly provisional, and the team can afford to own two pipelines. It is a poor fit for small teams changing logic frequently.</p></div></details>
+<details><summary>11. What do you monitor in a Lambda system?</summary><div class="answer"><p>Batch duration and completion, realtime window age and state size, merge correctness at boundaries, and divergence between batch and stream outputs for overlapping periods. Also monitor consumer lag and sink failures in both paths.</p></div></details>
+<details><summary>12. How would you explain the value of immutability here?</summary><div class="answer"><p>If raw events are append-only, every derived view is a pure function of history. That makes bugs recoverable, audits possible, and new metrics retroactive. Mutable state destroys that property because the original facts are gone.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Implementing the batch and streaming logic separately without comparison tests, then being surprised by jumps at the batch boundary.</li><li>Leaving the batch cutoff implicit, so boundary events are counted twice or dropped entirely.</li><li>Using additive merges for distinct counts or percentiles.</li><li>Sizing the speed layer for a few hours and assuming the batch job will always run on time.</li><li>Forgetting that reprocessing needs retained raw events and enough spare compute.</li><li>Claiming exactly-once while the streaming sink is not idempotent.</li><li>Publishing a rebuilt batch view in place so readers see a partially loaded table.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="data-lakehouse.html"><span>← Previous</span><strong>Data Lakehouse</strong></a><a class="next" href="kappa-architecture.html"><span>Next →</span><strong>Kappa Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/lambda-architecture">AlgoMaster — Lambda Architecture</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

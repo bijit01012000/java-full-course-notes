@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Streaming Engines — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 108 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Streaming Engines</h1>
+    <p class="dek">Big Data Processing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/streaming-engines">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why a streaming engine exists</a>
+<a href="#s2">Anatomy of a streaming job</a>
+<a href="#s3">Parallelism, partitioning, and shuffles</a>
+<a href="#s4">State management</a>
+<a href="#s5">Checkpoints and recovery</a>
+<a href="#s6">Event time and watermarks</a>
+<a href="#s7">Backpressure and flow control</a>
+<a href="#s8">Delivery semantics</a>
+<a href="#s9">Failure handling and upgrades</a>
+<a href="#s10">Comparing common engines</a>
+<a href="#s11">Choosing an engine</a>
+<a href="#s12">Operating a pipeline</a>
+<a href="#s13">Designing a streaming pipeline in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A streaming engine turns a simple read from a log into a fault-tolerant distributed computation, handling parallelism, state, event time, checkpoints, and backpressure so application teams do not rebuild those mechanisms themselves.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Operator graph</dt><dd>The directed graph of sources, transformations, and sinks that makes up a streaming job.</dd></div><div class="term"><dt>Keyed state</dt><dd>State partitioned by a key, such as per-user counters, so each key is owned by exactly one parallel task instance.</dd></div><div class="term"><dt>State backend</dt><dd>The component that stores operator state, typically an embedded local store or an in-memory structure, with durability handled separately.</dd></div><div class="term"><dt>Checkpoint</dt><dd>A consistent snapshot of all operator state plus input positions, used to restart a job without losing or duplicating progress.</dd></div><div class="term"><dt>Watermark</dt><dd>A per-partition progress signal in event time that tells operators how far the input has advanced and when windows can close.</dd></div><div class="term"><dt>Event time</dt><dd>The timestamp carried by the event itself, which makes results reproducible when data arrives late or is replayed.</dd></div><div class="term"><dt>Backpressure</dt><dd>The mechanism by which a slow downstream operator slows its upstream sources instead of buffering without bound.</dd></div><div class="term"><dt>Parallelism</dt><dd>The number of concurrent task instances executing an operator, which must be reconciled with the source partition count.</dd></div><div class="term"><dt>Shuffle</dt><dd>Redistributing records across task instances by key, which is required for keyed aggregation and is the expensive step in a streaming graph.</dd></div><div class="term"><dt>Exactly-once sink</dt><dd>An output path that makes retried or replayed writes idempotent, often through transactions or deterministic keys.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why a streaming engine exists</h2>
+<p class="lede">Reading records from a topic is the easy part. Everything that makes the computation correct is harder.</p>
+<ul><li>Work must be spread across many machines without two machines counting the same key twice.</li><li>Machines crash mid-processing, so progress must survive the loss of any single process.</li><li>Events arrive out of order and late, so a result cannot be emitted the moment the first record shows up.</li><li>Traffic spikes, and a pipeline that buffers without limit eventually runs out of memory or disk.</li><li>Operators keep state, and that state must be partitioned, snapshotted, and restored consistently with input positions.</li><li>A streaming engine packages these mechanisms into one runtime so each team does not reinvent them incorrectly.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Anatomy of a streaming job</h2>
+<ul><li><strong>Source</strong> connectors read from a log, files, or change streams and track offsets.</li><li><strong>Transformations</strong> are operators such as map, filter, keyBy, window, join, and aggregate.</li><li><strong>Sinks</strong> write results to tables, object storage, search indexes, or another topic.</li><li>A <strong>coordinator</strong> component plans the job, assigns work to workers, and drives checkpoints.</li><li>Workers execute task instances and host the local state for the keys they own.</li><li>The job graph is the contract: the engine decides how to place, chain, and parallelise its operators.</li></ul>
+
+<div class="flow"><span class="flow-step">Source reads a partition and emits records</span><span class="flow-arrow">→</span><span class="flow-step">Map and filter operators process in place</span><span class="flow-arrow">→</span><span class="flow-step">keyBy triggers a shuffle to the owning task</span><span class="flow-arrow">→</span><span class="flow-step">Stateful operator updates keyed state</span><span class="flow-arrow">→</span><span class="flow-step">Sink writes with idempotence or a transaction</span><span class="flow-arrow">→</span><span class="flow-step">Coordinator checkpoints state and offsets</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Parallelism, partitioning, and shuffles</h2>
+<ul><li>Each source partition is consumed by at most one task instance, which is what prevents duplicate processing at the source.</li><li>Total parallelism above the partition count leaves tasks idle at the source but still useful downstream.</li><li><code>keyBy</code> hashes the key so all records for a key reach the same task instance, which is what makes keyed state correct.</li><li>A change in parallelism changes key ownership, so state must be redistributed or the job restarted from a savepoint with rescaling.</li><li><strong>Operator chaining</strong> fuses narrow transformations into one task to avoid serialisation and network hops.</li><li>Wide operations such as joins and global aggregations require a <strong>shuffle</strong>, which is network-heavy and a common bottleneck.</li><li>Skewed keys overload one task while the rest idle, so hot-key detection and salting are part of operating a pipeline.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>State management</h2>
+<ul><li>State is scoped: operator state is per task, while <strong>keyed state</strong> is per key and therefore co-located with the owning task.</li><li>State backends range from on-heap maps for small state to embedded local stores for state larger than memory.</li><li>Large state belongs on local disk with an in-memory cache, because recomputing it from the log is expensive.</li><li>Durability comes from periodic snapshots and, in some engines, a changelog topic that records every state mutation.</li><li>State must be bounded: TTLs, window cleanup, and explicit eviction prevent unbounded growth.</li><li>State schema is part of the job's compatibility surface; renaming a state field can make old checkpoints unreadable unless the engine supports migration.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Checkpoints and recovery</h2>
+<ul><li>A checkpoint captures every operator's state together with the source offsets that state corresponds to.</li><li>The engine injects a barrier into the stream; when every input has reached the barrier, the snapshot is consistent.</li><li>Snapshots are written to durable storage asynchronously so normal processing continues while they upload.</li><li>On failure, tasks restart and restore the last completed checkpoint, then resume from the recorded offsets.</li><li>Recovery time depends on state size and storage bandwidth, which is why huge state slows both checkpoints and restarts.</li><li>Sinks must cooperate: output written after the last checkpoint may be replayed, so the sink must be idempotent or transactional.</li></ul>
+
+
+<div class="note">A checkpoint is only useful if restoring it produces the same result as never failing. That requires deterministic operators and a safe sink.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Event time and watermarks</h2>
+<ul><li><strong>Event time</strong> uses the timestamp inside the record, so results do not depend on when the job happened to process it.</li><li><strong>Processing time</strong> is cheaper and lower latency but produces different answers on replay and cannot handle late data correctly.</li><li>A watermark says the input is complete up to a point in event time, and windows close when the watermark passes their end.</li><li>Watermarks are usually derived from the maximum observed event timestamp minus an allowed-lateness bound.</li><li>Idle partitions can stall a watermark, so engines support idleness detection to keep windows closing.</li><li>Late events after the watermark either update a previously emitted result, go to a side output, or are dropped, and the policy must be explicit.</li><li>Watermarks are an estimate, not a guarantee: an event older than the watermark can still arrive and must not corrupt the output.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Backpressure and flow control</h2>
+<ul><li>When a downstream operator cannot keep up, it must slow the upstream rather than buffer indefinitely.</li><li>Engines propagate backpressure through bounded network buffers, so the source read rate drops to the slowest stage.</li><li>Backpressure is a symptom: the fix is usually more parallelism, a cheaper operator, or a faster sink.</li><li>Sustained backpressure appears as rising consumer lag, not as an error, so it is easy to miss without lag monitoring.</li><li>Buffering absorbs short spikes but cannot fix a capacity deficit; an unbounded queue only delays the failure.</li><li>A separate concern is load shedding: sometimes the right answer is to drop or sample low-value events during a spike.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Delivery semantics</h2>
+<ul><li><strong>At-most-once</strong> commits the offset before processing; a crash loses records.</li><li><strong>At-least-once</strong> commits after processing; a crash repeats records, so the sink must tolerate duplicates.</li><li><strong>Exactly-once</strong> requires checkpointed offsets, a transactional or idempotent sink, and deterministic processing.</li><li>Two-phase commit sinks write output and offsets in one transaction so a restart cannot expose partial results.</li><li>Idempotent upserts keyed by event or window identifier achieve the same effect for many analytical sinks.</li><li>Stateful operators must also be exactly-once internally, which is why the checkpoint and the sink are designed together.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Semantic</th><th>Failure behaviour</th><th>Requirement</th></tr></thead><tbody><tr><td>At-most-once</td><td>Lost records</td><td>No deduplication needed</td></tr>
+<tr><td>At-least-once</td><td>Duplicated records</td><td>Idempotent or deduplicating consumer</td></tr>
+<tr><td>Exactly-once</td><td>No loss, no duplicates</td><td>Checkpoints, transactional sink, deterministic logic</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Failure handling and upgrades</h2>
+<ul><li>A failed task is restarted from the last checkpoint, usually on the same or another worker.</li><li>Full-job restarts are simpler but replay more work; regional or pipeline failover keeps a warm copy for critical jobs.</li><li>Savepoints enable planned changes: stop with a savepoint, change code or parallelism, restore from it.</li><li>Restoring with different parallelism requires redistributing keyed state, which costs time proportional to state size.</li><li>Upgrading operator logic while keeping old state needs explicit state migration, not just a new jar.</li><li>Some engines allow a standby or hot-swap pattern where a new version runs alongside until it is ready.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Comparing common engines</h2>
+<ul><li><strong>Apache Flink</strong> is a cluster runtime with true event-time processing, large keyed state, distributed snapshots, and savepoints; it expects you to operate a cluster.</li><li><strong>Kafka Streams</strong> is a library embedded in your application, with local state stores and changelog topics; there is no separate cluster to run, but scaling is tied to your app deployment and partitions.</li><li><strong>Spark Structured Streaming</strong> runs on Spark and uses micro-batches with a checkpoint directory; it is a natural fit when batch and streaming share the same Spark codebase.</li><li><strong>Apache Beam</strong> provides a portable API whose runner decides execution, which helps avoid lock-in but adds a layer to debug.</li><li><strong>ksqlDB and similar SQL layers</strong> trade flexibility for declarative stream queries and are easiest for straightforward filtering and aggregation.</li><li>All of them solve the same core problems; the differences are deployment model, state capacity, latency profile, and operational burden.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Engine</th><th>Deployment</th><th>State model</th><th>Best fit</th></tr></thead><tbody><tr><td>Flink</td><td>Dedicated cluster</td><td>Large keyed state, snapshots and savepoints</td><td>Complex event-time logic, big state</td></tr>
+<tr><td>Kafka Streams</td><td>Library inside an app</td><td>Local stores plus changelog topics</td><td>Kafka-centric services, simple operations</td></tr>
+<tr><td>Spark Structured Streaming</td><td>Spark cluster</td><td>State store with checkpoint directory</td><td>Teams already running Spark</td></tr>
+<tr><td>Beam</td><td>Runner-dependent</td><td>Runner-dependent</td><td>Portable pipelines across engines</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Choosing an engine</h2>
+<ul><li>Start from the latency target: micro-batch is fine for near-real-time dashboards, while per-record processing suits tighter loops.</li><li>Check state size: joins and deduplication over long horizons need an engine built for large keyed state.</li><li>Check the operational model: a library inside an existing service is cheaper to run than a dedicated cluster.</li><li>Check the existing stack: reusing Spark or Kafka skills reduces risk more than a feature comparison.</li><li>Check the sink requirements: transactional output narrows the realistic options.</li><li>Check team capacity honestly; an engine that needs a platform team is the wrong choice for a team without one.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Operating a pipeline</h2>
+<ul><li>Monitor <strong>consumer lag</strong> and its trend, not just job status; a healthy job can still be hours behind.</li><li>Watch checkpoint duration and failures, state size, and restore time, because these set your recovery budget.</li><li>Watch watermark progress for stalled partitions and late-event rates for correctness drift.</li><li>Watch sink latency and error rates; a slow sink becomes backpressure across the whole graph.</li><li>Alert on skew and hot keys, which show up as one task at high load while peers idle.</li><li>Plan capacity for peaks and reprocessing, and test restores regularly rather than assuming checkpoints work.</li><li>Version the job, its state schema, and its input contracts together so an upgrade is reproducible.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Designing a streaming pipeline in an interview</h2>
+<ul><li>State the key and why it is the right partitioning unit for the aggregation.</li><li>Say whether the result must be exactly-once or whether idempotent upserts are sufficient.</li><li>Explain how late data is handled and what happens to windows that already emitted.</li><li>Explain how the job recovers: checkpoint interval, state size, and expected restore time.</li><li>Explain how the job is upgraded without losing state or double-writing output.</li><li>Name the bottleneck you expect first and the metric that will reveal it.</li></ul>
+
+<div class="flow"><span class="flow-step">Define the output, latency target, and correctness requirement</span><span class="flow-arrow">→</span><span class="flow-step">Choose source partitions and key to preserve ordering where needed</span><span class="flow-arrow">→</span><span class="flow-step">Pick operators and windowing with event time</span><span class="flow-arrow">→</span><span class="flow-step">Choose state backend and checkpoint interval</span><span class="flow-arrow">→</span><span class="flow-step">Choose sink and delivery semantics</span><span class="flow-arrow">→</span><span class="flow-step">Size parallelism and plan for skew and backpressure</span><span class="flow-arrow">→</span><span class="flow-step">Define monitoring, replay, and upgrade runbooks</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>More parallelism</strong> raises throughput but adds shuffle traffic, coordination, and more state to checkpoint.</li><li><strong>Larger state</strong> enables joins and long-window deduplication but slows checkpoints, restores, and rescaling.</li><li><strong>Frequent checkpoints</strong> reduce replay on failure but consume bandwidth and add steady overhead.</li><li><strong>Event time</strong> gives correct, reproducible results but requires watermarks and delays output until windows close.</li><li><strong>Exactly-once sinks</strong> remove duplicates but require transactional support and can add commit latency.</li><li><strong>Micro-batching</strong> simplifies fault tolerance and improves throughput but raises the minimum latency.</li><li><strong>A dedicated cluster engine</strong> handles large state and complex event time well but needs a platform team to operate.</li><li><strong>An embedded library</strong> is simple to deploy but makes scaling and state management the application team's problem.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What does a streaming engine do that a message broker does not?</summary><div class="answer"><p>The broker stores and delivers events. The engine executes the computation: distributing operators across machines, partitioning state by key, tracking event time and watermarks, checkpointing for recovery, and applying delivery semantics at the sink.</p></div></details>
+<details><summary>2. How does the engine spread work across machines?</summary><div class="answer"><p>It splits the job graph into tasks and assigns them to workers, with source partitions consumed by single tasks. Keyed operations hash the key so all records for a key reach the same task, and wide operations insert a shuffle to redistribute records.</p></div></details>
+<details><summary>3. Why must keyed state be co-located with its key?</summary><div class="answer"><p>Each key's state is updated by exactly one task instance. If two instances owned the same key, they would each see a partial history and produce inconsistent aggregates. Hashing the key enforces single ownership.</p></div></details>
+<details><summary>4. How does checkpointing produce a consistent snapshot?</summary><div class="answer"><p>The coordinator injects barriers into the stream; an operator snapshots its state once all its inputs have reached the barrier, and the snapshot is uploaded asynchronously. The result pairs all operator state with the source offsets that produced it.</p></div></details>
+<details><summary>5. What happens on failure?</summary><div class="answer"><p>Tasks restart, restore the latest completed checkpoint, and resume reading from the recorded offsets. Output written after that checkpoint may be replayed, so the sink must be idempotent or transactional to keep results correct.</p></div></details>
+<details><summary>6. Event time versus processing time: when do you use each?</summary><div class="answer"><p>Use event time whenever results must be correct and reproducible, especially with late or out-of-order data. Processing time is simpler and lower latency but gives different answers on replay, so it suits approximate monitoring rather than billing.</p></div></details>
+<details><summary>7. What is a watermark and what breaks it?</summary><div class="answer"><p>A watermark is a claim that event time has advanced to a point, which lets windows close. Idle partitions, skewed progress, and very late events break it: windows may stall, or late records may arrive after their window was emitted.</p></div></details>
+<details><summary>8. What causes backpressure and how do you fix it?</summary><div class="answer"><p>A downstream stage cannot keep up, so buffers fill and the source slows. Fix it by increasing parallelism, reducing per-record cost, optimising the sink, or shedding low-value load. Backpressure is a capacity signal, not something to buffer away.</p></div></details>
+<details><summary>9. How do you achieve exactly-once end to end?</summary><div class="answer"><p>Combine checkpointed state and offsets with a sink that participates in a transaction or accepts idempotent writes keyed deterministically. Also keep operators deterministic, or a replay produces different output even with correct offsets.</p></div></details>
+<details><summary>10. When would you choose Kafka Streams over Flink?</summary><div class="answer"><p>When the data is already in Kafka, the logic is modest, and you want to deploy a normal application without operating a cluster. Choose Flink when you need large keyed state, complex event-time logic, or advanced savepoint-based operations.</p></div></details>
+<details><summary>11. When is Spark Structured Streaming the pragmatic choice?</summary><div class="answer"><p>When the organisation already runs Spark and the same transformations serve batch and streaming. Micro-batch latency is acceptable for many dashboards, and reusing existing skills and infrastructure lowers operational risk.</p></div></details>
+<details><summary>12. How do you upgrade a running streaming job?</summary><div class="answer"><p>Take a savepoint, stop the job, deploy the new code, and restore from the savepoint with the intended parallelism. If the state schema changed, provide a migration; otherwise the new job cannot read the old state.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming the engine makes the pipeline correct without thinking about state size, event time, and sink semantics.</li><li>Setting parallelism below the source partition count and leaving partitions unread or underused.</li><li>Using processing time for metrics that must reconcile with a batch recomputation.</li><li>Joining two streams without bounding state, so the join grows forever.</li><li>Claiming exactly-once while the sink is a plain at-least-once writer.</li><li>Setting a checkpoint interval so long that recovery replays more work than the latency budget allows.</li><li>Ignoring skew, so one task instance saturates while the rest of the cluster is idle.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="kappa-architecture.html"><span>← Previous</span><strong>Kappa Architecture</strong></a><a class="next" href="deployment-strategies-overview.html"><span>Next →</span><strong>Deployment Strategies Overview</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/streaming-engines">AlgoMaster — Streaming Engines</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

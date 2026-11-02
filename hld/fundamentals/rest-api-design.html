@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>REST Fundamentals — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 22 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>REST Fundamentals</h1>
+    <p class="dek">API Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/rest-api-design">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why API design conventions matter</a>
+<a href="#s2">Resources and URIs</a>
+<a href="#s3">HTTP methods and semantics</a>
+<a href="#s4">Status codes</a>
+<a href="#s5">Representations and content negotiation</a>
+<a href="#s6">Request and error design</a>
+<a href="#s7">Pagination, filtering, and sorting</a>
+<a href="#s8">Versioning and evolution</a>
+<a href="#s9">Caching and conditional requests</a>
+<a href="#s10">Statelessness and horizontal scale</a>
+<a href="#s11">Idempotency, concurrency, and retries</a>
+<a href="#s12">Design checklist</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A good REST API is predictable: the same conventions for <strong>resources, methods, status codes, errors, pagination, and versioning</strong> everywhere, so learning one endpoint teaches you the rest.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Resource</dt><dd>A named thing the API exposes, such as a customer or an order, addressed by a URI.</dd></div><div class="term"><dt>Representation</dt><dd>The serialised form of a resource returned or accepted by the API, usually JSON.</dd></div><div class="term"><dt>Statelessness</dt><dd>Each request carries everything needed to process it, so no per-client session state lives on the server between calls.</dd></div><div class="term"><dt>Idempotent method</dt><dd>A method whose repeated application leaves the resource in the same state, such as PUT or DELETE.</dd></div><div class="term"><dt>Safe method</dt><dd>A method that does not change server state, such as GET or HEAD.</dd></div><div class="term"><dt>Pagination</dt><dd>Splitting a large collection into pages, usually with offset/limit or an opaque cursor.</dd></div><div class="term"><dt>Cursor pagination</dt><dd>Paging from a stable marker such as an ID or timestamp rather than a numeric offset.</dd></div><div class="term"><dt>Versioning</dt><dd>A scheme for evolving an API without breaking existing clients, in the path, header, or media type.</dd></div><div class="term"><dt>Conditional request</dt><dd>A request carrying ETag or Last-Modified validators so the server can answer 304 Not Modified or reject a stale write.</dd></div><div class="term"><dt>HATEOAS</dt><dd>Returning links to related actions and resources so clients discover transitions instead of hardcoding URLs.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why API design conventions matter</h2>
+<p class="lede">Making an API that works is easy: a few endpoints, some JSON, and a client. Keeping it usable as it grows is the hard part.</p>
+<ul><li>Once other teams, mobile apps, or external customers depend on it, every rename is a potential outage for someone else.</li><li>Inconsistent conventions force developers to relearn each endpoint instead of generalising from one example.</li><li>Inconsistent error handling pushes bespoke branching logic into every client.</li><li>A predictable API reduces support load, because behaviour can be inferred rather than looked up.</li><li>REST is an architectural style, not a protocol: it describes constraints such as resources, statelessness, and a uniform interface.</li><li>Most “REST” APIs are pragmatically REST-ish: resource-oriented URLs, HTTP semantics, JSON bodies.</li><li>The goal is not purity, it is predictability and evolvability.</li></ul>
+
+
+<div class="note">A useful test: a developer who has used one endpoint should be able to guess the shape of the next one.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Resources and URIs</h2>
+<ul><li>Model <strong>nouns</strong>, not verbs: <code>/customers</code>, <code>/orders</code>, <code>/orders/1001</code>.</li><li>Use plural collection names and a stable identifier for each item: <code>/orders/{orderId}</code>.</li><li>Express containment with nesting only one or two levels deep: <code>/customers/{id}/orders</code>.</li><li>Actions that do not fit CRUD can be sub-resources, such as <code>/orders/{id}/cancellation</code>.</li><li>Keep identifiers opaque; clients should treat them as strings, not as database keys with meaning.</li><li>Lowercase, hyphen-separated path segments avoid case and encoding ambiguity.</li><li>Query strings carry filters, sorting, and pagination, not resource identity.</li><li>Deeply nested or verb-based URLs (<code>/getOrderById</code>) make the surface harder to reason about.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Intent</th><th>Good shape</th><th>Poor shape</th></tr></thead><tbody><tr><td>List orders</td><td>GET /orders</td><td>GET /getOrders</td></tr>
+<tr><td>One order</td><td>GET /orders/1001</td><td>GET /order?id=1001</td></tr>
+<tr><td>Customer's orders</td><td>GET /customers/7/orders</td><td>GET /ordersByCustomer?c=7</td></tr>
+<tr><td>Cancel an order</td><td>POST /orders/1001/cancellation</td><td>POST /cancelOrder</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>HTTP methods and semantics</h2>
+<ul><li><code>GET</code> reads a resource, is safe, and must have no side effects.</li><li><code>POST</code> creates a subordinate resource or triggers processing, and is not idempotent by default.</li><li><code>PUT</code> replaces a resource with the supplied representation and is idempotent.</li><li><code>PATCH</code> applies a partial modification; idempotency depends on the patch format.</li><li><code>DELETE</code> removes a resource and is idempotent, even if later calls return 404.</li><li>Method semantics are a contract: caches, proxies, and clients rely on them being honest.</li><li>A GET that mutates state breaks retries, prefetching, and caching in ways that are hard to trace.</li><li>Use the method that matches the semantics rather than tunnelling everything through POST.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Status codes</h2>
+<ul><li>Use the class of the code, not a blanket 200: <code>2xx</code> success, <code>3xx</code> redirect, <code>4xx</code> client error, <code>5xx</code> server error.</li><li><code>201 Created</code> for a successful create, ideally with a <code>Location</code> header pointing at the new resource.</li><li><code>204 No Content</code> when an operation succeeds and there is no body to return.</li><li><code>400</code> for malformed input, <code>401</code> for missing or invalid credentials, <code>403</code> for a denied but authenticated action.</li><li><code>404</code> for a missing resource, <code>409</code> for a state conflict, <code>422</code> for semantically invalid input.</li><li><code>429</code> for rate limiting with <code>Retry-After</code>, and <code>5xx</code> only when the server is genuinely at fault.</li><li>Do not return <code>200</code> with an error body: clients, dashboards, and retry logic all key off the status.</li><li>Document the codes each endpoint can return so clients do not guess.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Representations and content negotiation</h2>
+<ul><li>JSON is the default representation; the resource is the concept, JSON is only one encoding of it.</li><li>Clients declare format and expectations with <code>Accept</code> and <code>Content-Type</code>.</li><li>Return consistent field naming, such as <code>snake_case</code> or <code>camelCase</code>, across every endpoint.</li><li>Use ISO-formatted timestamps in UTC and state the timezone convention explicitly.</li><li>Money should carry an amount plus a currency, never a bare float.</li><li>Prefer explicit nulls over omitted fields when absence is meaningful, and document which it is.</li><li>Keep representations stable: a field's type changing from number to string breaks strongly typed clients.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Request and error design</h2>
+<ul><li>Validate input at the edge and return all field-level failures in one response, not one at a time.</li><li>Use a single, documented error envelope with a machine-readable code, a human message, and optional field details.</li><li>Never leak stack traces, SQL, or internal identifiers in error bodies.</li><li>Include a correlation or request ID so support can trace a specific failure.</li><li>Accept an idempotency key on create-like endpoints so clients can retry safely.</li><li>Bound request sizes and payload depth to protect parsing and memory.</li><li>Make error codes part of the contract, because clients branch on them.</li></ul>
+
+
+<pre class="code"><code>{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;payment_declined&quot;,
+    &quot;message&quot;: &quot;The card was declined by the issuer.&quot;,
+    &quot;requestId&quot;: &quot;req_8f21c&quot;,
+    &quot;details&quot;: [{&quot;field&quot;: &quot;card&quot;, &quot;issue&quot;: &quot;expired&quot;}]
+  }
+}</code></pre>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Pagination, filtering, and sorting</h2>
+<ul><li>Never return an unbounded collection; always paginate with an explicit limit and a maximum.</li><li><strong>Offset pagination</strong> is simple and supports jumping to a page, but drifts when items are inserted or deleted mid-traversal.</li><li><strong>Cursor pagination</strong> uses an opaque marker from the last item, giving stable results and better index performance.</li><li>Return a next cursor rather than letting clients construct one, so the encoding can change later.</li><li>Include an approximate total only when the UI needs it, because counting large collections is expensive.</li><li>Define a small, documented set of filter and sort parameters instead of accepting arbitrary field names.</li><li>Sort order must be deterministic and tie-broken, or pagination can repeat or skip items.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Strength</th><th>Weakness</th></tr></thead><tbody><tr><td>Offset / limit</td><td>Simple, supports page numbers</td><td>Drifts on inserts and deletes; slow deep offsets</td></tr>
+<tr><td>Cursor</td><td>Stable and index-friendly</td><td>No random page access</td></tr>
+<tr><td>Keyset on timestamp</td><td>Natural for feeds</td><td>Ties need a secondary sort key</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Versioning and evolution</h2>
+<ul><li>Assume every published field is depended on by someone, including ones you consider internal.</li><li>Prefer <strong>additive</strong> change: new optional fields and new endpoints rarely break clients.</li><li>Adding a required field to a request, renaming a field, or tightening validation are breaking changes.</li><li>Common versioning schemes are a path segment (<code>/v1/orders</code>), a custom header, or a media type.</li><li>Path versioning is the most visible and easiest to route; header versioning keeps URLs clean but is easy to overlook.</li><li>Support a small number of versions and publish a deprecation timeline with sunset dates.</li><li>Emit deprecation signals in response headers so clients can discover them before removal.</li><li>Change behaviour behind a feature flag first and measure, rather than shipping a breaking change directly.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Caching and conditional requests</h2>
+<ul><li>Mark safe, cacheable responses with <code>Cache-Control</code>, and use <code>no-store</code> for anything user-specific or sensitive.</li><li>Serve shared responses through a CDN or reverse proxy when the data is not per-user.</li><li>Return an <code>ETag</code> and support <code>If-None-Match</code> so clients can revalidate cheaply with <code>304 Not Modified</code>.</li><li>Support <code>If-Match</code> on writes to prevent lost updates when two clients edit the same resource.</li><li>Use <code>Last-Modified</code> when a reliable modification timestamp exists; ETags are more precise.</li><li>Vary caches correctly by authorization or tenant, or one user's response can be served to another.</li><li>Caching is only safe when the method is safe and the response is not personalised without a key.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Statelessness and horizontal scale</h2>
+<ul><li>Each request must carry its own credentials and parameters so any server instance can handle it.</li><li>Statelessness is what lets you add instances behind a load balancer without sticky sessions.</li><li>Put session or conversation state in a token or a shared store, not in process memory.</li><li>Stateless APIs restart, redeploy, and autoscale cleanly because no instance is special.</li><li>Long-running work belongs in a job with a status resource: submit, return a handle, poll or receive a webhook.</li><li>Statelessness does not forbid server-side state; it forbids depending on <em>this</em> server's memory.</li><li>Idempotency is still required, because stateless retries can duplicate side effects.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Idempotency, concurrency, and retries</h2>
+<ul><li>Clients must retry on timeouts and 5xx, so non-idempotent operations need an explicit key.</li><li>Accept an <code>Idempotency-Key</code> header on create and payment endpoints and store the outcome.</li><li>Use optimistic concurrency with ETags or version numbers to avoid lost updates.</li><li>Return <code>409</code> when a state transition conflicts with the current resource state.</li><li>Document which errors are retryable and which are permanent, and back that up with status codes.</li><li>Retries need backoff with jitter, plus a cap, or a struggling service gets hammered.</li><li>A timeout is an unknown outcome, not a failure: design the endpoint so a retry is harmless.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Design checklist</h2>
+<ul><li>Are resources nouns, plural, and addressed by opaque identifiers?</li><li>Does every endpoint use HTTP methods and status codes with their standard meaning?</li><li>Is there one error envelope with stable machine-readable codes?</li><li>Is every collection paginated, bounded, and deterministically sorted?</li><li>Are breaking changes versioned, deprecated on a schedule, and announced in headers?</li><li>Are cacheable responses marked, and are personalised ones excluded from shared caches?</li><li>Can a create or payment request be retried safely with an idempotency key?</li><li>Is the API documented with examples, codes, and rate limits, and is that documentation generated from the contract?</li></ul>
+
+<div class="flow"><span class="flow-step">Model resources</span><span class="flow-arrow">→</span><span class="flow-step">Assign methods and status codes</span><span class="flow-arrow">→</span><span class="flow-step">Define representations and errors</span><span class="flow-arrow">→</span><span class="flow-step">Add pagination and filtering</span><span class="flow-arrow">→</span><span class="flow-step">Add caching and conditional requests</span><span class="flow-arrow">→</span><span class="flow-step">Add versioning and deprecation policy</span><span class="flow-arrow">→</span><span class="flow-step">Document and contract-test</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Strict REST purity</strong> gives a uniform, discoverable interface but can be awkward for action-style operations.</li><li><strong>Path versioning</strong> is obvious and easy to route but duplicates the surface and fragments clients across versions.</li><li><strong>Header versioning</strong> keeps URLs stable but is invisible in logs and easy for clients to forget.</li><li><strong>Offset pagination</strong> is simple and allows page jumps but drifts and slows down at deep offsets.</li><li><strong>Cursor pagination</strong> is stable and fast but prevents random page access and complicates UI.</li><li><strong>Verbose error details</strong> speed up integration but risk leaking internal structure and enlarge payloads.</li><li><strong>Aggressive caching</strong> cuts latency and load but risks serving stale or wrongly scoped data.</li><li><strong>Additive-only evolution</strong> avoids breakage but accumulates fields and inconsistent shapes over time.</li><li><strong>Fine-grained endpoints</strong> are simple individually but force chatty clients and more round trips.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What makes an API RESTful?</summary><div class="answer"><p>Resource-oriented design with a uniform interface: nouns in URIs, standard HTTP methods and status codes, representations such as JSON, and stateless requests. Purity matters less than consistency and predictability for clients.</p></div></details>
+<details><summary>2. Why model resources as nouns instead of verbs?</summary><div class="answer"><p>Nouns map cleanly onto HTTP methods and identifiers, so the same URL supports read, replace, and delete with different methods. Verb URLs collapse all intent into POST and lose the semantics that caches and clients rely on.</p></div></details>
+<details><summary>3. What is the difference between PUT and PATCH?</summary><div class="answer"><p>PUT replaces the resource with the complete representation you send, so repeating it is idempotent. PATCH applies a partial change, and whether that is idempotent depends on the patch format you use.</p></div></details>
+<details><summary>4. Which status code should a create endpoint return?</summary><div class="answer"><p><code>201 Created</code>, ideally with a <code>Location</code> header pointing to the new resource and the created representation in the body. Returning a bare 200 loses the information that something was created.</p></div></details>
+<details><summary>5. Why is returning 200 with an error body a bad pattern?</summary><div class="answer"><p>Clients, monitoring, gateways, and retry logic all branch on the status code. A 200 signals success, so failures get logged as successes and retried incorrectly.</p></div></details>
+<details><summary>6. When would you choose cursor pagination over offset?</summary><div class="answer"><p>When the collection changes frequently or is large. Cursor pagination stays stable across inserts and deletes and performs well with an indexed sort key, while offset drifts and slows at deep offsets.</p></div></details>
+<details><summary>7. How do you version a REST API?</summary><div class="answer"><p>Pick one scheme and apply it consistently: a path segment, a custom header, or a media type. Prefer additive change so most releases need no new version, and publish deprecation and sunset policy for the versions you retire.</p></div></details>
+<details><summary>8. What kinds of changes are breaking?</summary><div class="answer"><p>Renaming or removing a field, changing a field's type, making an optional request field required, tightening validation, and changing status-code behaviour. Adding an optional response field or a new endpoint is normally safe.</p></div></details>
+<details><summary>9. Why does statelessness matter for scaling?</summary><div class="answer"><p>If any instance can serve any request, you can add instances behind a load balancer, deploy without draining sticky sessions, and replace failed nodes freely. Per-instance memory makes all of that harder.</p></div></details>
+<details><summary>10. How do you prevent lost updates?</summary><div class="answer"><p>Use optimistic concurrency: return an ETag or version on read, require it on write through <code>If-Match</code> or a version field, and reject stale writes with <code>409</code> or <code>412</code>.</p></div></details>
+<details><summary>11. How do you make a create endpoint retry-safe?</summary><div class="answer"><p>Accept an idempotency key, store the outcome with the key, and return the stored result on a repeat. That way a client that times out can retry without creating a duplicate order.</p></div></details>
+<details><summary>12. How would you design a long-running operation in REST?</summary><div class="answer"><p>Accept the request, return <code>202 Accepted</code> with a job resource URL, and let the client poll that resource or receive a webhook. This keeps requests short and avoids tying a connection to the work.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Returning 200 for every outcome, including errors and validation failures.</li><li>Using GET for state-changing operations so retries and prefetches mutate data.</li><li>Returning unbounded collections and calling the endpoint “done”.</li><li>Paging with an offset on a fast-changing feed and silently skipping or repeating rows.</li><li>Breaking clients by renaming a field and shipping it as a minor change.</li><li>Caching a personalised response in a shared cache without varying on the caller.</li><li>Documenting errors only as free-text messages with no stable machine-readable code.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="idempotency.html"><span>← Previous</span><strong>Idempotency</strong></a><a class="next" href="graphql.html"><span>Next →</span><strong>GraphQL Fundamentals</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/rest-api-design">AlgoMaster — REST Fundamentals</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

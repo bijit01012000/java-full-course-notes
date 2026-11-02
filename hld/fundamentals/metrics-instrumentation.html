@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Metrics and Instrumentation — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 121 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Metrics and Instrumentation</h1>
+    <p class="dek">Observability · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/metrics-instrumentation">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why metrics exist</a>
+<a href="#s2">Anatomy of a metric</a>
+<a href="#s3">Metric types and when to use them</a>
+<a href="#s4">Labels and the cardinality budget</a>
+<a href="#s5">What to measure</a>
+<a href="#s6">Percentiles, buckets, and why averages lie</a>
+<a href="#s7">Instrumentation approaches</a>
+<a href="#s8">Push versus pull collection</a>
+<a href="#s9">Query semantics that trip people up</a>
+<a href="#s10">Storage, resolution, and retention</a>
+<a href="#s11">From metrics to alerts</a>
+<a href="#s12">Common instrumentation failure modes</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Metrics turn system behavior into a small set of numeric time series, so you can see a slowdown building minutes before customers report it — provided the instrumented signals and their labels are chosen carefully.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Metric</dt><dd>A named numeric measurement recorded over time, with labels that identify which service, endpoint, or resource it describes.</dd></div><div class="term"><dt>Time series</dt><dd>The sequence of values for one metric name plus one specific combination of label values.</dd></div><div class="term"><dt>Counter</dt><dd>A cumulative metric that only increases, from which rates and totals are derived by differencing over a window.</dd></div><div class="term"><dt>Gauge</dt><dd>A metric representing a value at a point in time that can rise or fall, such as connection pool usage or queue depth.</dd></div><div class="term"><dt>Histogram</dt><dd>A metric that counts observations into buckets, allowing percentiles to be estimated and aggregated across instances.</dd></div><div class="term"><dt>Label</dt><dd>A key-value dimension attached to a metric, such as status code or region, that makes the series queryable from many angles.</dd></div><div class="term"><dt>Cardinality</dt><dd>The number of distinct time series produced by a metric; driven by the product of distinct label values.</dd></div><div class="term"><dt>Golden signals</dt><dd>Latency, traffic, errors, and saturation — the four default signals for judging a service's health.</dd></div><div class="term"><dt>Scrape</dt><dd>A pull-based collection in which the monitoring system periodically fetches the current metric values from each target.</dd></div><div class="term"><dt>Downsampling</dt><dd>Progressively reducing the resolution of older metric data so long retention stays affordable.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why metrics exist</h2>
+<p class="lede">Without metrics, the first sign of a problem is often a wave of customer complaints. With metrics, the same problem appears as a trend that can be alerted on before most users notice.</p>
+<ul><li>Metrics give a <strong>continuous numeric view</strong>: latency, error rate, throughput, and resource saturation at every point in time.</li><li>They show whether the system is normal, when it stopped being normal, and which part changed.</li><li>Because they are cheap, they can be collected from every service and instance all the time.</li><li>They are the natural input to alerts, dashboards, capacity planning, and autoscaling decisions.</li><li>They are also comparable over time, so a deploy can be judged by what happened to the curves after it.</li><li>Metrics are a summary, not a record: they tell you that something is wrong, not which specific request failed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Anatomy of a metric</h2>
+<ul><li>A metric has a <strong>name</strong> describing what is measured, such as <code>http_requests_total</code>.</li><li>It has a <strong>type</strong> that defines valid operations — counters can be rate-d, gauges cannot.</li><li>It has <strong>labels</strong> identifying the dimensions: service, endpoint, method, status code.</li><li>Each observation carries a <strong>timestamp</strong> and a <strong>value</strong>.</li><li>Name plus a unique label set defines one <strong>time series</strong>; changing one label value creates a different series.</li><li>The unit belongs in the name or metadata (seconds, bytes), because a latency in milliseconds and one in seconds look identical numerically.</li><li>Instrumentation should expose low-level, composable metrics rather than pre-computed business judgments, so queries can combine them later.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Metric types and when to use them</h2>
+<ul><li><strong>Counter</strong> — cumulative totals such as requests, errors, bytes. Query with a rate over a window; never graph raw totals for traffic shape.</li><li><strong>Gauge</strong> — a snapshot such as active connections, queue depth, memory in use. Query the current value, min, max, or average.</li><li><strong>Histogram</strong> — bucket counts for latency or payload size, from which percentiles are estimated.</li><li><strong>Summary</strong> — client-side computed quantiles; accurate per instance but impossible to merge across instances.</li><li>Use counters for anything that logically accumulates, even if you only ever query the rate.</li><li>Use a histogram when the distribution matters; use a gauge when only the level matters.</li><li>Avoid deriving a counter from a gauge by subtraction — restarts and resets will corrupt the series.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Type</th><th>Monotonic</th><th>Good for</th><th>Query shape</th></tr></thead><tbody><tr><td>Counter</td><td>Yes</td><td>Requests, errors, bytes</td><td>Rate or increase over a window</td></tr>
+<tr><td>Gauge</td><td>No</td><td>Connections, queue depth, memory</td><td>Current value, min, max, average</td></tr>
+<tr><td>Histogram</td><td>Yes (bucket counts)</td><td>Latency, payload size</td><td>Percentiles, average, bucket ratios</td></tr>
+<tr><td>Summary</td><td>Yes</td><td>Client-computed quantiles</td><td>Fixed quantiles per instance</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Labels and the cardinality budget</h2>
+<ul><li>Labels are what turn a single number into an answerable dataset: without <code>status_code</code> you cannot separate errors from success.</li><li>Cardinality multiplies: five endpoints times four methods times six status codes is already one hundred and twenty series for one counter.</li><li>Adding a label whose values grow with traffic — user ID, request ID, full URL path — makes cardinality unbounded.</li><li>Each series costs memory, index space, and query time, and the bill is paid by every team sharing the backend.</li><li>Prefer bounded dimensions: service, region, environment, version, status class, route template.</li><li>Normalize paths before labeling (<code>/orders/{id}</code>, not <code>/orders/12345</code>).</li><li>When you need per-request detail, use a trace or log, or attach an exemplar rather than a label.</li></ul>
+
+
+<div class="note">A useful test before adding a label: can you list every possible value, and will that list stay small a year from now?</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>What to measure</h2>
+<ul><li>The <strong>four golden signals</strong> — latency, traffic, errors, saturation — are the default per-service set.</li><li><strong>RED</strong> (rate, errors, duration) fits request-driven services and maps cleanly to those signals.</li><li><strong>USE</strong> (utilization, saturation, errors) fits resources such as CPU, disks, and queues.</li><li>Latency must be split by outcome: a fast error response and a slow success mean very different things, so never merge them into one latency series.</li><li>Measure saturation directly where possible — pool in use versus pool size, queue depth, thread count — because it moves before latency degrades.</li><li>Add business metrics that reflect user outcomes: orders placed, payments declined, signups completed.</li><li>Instrument dependencies as well as your own service, so you can tell whether the fault is yours or downstream.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Percentiles, buckets, and why averages lie</h2>
+<p class="lede">Latency distributions are skewed. A small fraction of slow requests can be invisible in the mean while dominating user complaints.</p>
+<ul><li>If most requests take tens of milliseconds and a few take seconds, the average sits near the fast majority and looks healthy.</li><li>p95 and p99 describe the experience of the slowest users, which is where timeouts and abandonment live.</li><li>A histogram stores bucket counts, so percentiles are estimated from the bucket boundaries — coarse buckets give coarse answers.</li><li>Percentiles cannot be averaged: the average of two p99 values is not the p99 of the combined traffic.</li><li>To aggregate across instances, sum the histogram buckets and then compute the percentile on the merged distribution.</li><li>Client-side summaries cannot be merged at all, which is why they are a poor fit for fleet-wide latency dashboards.</li><li>Pick bucket boundaries around the thresholds that matter, such as the timeout or SLO target.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Instrumentation approaches</h2>
+<ul><li><strong>Client library:</strong> the application records metrics in-process and exposes or pushes them; full control, but code changes per language.</li><li><strong>Auto-instrumentation:</strong> agents or framework integrations wrap HTTP handlers, database clients, and queues with no business logic changes.</li><li><strong>Sidecar or proxy:</strong> a local process observes traffic and exports network-level metrics; no application changes, less semantic detail.</li><li><strong>Host and platform agents:</strong> collect CPU, memory, disk, and container metrics that the application cannot see.</li><li>Auto-instrumentation covers the standard request path well; you still hand-write business counters and gauges.</li><li>Keep metric emission non-blocking and cheap — an instrumentation call on the hot path must not allocate heavily or take locks.</li><li>Use a vendor-neutral SDK such as OpenTelemetry so the export target can change without re-instrumenting.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Push versus pull collection</h2>
+<ul><li>In <strong>pull</strong>, the monitoring system scrapes each target on an interval; targets expose a current snapshot.</li><li>Pull makes it obvious when a target is down, because the scrape fails, and keeps the target free of delivery logic.</li><li>In <strong>push</strong>, the application sends observations to a collector or gateway; useful for short-lived jobs and for crossing network boundaries.</li><li>Push hides target health: a missing series looks the same as a target that never existed.</li><li>Scrape interval bounds resolution — a spike shorter than the interval can be missed entirely.</li><li>Short-lived jobs need a gateway or an export on shutdown, because they may not exist when the next scrape arrives.</li><li>Whichever model you choose, align the collection interval with the shortest alerting window you intend to use.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Pull</th><th>Push</th></tr></thead><tbody><tr><td>Direction</td><td>Collector fetches from target</td><td>Target sends to collector</td></tr>
+<tr><td>Target health</td><td>Visible through failed scrapes</td><td>Ambiguous when data stops</td></tr>
+<tr><td>Best for</td><td>Long-running services</td><td>Batch jobs, edge locations, firewalled networks</td></tr>
+<tr><td>Risk</td><td>Targets must be discoverable</td><td>Unbounded senders can overload the backend</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Query semantics that trip people up</h2>
+<ul><li>Counters reset when a process restarts; rate calculations must handle the reset rather than reporting a negative spike.</li><li>A rate over a window shorter than the scrape interval produces noisy or empty results.</li><li>Window alignment matters: comparing a value at 09:00 with an average over a trailing window can suggest a trend that is not there.</li><li>Aggregating before versus after a ratio changes the answer — compute ratios from summed components, not from averaged ratios.</li><li>Recording rules precompute expensive queries so dashboards and alerts stay fast and consistent.</li><li>Staleness handling matters during deploys: an old value can look like a current one unless the system marks missing series.</li><li>Label matchers are the main cost lever; broad selectors over many series are what make queries slow.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Storage, resolution, and retention</h2>
+<ul><li>Metric stores compress well because values change slowly relative to their volume, but volume is still driven by series count times sample rate.</li><li>Higher resolution means more samples and higher cost; most systems keep recent data at full resolution and thin older data.</li><li>Downsampling preserves trends for dashboards over long ranges while losing short spikes.</li><li>Retention should match the question: weeks for operational debugging, months or years for capacity trends and SLO reporting.</li><li>Series churn — short-lived series from ephemeral pods or unbounded labels — is a hidden cost multiplier.</li><li>Capacity planning needs enough history to see weekly and seasonal patterns, not just the last few days.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>From metrics to alerts</h2>
+<ul><li>Alert on symptoms users feel — error rate, latency, availability — rather than on every internal cause metric.</li><li>Cause metrics such as CPU or queue depth are better used for diagnosis and early warning than for paging.</li><li>Require a sustained breach (<em>for</em> duration) so a single scrape spike does not page anyone.</li><li>Alert on <strong>missing data</strong> too, because a service that stops reporting looks healthy on a graph with no gaps drawn.</li><li>Every alert should link to a dashboard and a runbook that explains what to check and what to do.</li><li>Keep thresholds tied to an SLO or a capacity limit, not to a number that felt right once.</li><li>Review alerts after each incident: an alert that never leads to action is noise that erodes trust in the pager.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Common instrumentation failure modes</h2>
+<ul><li>A cardinality explosion from one unbounded label can degrade the whole metrics backend, not just one dashboard.</li><li>Instrumenting only successes hides the failure path, which is usually the one that matters during an incident.</li><li>Measuring at the wrong layer — proxy latency only — hides slow application code behind a fast network hop.</li><li>Emitting high-frequency metrics from inside hot loops adds measurable CPU and allocation overhead.</li><li>Inconsistent metric names and units across services make fleet-wide queries impossible.</li><li>Gauges sampled too coarsely miss short saturation events, such as a pool briefly exhausting under a burst.</li><li>Assuming a metric exists because a dashboard shows a line: the panel may be graphing a stale or defaulted series.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Rich labels</strong> make metrics sliceable but multiply series count and can overwhelm the backend.</li><li><strong>High-resolution scraping</strong> catches short spikes but multiplies storage and ingestion cost.</li><li><strong>Histograms</strong> enable fleet-wide percentiles but cost more per series than a simple counter.</li><li><strong>Client-computed summaries</strong> give accurate local quantiles but cannot be merged across instances.</li><li><strong>Auto-instrumentation</strong> is fast to adopt but produces generic metrics that may miss business meaning.</li><li><strong>Pull collection</strong> reveals target health but requires discoverable targets and a working scrape path.</li><li><strong>Long retention and downsampling</strong> support capacity planning but lose detail on old incidents.</li><li><strong>Alerting on cause metrics</strong> catches problems early but generates pages for conditions users never felt.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a metric, precisely?</summary><div class="answer"><p>A named numeric measurement recorded at points in time, identified by a name, a type, and a set of labels. One metric name with one unique label combination forms a time series. Metrics summarize many events into a small number of numbers, which is what makes them cheap to store and query.</p></div></details>
+<details><summary>2. Counter, gauge, or histogram — how do you choose?</summary><div class="answer"><p>Use a counter for anything that only accumulates, such as requests or errors, and query its rate. Use a gauge for a level that rises and falls, such as connections in use. Use a histogram when the distribution matters, typically latency or payload size, because it lets you compute percentiles after the fact.</p></div></details>
+<details><summary>3. Why are percentiles better than averages for latency?</summary><div class="answer"><p>Latency distributions are heavily skewed, so the mean tracks the fast majority and hides the slow tail. p95 and p99 reflect the users most likely to time out or abandon, which is usually what triggers complaints. Report both a percentile and a count so the reader knows how much traffic the tail represents.</p></div></details>
+<details><summary>4. Why can't you average percentiles across instances?</summary><div class="answer"><p>A percentile is a position in a distribution, not an additive quantity, so the average of two p99 values says nothing about the combined p99. The correct approach is to aggregate the underlying histogram buckets and compute the percentile on the merged distribution. Client-side summaries make this impossible, which is a reason to prefer histograms for fleet-wide latency.</p></div></details>
+<details><summary>5. What is the high cardinality problem in metrics?</summary><div class="answer"><p>Every distinct label combination is its own time series, so an unbounded label such as user ID or raw URL can create millions of series. That consumes memory and index space, slows queries, and can destabilize the metrics backend for everyone. Keep labels bounded and put unbounded identifiers in logs or traces.</p></div></details>
+<details><summary>6. Push or pull — which do you prefer and why?</summary><div class="answer"><p>Pull suits long-running services: failed scrapes reveal target health and the application needs no delivery logic. Push suits short-lived jobs, edge sites, and networks where the collector cannot reach the target. Push hides target liveness, so you need explicit heartbeats or a gateway that tracks expected senders.</p></div></details>
+<details><summary>7. What are the four golden signals and why those four?</summary><div class="answer"><p>Latency, traffic, errors, and saturation. Together they answer how slow requests are, how much demand exists, how often requests fail, and how close resources are to their limits. They cover both user-visible symptoms and the leading indicator — saturation — that predicts degradation.</p></div></details>
+<details><summary>8. How would you instrument a new HTTP service?</summary><div class="answer"><p>Auto-instrument inbound and outbound calls, then add a request counter by route, method, and status class, a latency histogram, an in-flight request gauge, and saturation metrics for pools and queues. Add business counters for outcomes that matter to users. Keep every label bounded and route metric names consistently with other services.</p></div></details>
+<details><summary>9. Why do counters reset, and how does that affect queries?</summary><div class="answer"><p>A counter lives in process memory, so a restart starts it from zero. Rate calculations must detect the reset and treat the drop as a new accumulation rather than a negative rate. This is why you query <code>rate</code> or <code>increase</code> over a window instead of subtracting raw samples yourself.</p></div></details>
+<details><summary>10. What makes a good alerting metric?</summary><div class="answer"><p>It should reflect something users experience, such as error rate or latency above an SLO, and be stable enough that a short spike does not page anyone. It should have a clear owner, a link to a dashboard, and a runbook. Cause metrics like CPU are better for diagnosis and warning than for waking people up.</p></div></details>
+<details><summary>11. How do you keep long-term metric storage affordable?</summary><div class="answer"><p>Keep recent data at full resolution, downsample older data to coarser intervals, and set retention by question type — short for debugging, long for capacity trends. Also control series count, because churn from ephemeral pods or unbounded labels costs more than sample rate in many systems.</p></div></details>
+<details><summary>12. What are the risks of auto-instrumentation?</summary><div class="answer"><p>It is generic: it measures transport-level facts but not business outcomes, and it can create high-cardinality series if it labels by raw paths. It also hides which metrics are actually maintained. Use it for the standard request path, then add deliberate domain metrics and prune noisy defaults.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Labeling by raw URL path or user ID and collapsing the metrics backend with unbounded cardinality.</li><li>Graphing average latency and concluding the service is healthy while the p99 is timing out.</li><li>Averaging per-instance percentiles instead of merging histogram buckets.</li><li>Measuring only successful requests, so the failure path is invisible exactly when it matters.</li><li>Alerting on CPU or memory as a page while ignoring user-facing error rate and latency.</li><li>Treating a missing series as healthy instead of alerting on absent data.</li><li>Emitting metrics from hot loops with expensive label computations and adding real request latency.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="log-aggregation.html"><span>← Previous</span><strong>Log Aggregation</strong></a><a class="next" href="distributed-tracing.html"><span>Next →</span><strong>Distributed Tracing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/metrics-instrumentation">AlgoMaster — Metrics and Instrumentation</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

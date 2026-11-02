@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Document Databases — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 46 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Document Databases</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/document-databases">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem document databases solve</a>
+<a href="#s2">What a document database is</a>
+<a href="#s3">Document structure and IDs</a>
+<a href="#s4">Flexible schema and its responsibilities</a>
+<a href="#s5">Querying documents</a>
+<a href="#s6">Indexes</a>
+<a href="#s7">Embedding versus referencing</a>
+<a href="#s8">A modeling example: a blog</a>
+<a href="#s9">Updates and transactions</a>
+<a href="#s10">Replication</a>
+<a href="#s11">Sharding</a>
+<a href="#s12">Document versus relational</a>
+<a href="#s13">When to use a document database</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A document database stores each entity as one self-contained JSON-like record, so a request that touches one entity is a single read of one document — as long as you model around embedding, references, and the queries you actually run.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Document</dt><dd>A self-contained record of fields, nested objects, and arrays, stored and retrieved as one unit.</dd></div><div class="term"><dt>Collection</dt><dd>A group of documents, roughly the analogue of a table, but without a shared fixed schema.</dd></div><div class="term"><dt>Data locality</dt><dd>Keeping related data inside one document so the storage engine returns it in a single read instead of joining.</dd></div><div class="term"><dt>Embedding</dt><dd>Storing related data as a nested object or array inside the parent document.</dd></div><div class="term"><dt>Referencing</dt><dd>Storing related data in a separate document and holding its id, like a foreign key without database enforcement.</dd></div><div class="term"><dt>Multikey index</dt><dd>An index on an array field that creates one index entry per array element, so queries can match inside arrays.</dd></div><div class="term"><dt>Aggregation pipeline</dt><dd>An ordered series of stages that filter, group, project, and sort documents, each stage feeding the next.</dd></div><div class="term"><dt>Replica set</dt><dd>A primary plus secondaries that copy the primary's operation log and can elect a new primary after a failure.</dd></div><div class="term"><dt>Write concern</dt><dd>How many replica members must acknowledge a write before the driver reports success.</dd></div><div class="term"><dt>Shard key</dt><dd>The field that decides which shard owns a document; queries that include it avoid fanning out to every shard.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem document databases solve</h2>
+<p class="lede">A product catalog holds things that do not share attributes: a shoe has sizes and a material, a laptop has a processor and memory, a book has an author and a page count.</p>
+<ul><li>One wide table needs a column for every possible attribute, and most columns stay empty for most rows.</li><li>One table per product type avoids empty columns but requires a schema change for every new product type.</li><li>A generic <code>(product_id, attribute, value)</code> table is flexible but makes every query a join and a pivot.</li><li>A second problem is assembly: one product page may need rows from products, variants, images, and specifications.</li><li>The application has to join four tables just to rebuild one object it already knows the shape of.</li><li>A document database stores that whole object as one record, matching how the application uses it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a document database is</h2>
+<ul><li>A document is a self-contained record, usually a JSON-like structure; MongoDB stores a binary form called BSON.</li><li>Documents are grouped into <strong>collections</strong>, and each document has a unique identifier such as MongoDB's <code>_id</code>.</li><li>Unlike a table, documents in one collection may have different fields, so a shoe and a laptop can coexist.</li><li>The mental mapping is: table to collection, row to document, column to field, foreign key to embedded data or a reference.</li><li>Queries address fields inside the document, so the engine must understand its contents — unlike a pure key-value store.</li><li>Popular engines include MongoDB, Couchbase, Firestore, and Cosmos DB; DynamoDB can also store document-style items.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Relational</th><th>Document</th></tr></thead><tbody><tr><td>Table</td><td>Collection</td></tr>
+<tr><td>Row</td><td>Document</td></tr>
+<tr><td>Column</td><td>Field</td></tr>
+<tr><td>Join table or foreign key</td><td>Embedded data or a reference id</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Document structure and IDs</h2>
+<ul><li>A document can hold simple fields such as name, brand, and price.</li><li>It can hold an <strong>array</strong>, such as the available sizes.</li><li>It can hold a <strong>nested object</strong>, such as a specifications block with material and weight.</li><li>It can hold an <strong>array of objects</strong>, such as variants that each carry a color, size, and stock count.</li><li>Because everything sits together on disk, one read returns the whole product — no joins, no fan-out.</li><li>The <code>_id</code> choice matters: database-generated ids are convenient and roughly ordered, UUIDs can be created by any service, and business ids avoid an extra mapping.</li><li>A time-ordered id keeps recent documents adjacent in the index, which helps range reads but can create a write hotspot if it is also the shard key.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Flexible schema and its responsibilities</h2>
+<ul><li>Two documents in one collection can have completely different fields, so a new product type needs no migration.</li><li>The application simply starts writing the new field; older documents keep their old shape.</li><li>The cost is that every reader must handle missing fields, legacy formats, and unexpected types.</li><li>So structure does not disappear — it moves into code, where each service must agree on what a valid document looks like.</li><li>Most engines offer optional <strong>schema validation</strong>, requiring certain fields and types while allowing the rest to vary.</li><li>In production, schemaless should mean a predictable core shape with variation only where the data genuinely varies.</li><li>That balance keeps flexibility without forcing every reader to defend against every historical shape.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Querying documents</h2>
+<ul><li>Because the engine understands the document, you can filter on any field, not only the id.</li><li>Queries use a structured filter document rather than a string language, which composes easily in application code.</li><li>An <strong>aggregation pipeline</strong> chains stages: filter last month's orders, group by customer and sum totals, sort by spending.</li><li>Each stage transforms its input and passes the result on, which makes complex reporting expressible without application-side loops.</li><li>A lookup stage can join another collection, but it is usually cheaper to model documents so joins are unnecessary.</li><li>Pipelines can use indexes only for the stages that can push a filter down, so stage order affects performance.</li><li>Complex multi-collection reporting remains less natural than in SQL, which is the main querying limitation.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Indexes</h2>
+<ul><li>Without an index, a query scans every document in the collection.</li><li>Single-field and compound indexes work as they do in a relational engine.</li><li>A <strong>multikey index</strong> on an array creates one entry per element, so a search for size 9 can use the index directly.</li><li>Indexes on nested paths such as <code>specifications.material</code> are supported, which keeps embedded data queryable.</li><li>Text indexes support basic full-text matching; TTL indexes expire documents such as sessions or tokens automatically.</li><li>The usual cost applies: every write must update every index, and indexes occupy memory and disk.</li><li>A multikey index over a large array grows quickly, because one document produces many entries.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Index type</th><th>Use case</th><th>Example field</th></tr></thead><tbody><tr><td>Single field</td><td>Filter on one field</td><td>brand</td></tr>
+<tr><td>Compound</td><td>Filter and sort on several fields</td><td>brand + price</td></tr>
+<tr><td>Multikey</td><td>Match values inside an array</td><td>sizes, variants.color</td></tr>
+<tr><td>Nested field</td><td>Match inside embedded objects</td><td>specifications.material</td></tr>
+<tr><td>Text</td><td>Basic full-text search</td><td>name, description</td></tr>
+<tr><td>TTL</td><td>Expire documents automatically</td><td>sessions, tokens</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Embedding versus referencing</h2>
+<p class="lede">This is the central modeling decision in a document database, and it decides both read cost and update cost.</p>
+<ul><li><strong>Embed</strong> data that is read together, owned by the parent, and bounded in size — order line items, a shipping address.</li><li><strong>Reference</strong> data that is shared, updated independently, or able to grow without limit — a customer, an author.</li><li>Embedding gives one read and atomic single-document updates, but duplicates data that must then be kept in sync.</li><li>Referencing keeps one authoritative copy and smaller documents, but needs extra reads and has no enforced foreign keys.</li><li>A common hybrid stores a reference <em>and</em> a snapshot: the order points at the customer, yet embeds the shipping address as it was at purchase.</li><li>Snapshots are correct for history — if the customer moves or a price changes, the old order should not change with it.</li><li>Growth is the deciding factor: an unbounded array turns every append into a rewrite of a larger and larger document.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Factor</th><th>Favor embedding</th><th>Favor referencing</th></tr></thead><tbody><tr><td>Access pattern</td><td>Read together</td><td>Read independently</td></tr>
+<tr><td>Ownership</td><td>Owned by the parent</td><td>Shared by many documents</td></tr>
+<tr><td>Cardinality</td><td>One-to-one or one-to-few</td><td>One-to-many or many-to-many</td></tr>
+<tr><td>Growth</td><td>Has a clear limit</td><td>Can grow without limit</td></tr>
+<tr><td>Updates</td><td>Change with the parent</td><td>Change independently</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>A modeling example: a blog</h2>
+<ul><li>Tags are small, belong to the post, and are read with it, so they are embedded as an array.</li><li>The author is shared across many posts, so the post stores the author id and optionally a display name.</li><li>Comments look embeddable because they are displayed with the post, but a popular post can collect an unbounded number.</li><li>An ever-growing array means each new comment rewrites a larger document; MongoDB also caps a document at 16 MB.</li><li>So comments live in their own collection, each referencing the post id, with indexes on that reference and on time.</li><li>The post may still embed the few most recent comments, so the first page render needs no second query.</li><li>The lesson generalizes: model around how the application reads and writes, not around a fixed rule.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Updates and transactions</h2>
+<ul><li>Partial updates change one field, increment a counter, or push onto an array without rewriting the whole document from the client.</li><li>Operations on a <strong>single document are atomic</strong>: if three fields change, either all three or none.</li><li>That is a strong argument for embedding data that must change together, such as an order and its line items.</li><li>Changes across several documents need <strong>multi-document transactions</strong>, which MongoDB added in 4.0 and extended to sharded clusters in 4.2.</li><li>Those transactions cost more than single-document writes and hold resources longer, so they are the exception rather than the default.</li><li>Good document design keeps most related changes inside one document precisely so transactions stay rare.</li><li>If nearly every write needs a multi-document transaction, the model is probably more relational than document-shaped.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Replication</h2>
+<ul><li>Document databases usually replicate data for availability; in MongoDB the group is a <strong>replica set</strong>.</li><li>A replica set has one primary and usually two or more secondaries.</li><li>All writes go to the primary, which records them in an ordered log called the <strong>oplog</strong>.</li><li>Secondaries copy and apply that log, so they converge to the primary's state.</li><li>If the primary fails, the remaining members hold an election and promote a secondary, usually within seconds.</li><li>A <strong>write concern</strong> of majority confirms a write only after most members have it, protecting it against a primary failure right after the acknowledgment.</li><li>Reads can be served from secondaries to spread load, but those reads may be stale because replication lags.</li><li>Read preference is therefore a per-query consistency decision, not a global setting.</li></ul>
+
+<div class="flow"><span class="flow-step">Client writes to primary</span><span class="flow-arrow">→</span><span class="flow-step">Primary appends to oplog</span><span class="flow-arrow">→</span><span class="flow-step">Secondaries copy and apply</span><span class="flow-arrow">→</span><span class="flow-step">Write concern satisfied</span><span class="flow-arrow">→</span><span class="flow-step">Primary fails: election promotes a secondary</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Sharding</h2>
+<ul><li>When a collection outgrows one replica set, it is split across shards, and each shard is itself a replica set.</li><li>The <strong>shard key</strong> is a field present in every document, such as <code>customer_id</code> on an orders collection.</li><li><strong>Ranged</strong> sharding keeps nearby key values together, which suits range queries but risks concentrating writes at one end.</li><li><strong>Hashed</strong> sharding spreads keys evenly, which balances writes but scatters ranges across shards.</li><li>A <strong>router</strong> receives queries and forwards each one to the shards that can answer it.</li><li>If the query includes the shard key, it targets one shard; if not, it becomes a <strong>scatter-gather</strong> across all shards.</li><li>So the shard key should match the most common query, not just the most even distribution.</li><li>A poor key creates hotspots: low-cardinality fields cannot spread data, and a ranged timestamp sends every new write to the newest range.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Shard key</th><th>Problem</th></tr></thead><tbody><tr><td>status</td><td>Few distinct values, so data cannot spread</td></tr>
+<tr><td>created_at, ranged</td><td>Every new write lands on the newest range</td></tr>
+<tr><td>country</td><td>One dominant country overloads one shard</td></tr>
+<tr><td>customer_id, hashed</td><td>Even writes, and per-customer queries stay targeted</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Document versus relational</h2>
+<ul><li>Relational layout normalizes facts and combines them with joins; document layout keeps related data together, shaped for reading.</li><li>Relational schema is fixed and enforced; document schema is flexible with optional validation.</li><li>Relational strength is complex joins and ad hoc queries across many entities; document strength is fast read and write of whole objects for one main entity.</li><li>Relational transactions are multi-row by default; document atomicity is per document, with multi-document transactions available but costlier.</li><li>The line has blurred: PostgreSQL indexes JSON columns, and MongoDB supports joins and transactions.</li><li>So the choice is less about feature checklists and more about which model matches your data and access patterns.</li><li>A useful smell: if you reference everything and join on almost every query, the data is probably relational.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Relational</th><th>Document</th></tr></thead><tbody><tr><td>Data layout</td><td>Normalized tables joined at read time</td><td>Related data together in one document</td></tr>
+<tr><td>Schema</td><td>Fixed, enforced by the database</td><td>Flexible, optional validation</td></tr>
+<tr><td>Strong at</td><td>Joins and ad hoc queries across entities</td><td>Whole-object reads and writes for one entity</td></tr>
+<tr><td>Transactions</td><td>Multi-row ACID is the default</td><td>Single-document atomic; multi-document costlier</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use a document database</h2>
+<ul><li>The data is naturally an object with nested detail: product catalogs, content management, user profiles, game state.</li><li>Records vary in structure, or the model changes often enough that migrations would dominate delivery.</li><li>Most requests read or write <strong>one main entity</strong>: one product, one article, one user.</li><li>It is a weaker fit when many entities must be combined in different ways, as in financial reporting across accounts, transactions, and customers.</li><li>It is also weak when aggregates must span the whole collection rather than one document.</li><li>The design test is whether the data is read in the same shape it is stored; if not, the joins you keep writing are the signal.</li><li>A common production pattern keeps the relational database as the source of truth and uses documents for the read-optimized view.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Embedding</strong> gives single-read, atomic updates but duplicates data and can produce ever-growing documents.</li><li><strong>Referencing</strong> keeps one authoritative copy and small documents but adds reads and provides no enforced foreign keys.</li><li><strong>Flexible schema</strong> removes migration friction but pushes validation into every reader and lets formats drift.</li><li><strong>Data locality</strong> makes whole-object reads fast but works against queries that need fields across many entities.</li><li><strong>Multikey indexes</strong> make array membership queryable but multiply index entries per document and inflate write cost.</li><li><strong>Single-document atomicity</strong> is cheap and reliable but only covers changes you managed to keep inside one document.</li><li><strong>Multi-document transactions</strong> extend correctness but add coordination cost and hold resources longer.</li><li><strong>Sharding by a hash</strong> balances writes but scatters ranges; sharding by range keeps ranges local but risks hot ranges.</li><li><strong>Majority write concern</strong> protects acknowledged writes but adds latency to every write.</li><li><strong>Secondary reads</strong> spread load but can return data that lags the primary.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a document database in one sentence?</summary><div class="answer"><p>A database that stores each entity as a self-contained JSON-like document with nested objects and arrays, grouped into collections and read as a whole. It is designed so one request that touches one entity becomes one read, without joins.</p></div></details>
+<details><summary>2. Why does a product catalog fit documents well?</summary><div class="answer"><p>Products share a core shape but differ widely in attributes, so a fixed table would be mostly empty columns or need constant schema changes. A document holds exactly the fields each product has, and one read returns everything a product page needs.</p></div></details>
+<details><summary>3. What is data locality?</summary><div class="answer"><p>Keeping related data together in one document so the storage engine can return it in a single read. It removes the join work but means the same data may be copied into several documents, which must then be kept in sync.</p></div></details>
+<details><summary>4. Embed or reference: what is the rule?</summary><div class="answer"><p>Embed when the data is read together, owned by the parent, and bounded in size. Reference when it is shared, updated independently, or unbounded — an ever-growing array turns each append into a rewrite of a larger document and eventually hits the document size limit.</p></div></details>
+<details><summary>5. Why is 'schemaless' misleading?</summary><div class="answer"><p>Because the structure still exists in the application code that reads and writes documents. Nothing enforces it, so readers must handle missing fields and old formats, and different services can write incompatible shapes. Optional schema validation restores a predictable core.</p></div></details>
+<details><summary>6. How do multikey indexes work?</summary><div class="answer"><p>An index on an array field creates one entry per array element, each pointing back to the owning document. A query for one element value can then use the index instead of scanning. The cost is that one document with a long array produces many index entries, so index size and write cost grow with array length.</p></div></details>
+<details><summary>7. What does the aggregation pipeline give you?</summary><div class="answer"><p>A sequence of stages where each transforms the data and passes it on — filter, group, sum, sort, project. It lets the database do reporting work that would otherwise be application loops. A lookup stage can join another collection, but modeling to avoid that join is usually faster.</p></div></details>
+<details><summary>8. What is atomic in a document database?</summary><div class="answer"><p>Operations on a single document are atomic: all field changes apply or none do. That is why embedding related data helps correctness as well as speed. Cross-document changes need multi-document transactions, which exist but cost more.</p></div></details>
+<details><summary>9. How does a replica set handle a primary failure?</summary><div class="answer"><p>Secondaries copy the primary's oplog and apply it. If the primary fails, the remaining members hold an election and promote one secondary. Writes acknowledged with majority write concern survive that failure; writes acknowledged by the primary alone may not.</p></div></details>
+<details><summary>10. How should you choose a shard key?</summary><div class="answer"><p>Match the most common query and spread writes. A high-cardinality key included in typical queries keeps reads on one shard; a low-cardinality key cannot spread data, and a ranged timestamp sends every new write to the newest range. Hashing helps balance writes but scatters ranges.</p></div></details>
+<details><summary>11. What is a scatter-gather query and why is it bad?</summary><div class="answer"><p>If a query does not include the shard key, the router cannot know which shard holds the matching documents, so it sends the query to all shards and merges the results. Latency becomes the slowest shard's, and cost grows with shard count.</p></div></details>
+<details><summary>12. When is a relational database the better choice?</summary><div class="answer"><p>When many entities must be combined in different ways, when reporting spans the whole data set, or when multi-row correctness is the norm. If you reference almost everything and join on every query, the data is relational in shape regardless of the engine you picked.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Embedding an unbounded array such as comments or events, then hitting document size limits and rewrite costs.</li><li>Choosing randomness for ids without checking how it interacts with index locality and the shard key.</li><li>Treating schemaless as requiring no validation, so every reader defends against unknown shapes.</li><li>Assuming multi-document writes are atomic because single-document writes are.</li><li>Sharding on a low-cardinality field such as status and expecting even distribution.</li><li>Reading from secondaries for a flow that must show the user their own write.</li><li>Modeling like a relational schema — one small collection per entity — and then joining on every query.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="relational-databases.html"><span>← Previous</span><strong>Relational Databases</strong></a><a class="next" href="key-value-stores.html"><span>Next →</span><strong>Key-Value Stores</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/document-databases">AlgoMaster — Document Databases</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

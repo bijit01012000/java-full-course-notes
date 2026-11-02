@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Delivery Semantics — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 33 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Delivery Semantics</h1>
+    <p class="dek">Communication Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/delivery-semantics">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The uncertainty problem</a>
+<a href="#s2">The three guarantees</a>
+<a href="#s3">At-most-once</a>
+<a href="#s4">At-least-once</a>
+<a href="#s5">Exactly-once</a>
+<a href="#s6">Where the choice lives: retry and acknowledge timing</a>
+<a href="#s7">Producer-side duplicates</a>
+<a href="#s8">Consumer-side idempotency</a>
+<a href="#s9">Ordering, partitions, and duplicates</a>
+<a href="#s10">Failure modes that break the guarantee</a>
+<a href="#s11">Choosing a guarantee</a>
+<a href="#s12">Verifying it in production</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Delivery semantics describe what a messaging system promises about loss and duplication — and every promise is really a choice about when to retry and when to acknowledge.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Delivery semantics</dt><dd>The guarantee a messaging path makes about whether a message can be lost, duplicated, or processed exactly one time.</dd></div><div class="term"><dt>At-most-once</dt><dd>A message is delivered zero or one time: it may be lost, but it is never duplicated.</dd></div><div class="term"><dt>At-least-once</dt><dd>A message is never lost, but it may be delivered more than once, so consumers must tolerate duplicates.</dd></div><div class="term"><dt>Exactly-once</dt><dd>Every message affects the system one time, with no loss and no duplicates, usually implemented as at-least-once plus deduplication.</dd></div><div class="term"><dt>Acknowledgment</dt><dd>The signal that tells the broker a message was processed, which is what allows it to stop redelivering.</dd></div><div class="term"><dt>Idempotency</dt><dd>The property that repeating an operation produces the same final state as doing it once.</dd></div><div class="term"><dt>Idempotency key</dt><dd>A unique identifier carried with a message so the consumer can detect and discard a repeat.</dd></div><div class="term"><dt>Deduplication</dt><dd>Storing recently seen message identifiers so duplicate deliveries are ignored instead of reprocessed.</dd></div><div class="term"><dt>Effectively-once</dt><dd>An end-to-end design where duplicates may exist in transport but produce only one observable effect.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The uncertainty problem</h2>
+<p class="lede">An order service sends 'charge this customer $50' to a payment service and waits. Nothing comes back. The silence is ambiguous, and the ambiguity is the entire subject of delivery semantics.</p>
+<ul><li>The message may have been <strong>lost before delivery</strong>, so nothing happened.</li><li>The message may have been <strong>processed and the response lost</strong>, so the charge already happened.</li><li>The service may simply be <strong>slow</strong> and the response is still in flight.</li><li>From the sender's view these three cases are indistinguishable — all it observes is silence.</li><li>Not retrying risks a payment that never happens; retrying risks charging the customer twice.</li><li>Every messaging system therefore has to pick a behavior for this exact moment.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The three guarantees</h2>
+<ul><li><strong>At-most-once</strong>: delivered once or not at all — possible loss, never duplication.</li><li><strong>At-least-once</strong>: never lost, but possibly delivered more than once.</li><li><strong>Exactly-once</strong>: each message affects the system one time, with neither loss nor duplication.</li><li>The guarantees are not abstract promises; each follows from concrete choices about retrying and acknowledging.</li><li>In practice exactly-once is delivered as at-least-once transport plus deduplication at the effect boundary.</li><li>The choice should be made per message type, because not every message deserves the same cost.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Guarantee</th><th>Retry?</th><th>When the consumer acknowledges</th><th>Main risk</th></tr></thead><tbody><tr><td>At-most-once</td><td>No</td><td>Before processing</td><td>Message loss</td></tr>
+<tr><td>At-least-once</td><td>Yes, until acknowledged</td><td>After processing</td><td>Duplicates</td></tr>
+<tr><td>Exactly-once</td><td>Yes</td><td>After processing, plus deduplication</td><td>More complexity</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>At-most-once</h2>
+<ul><li>The consumer acknowledges, or the broker deletes, the message <strong>before</strong> the work is done.</li><li>Because the message is already gone, a crash during processing leaves nothing to redeliver.</li><li>The failure mode is silent loss, which is acceptable when the data is replaceable or superseded.</li><li>Good fits: metrics samples, telemetry, log shipping, live position updates where the next value overwrites the last.</li><li>Bad fits: payments, order placement, anything a user expects to happen.</li><li>It is cheap and simple because no retry, tracking, or deduplication state is required.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>At-least-once</h2>
+<ul><li>The consumer acknowledges only <strong>after</strong> successfully processing, so an unacknowledged message is redelivered.</li><li>This guarantees no loss as long as retention outlives the consumer's downtime — a real constraint, not a free property.</li><li>The cost is duplicates: a crash after the effect but before the acknowledgment replays the message.</li><li>Duplicate delivery can also come from retries after a timeout, from failover, or from a consumer being reassigned.</li><li>Consumers must therefore be idempotent or deduplicated, otherwise the guarantee becomes 'at least one bad outcome'.</li><li>It is the most common production default because it fails safe: nothing disappears.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Exactly-once</h2>
+<ul><li>Exactly-once means one <em>effect</em>, not one network transmission; the network may still carry a message twice.</li><li>Typical construction: at-least-once delivery, a stable message ID, and a deduplication store the consumer checks before acting.</li><li>The effect and the record of 'already processed' must commit together, usually in one local transaction.</li><li>If the effect is an external side effect (an email, a card charge), you need that system's own idempotency mechanism.</li><li>Scope matters: exactly-once inside one broker and one database is tractable; across arbitrary external systems it is a design effort, not a switch.</li><li>It costs latency, extra storage, and coordination, so applying it everywhere is usually over-engineering.</li></ul>
+
+<div class="flow"><span class="flow-step">Consume message with ID</span><span class="flow-arrow">→</span><span class="flow-step">Begin transaction</span><span class="flow-arrow">→</span><span class="flow-step">Check processed-ID table</span><span class="flow-arrow">→</span><span class="flow-step">Already present -> commit and acknowledge without acting</span><span class="flow-arrow">→</span><span class="flow-step">Not present -> apply effect, insert ID</span><span class="flow-arrow">→</span><span class="flow-step">Commit, then acknowledge</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Where the choice lives: retry and acknowledge timing</h2>
+<ul><li>Move the acknowledgment earlier and you reduce duplicate risk while increasing loss risk.</li><li>Move the acknowledgment later and you eliminate loss while accepting duplicates.</li><li>A <strong>retry</strong> is what turns an unacknowledged message into a possible duplicate.</li><li>The ack boundary must match the transaction boundary of the work being done, not an arbitrary point in the handler.</li><li>Batching acknowledgments trades throughput for a wider duplicate window on partial failure.</li><li>Explicitly document which guarantee each consumer path provides; implicit semantics drift during refactors.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Ack point</th><th>Loss risk</th><th>Duplicate risk</th></tr></thead><tbody><tr><td>Before processing</td><td>High — crash loses the work</td><td>None</td></tr>
+<tr><td>After processing, before commit</td><td>Low</td><td>Moderate — effect may have applied</td></tr>
+<tr><td>After commit</td><td>None</td><td>Possible on ack failure</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Producer-side duplicates</h2>
+<ul><li>A producer that retries after a timeout may send the same message twice even if the first was stored.</li><li>An <strong>idempotent producer</strong> attaches a producer identity and a per-message sequence number so the broker discards a repeat.</li><li>This protects the write path only — it does nothing about a consumer that reapplies an effect.</li><li>Some brokers also offer transactions that group writes and offsets into one atomic unit for stream processing.</li><li>Producer retries need a bounded policy and a cap, otherwise a stuck producer turns into a retry storm.</li><li>Retries should never be unbounded loops without backoff and a terminal outcome.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Consumer-side idempotency</h2>
+<ul><li>Make the handler naturally idempotent where possible: <code>SET status = 'shipped'</code> instead of <code>increment count</code>.</li><li>Use a unique message ID plus a processed-messages table, ideally in the same store as the effect.</li><li>For inserts, rely on a unique constraint on the business key so a duplicate fails harmlessly.</li><li>For external calls, pass an idempotency key the downstream service honors.</li><li>Deduplication windows are finite, so decide how long an ID is remembered and what happens after it expires.</li><li>Idempotency is the real requirement; exactly-once is one way to satisfy it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Ordering, partitions, and duplicates</h2>
+<ul><li>Retries and redelivery can reorder messages unless the system preserves a sequence per key.</li><li>Many brokers guarantee order only within a partition or message group, so ordering scope must match the business key.</li><li>A retry that lands later than a subsequent message can apply an older state over a newer one.</li><li>Consumers can guard with a version or timestamp and reject stale updates.</li><li>Preserving strict order usually forces a single consumer lane, which caps throughput.</li><li>State the ordering requirement first; it constrains which semantics are even achievable.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Failure modes that break the guarantee</h2>
+<ul><li><strong>Poison messages</strong> redelivered forever under at-least-once, consuming capacity — route them to a dead-letter queue.</li><li><strong>Retention expiry</strong> silently converts at-least-once into at-most-once for a consumer that fell too far behind.</li><li><strong>Ack after external side effect</strong> leaves an unrecorded effect when the ack fails, producing duplicates.</li><li><strong>Deduplication store unavailable</strong> forces a choice between blocking and risking duplicates.</li><li><strong>Non-transactional dedup</strong> allows the effect to apply and the ID record to fail, defeating exactly-once.</li><li><strong>Unbounded retry</strong> hides a permanent error as a slow one and inflates load.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Choosing a guarantee</h2>
+<ul><li>Ask what a lost message costs versus what a duplicate costs.</li><li>Loss is worse for money, inventory, and fulfilment; duplicates are worse for notifications, emails, and counters.</li><li>If duplicates are cheaper, choose at-least-once and invest in idempotency.</li><li>If loss is cheap and volume is high, at-most-once can be the pragmatic choice.</li><li>Reserve exactly-once machinery for flows where both loss and duplication are unacceptable.</li><li>Match the guarantee to the message type rather than standardizing on the strongest one everywhere.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Scenario</th><th>Sensible guarantee</th><th>Why</th></tr></thead><tbody><tr><td>Payment capture</td><td>Exactly-once with an idempotency key</td><td>Loss and double charge are both unacceptable</td></tr>
+<tr><td>Order placed event</td><td>At-least-once plus idempotent consumer</td><td>Loss is worse; duplicates are cheap to suppress</td></tr>
+<tr><td>Metrics or telemetry sample</td><td>At-most-once</td><td>Loss is acceptable and volume is high</td></tr>
+<tr><td>Email or push notification</td><td>At-least-once with dedup</td><td>Loss is bad, but a repeat is visible to the user</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Verifying it in production</h2>
+<ul><li>Track redelivery counts and duplicate rejections; a rising rate means duplicate handling is doing real work.</li><li>Alert on consumer lag and retention risk, since falling behind quietly degrades at-least-once.</li><li>Log the message ID and a trace ID so a duplicate can be traced to the exact retry.</li><li>Test by injecting failures: kill the consumer between effect and ack, and confirm the outcome is still correct.</li><li>Review every new consumer for idempotency rather than assuming the framework provides it.</li><li>Document the chosen semantics next to the topic or queue configuration.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Acknowledge early</strong> removes duplicates but risks losing work on a crash.</li><li><strong>Acknowledge late</strong> removes loss but guarantees occasional duplicates on retry.</li><li><strong>Exactly-once</strong> removes both risks in its scope, at the cost of coordination, storage, and latency.</li><li><strong>Deduplication tables</strong> suppress repeats, but add a write per message and a retention decision on IDs.</li><li><strong>Idempotent producers</strong> protect the write path, but do nothing for consumer-side reapplies.</li><li><strong>Strict ordering</strong> preserves intent across retries, but limits parallelism to a single lane.</li><li><strong>Batching</strong> raises throughput, but widens the window where a partial failure forces a redelivery.</li><li><strong>Unbounded retries</strong> maximize delivery attempts, but hide permanent failures and amplify load.</li><li><strong>Strongest-everywhere</strong> simplifies reasoning, but pays coordination cost on messages that never needed it.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why is a lost acknowledgment ambiguous?</summary><div class="answer"><p>The sender cannot tell whether the message was dropped before delivery, processed with the response lost, or is still in flight. Since all three look identical, any decision — retry or not — risks either loss or duplication.</p></div></details>
+<details><summary>2. Define the three delivery guarantees.</summary><div class="answer"><p>At-most-once delivers zero or one time and may lose messages. At-least-once never loses but may duplicate. Exactly-once means each message takes effect once, with neither loss nor duplication, and is normally implemented as at-least-once plus deduplication.</p></div></details>
+<details><summary>3. How is at-most-once implemented?</summary><div class="answer"><p>The consumer acknowledges before doing the work, so the broker has nothing to redeliver if processing fails. It is simple and duplicate-free but silently loses messages, which suits telemetry and superseded state updates.</p></div></details>
+<details><summary>4. When do duplicates appear under at-least-once?</summary><div class="answer"><p>Whenever the work succeeded but the acknowledgment did not reach the broker. That happens on a consumer crash, an ack timeout, a network partition, or a failover that reassigns the message to another consumer.</p></div></details>
+<details><summary>5. Does exactly-once mean the message crosses the network once?</summary><div class="answer"><p>No. Transport can still carry duplicates. Exactly-once is a statement about effects: the system reaches the same state as if each message were applied once. Deduplication and atomic commit are what make that true.</p></div></details>
+<details><summary>6. How do you implement idempotent consumption?</summary><div class="answer"><p>Prefer naturally idempotent writes such as setting a value. Otherwise record processed message IDs in the same transaction as the effect, use unique constraints on business keys, or pass an idempotency key to downstream services.</p></div></details>
+<details><summary>7. What breaks exactly-once most often?</summary><div class="answer"><p>Doing the dedup check and the effect in separate transactions, or calling an external system that has no idempotency support. Either way, a failure between the two steps leaves the state inconsistent with what the system believes.</p></div></details>
+<details><summary>8. How does consumer lag threaten at-least-once?</summary><div class="answer"><p>If a consumer falls behind longer than the retention window, unprocessed messages are deleted. At that point the system behaves like at-most-once for that consumer, without any configuration change or warning unless lag is monitored.</p></div></details>
+<details><summary>9. Why does ordering interact with delivery semantics?</summary><div class="answer"><p>A retry can deliver an older message after a newer one, so the effect order differs from the send order. Systems therefore guarantee order only within a partition or message group, and consumers often reject stale updates using a version or timestamp.</p></div></details>
+<details><summary>10. Which guarantee would you pick for a payment?</summary><div class="answer"><p>Exactly-once behavior with an idempotency key the payment provider honors, because both a lost charge and a double charge are unacceptable. In practice this means at-least-once transport plus a durable record of processed keys.</p></div></details>
+<details><summary>11. When is at-most-once the right call?</summary><div class="answer"><p>When messages carry replaceable data that is superseded quickly, such as metrics samples, live position updates, or cache warm hints. Losing one is harmless and the duplicate-suppression machinery would cost more than it saves.</p></div></details>
+<details><summary>12. How would you test that a consumer is idempotent?</summary><div class="answer"><p>Deliver the same message twice and compare state, then kill the consumer between the effect and the acknowledgment and confirm recovery produces one effect. Both tests exercise the failure paths that production actually hits.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Claiming exactly-once because the broker supports it, while the consumer calls a non-idempotent external API.</li><li>Acknowledging before processing and calling the result reliable.</li><li>Checking a deduplication table in a different transaction from the effect.</li><li>Ignoring that retention expiry silently downgrades at-least-once to at-most-once.</li><li>Retrying forever without a terminal outcome or dead-letter path.</li><li>Assuming a topic-wide ordering guarantee when the broker only orders within a partition.</li><li>Applying the strongest guarantee to high-volume telemetry and paying coordination cost for nothing.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="message-brokers.html"><span>← Previous</span><strong>Message Brokers</strong></a><a class="next" href="dead-letter-queues.html"><span>Next →</span><strong>Dead Letter Queues</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/delivery-semantics">AlgoMaster — Delivery Semantics</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

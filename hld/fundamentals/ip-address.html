@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IP Address — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 09 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>IP Address</h1>
+    <p class="dek">Networking · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/ip-address">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What an IP address represents</a>
+<a href="#s2">IPv4 addresses</a>
+<a href="#s3">Network and host portions</a>
+<a href="#s4">CIDR notation</a>
+<a href="#s5">Subnets</a>
+<a href="#s6">Virtual networks and CIDR planning</a>
+<a href="#s7">Public and private IP addresses</a>
+<a href="#s8">Network Address Translation (NAT)</a>
+<a href="#s9">Static and dynamic IP addresses</a>
+<a href="#s10">DNS, load balancers, and service discovery</a>
+<a href="#s11">IPv6 addresses</a>
+<a href="#s12">Common pitfalls in system design</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>An IP address is a <strong>network location</strong>, not a machine's permanent identity: routers forward packets toward it, and CIDR, subnets, NAT, and DNS decide how those locations are organised and reached.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>IP address</dt><dd>A numerical address assigned to a network interface that routers use to forward packets toward a destination.</dd></div><div class="term"><dt>CIDR</dt><dd>Classless Inter-Domain Routing: a prefix plus a length, such as <code>10.0.0.0/16</code>, describing a block of addresses.</dd></div><div class="term"><dt>Prefix length</dt><dd>The number after the slash that says how many leading bits identify the network; a longer prefix means a smaller block.</dd></div><div class="term"><dt>Subnet</dt><dd>A smaller network carved out of a larger address range, with its own routes and security rules.</dd></div><div class="term"><dt>Private address</dt><dd>An address from an RFC 1918 range that is only unique inside its own network and is not routable on the public internet.</dd></div><div class="term"><dt>NAT</dt><dd>Network Address Translation: rewriting source addresses and ports so private hosts can share a public address.</dd></div><div class="term"><dt>VPC</dt><dd>A virtual private cloud: a cloud-assigned CIDR block divided into public and private subnets.</dd></div><div class="term"><dt>Longest prefix match</dt><dd>The routing rule that picks the most specific matching route when several prefixes match a destination.</dd></div><div class="term"><dt>Service discovery</dt><dd>A mechanism that lets services find healthy instances by name instead of a hardcoded IP address.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What an IP address represents</h2>
+<p class="lede">Every packet carries two addresses: the destination, where it should be delivered, and the source, so the reply knows where to go.</p>
+<ul><li>An IP address is assigned to a <strong>network interface</strong>, not to a machine: a laptop's Wi-Fi adapter, a VM's NIC, or a container's virtual interface.</li><li>One server can have several interfaces and therefore several addresses, each on a different network.</li><li>Routers only need to know the <strong>next hop</strong>, not the full path, which is what makes the internet scale.</li><li>Addresses change: a server that moves networks, a replacement instance, or a restarted container may get a different address.</li><li>So think of an address as a <strong>network location</strong>, not a permanent identifier of hardware.</li><li>Because it is a location, any design that stores an IP as an identity or a durable reference eventually breaks.</li></ul>
+<h3>IP addresses vs MAC addresses</h3>
+<ul><li>A MAC address delivers a frame within one local network; an IP address routes a packet between networks.</li><li>The destination MAC changes at every hop, because each hop is a fresh local delivery.</li><li>The destination IP normally stays the same until it reaches the target, unless NAT or a proxy rewrites it.</li><li>MAC addresses are burned into hardware or assigned by the hypervisor; IP addresses are a routing decision.</li><li>ARP bridges the two by resolving an IP address to a MAC address on the local segment.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>IPv4 addresses</h2>
+<ul><li>An IPv4 address is <strong>32 bits</strong>, written as four decimal numbers from 0 to 255 separated by dots.</li><li>32 bits gives 2^32, roughly 4.3 billion addresses, which is far fewer than the number of connected devices today.</li><li>Not all of that space is publicly usable: private ranges, multicast, link-local, and reserved blocks consume large parts of it.</li><li>The shortage drove private addressing, NAT, careful allocation, and eventually IPv6.</li><li>Regional registries exhausted their free public IPv4 pools during the 2010s, so new public addresses are scarce and costly.</li><li>IPv4 still works because most endpoints sit behind NAT rather than owning a public address.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Network and host portions</h2>
+<p class="lede">Every address splits into a network portion, which identifies the network, and a host portion, which identifies the specific interface inside it.</p>
+<ul><li>The <strong>prefix length</strong> tells you how many leading bits belong to the network.</li><li>In <code>192.168.1.10/24</code>, the first 24 bits are the network and the remaining 8 bits are the host.</li><li>Routers forward on <strong>prefixes</strong>, not individual addresses: one route for <code>192.168.1.0/24</code> covers all 256 addresses.</li><li>When multiple routes match, the router picks the longest prefix, because it is the most specific.</li><li><code>0.0.0.0/0</code> is the default route: it matches everything and is used only when nothing more specific exists.</li><li>Adjusting the prefix splits a block into smaller subnets (<code>/24</code> into two <code>/25</code>s) or summarises several into one larger route.</li><li>Early IPv4 used fixed classes A, B, and C, which wasted space badly and was replaced by CIDR in the 1990s.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>CIDR notation</h2>
+<ul><li>CIDR writes a block as an address plus a prefix length, such as <code>192.168.1.0/24</code>.</li><li>The host bits are <code>32 - prefix</code>, so the block size is <code>2^(32 - prefix)</code>.</li><li>Each extra bit of prefix <strong>halves</strong> the block: <code>/24</code> has 256 addresses, <code>/25</code> has 128.</li><li>The network address is the first address in the block and the broadcast address is the last, so a <code>/24</code> has 254 usable hosts.</li><li>Cloud providers reserve extra addresses in every subnet, so plan for fewer usable IPs than the arithmetic suggests.</li><li>A <code>/32</code> is a single address, which is why the “minus two” rule does not apply to it.</li><li>You meet CIDR in route tables, firewall rules, subnet design, and security group definitions.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>CIDR</th><th>Subnet mask</th><th>Total addresses</th><th>Typical use</th></tr></thead><tbody><tr><td>/16</td><td>255.255.0.0</td><td>65,536</td><td>VPC or corporate network</td></tr>
+<tr><td>/20</td><td>255.255.240.0</td><td>4,096</td><td>Medium subnet or environment range</td></tr>
+<tr><td>/24</td><td>255.255.255.0</td><td>256</td><td>Common subnet size</td></tr>
+<tr><td>/28</td><td>255.255.255.240</td><td>16</td><td>Small network segment</td></tr>
+<tr><td>/32</td><td>255.255.255.255</td><td>1</td><td>Single host in a firewall rule</td></tr></tbody></table></div>
+
+<div class="note">A <code>10.0.0.0/20</code> leaves 12 host bits: 4,096 addresses, running from 10.0.0.0 to 10.0.15.255, with 10.0.0.1 to 10.0.15.254 traditionally usable.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Subnets</h2>
+<p class="lede">A subnet is a smaller network carved out of a larger range, used to separate resources by role and control what can talk to what.</p>
+<ul><li>Split a <code>/16</code> into per-role subnets: public load balancers, application servers, and databases.</li><li>Each subnet gets its own routing table and security rules, so policy becomes structural rather than per-host.</li><li>A database subnet can be configured to accept connections only from the application subnet.</li><li>Public subnets have a route to an internet gateway; private subnets do not.</li><li>Placement alone does not secure anything: you still need routes, security groups, and network ACLs.</li><li>Subnets also define failure and blast-radius boundaries inside a cloud region.</li><li>Sizing is a capacity decision: a subnet that is too small runs out of addresses as the workload scales.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Range</th><th>Purpose</th></tr></thead><tbody><tr><td>10.0.0.0/16</td><td>The whole application network</td></tr>
+<tr><td>10.0.1.0/24</td><td>Public subnet: internet-facing load balancer</td></tr>
+<tr><td>10.0.2.0/24</td><td>Private subnet: application servers</td></tr>
+<tr><td>10.0.3.0/24</td><td>Private subnet: databases</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Virtual networks and CIDR planning</h2>
+<ul><li>In the cloud, resources live inside a virtual network: an AWS VPC, an Azure VNet, or a GCP VPC.</li><li>You assign the network a CIDR block such as <code>10.0.0.0/16</code> and carve subnets out of it per workload.</li><li>Public versus private is a route-table difference: a public subnet has a route to an internet gateway, a private one does not.</li><li><strong>Overlapping ranges</strong> are the expensive mistake: two VPCs both using <code>10.0.0.0/16</code> cannot be cleanly peered or joined by VPN.</li><li>Subnets that are too small are the other expensive mistake; Kubernetes pods consume addresses far faster than servers do.</li><li>Avoid reusing the same default range in every environment, and reserve space for future regions and accounts.</li><li>Check existing corporate, VPN, partner, and data-centre ranges before picking a cloud CIDR.</li></ul>
+
+
+<div class="note">Renumbering a live VPC is close to a migration project, so CIDR planning is one of the few decisions worth slowing down for.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Public and private IP addresses</h2>
+<ul><li>A <strong>public</strong> address is routable on the internet and is allocated through registries, ISPs, and cloud providers so ranges stay unique.</li><li>A <strong>private</strong> address is used inside a network and is not routable on the public internet.</li><li>RFC 1918 defines three private ranges: <code>10.0.0.0/8</code>, <code>172.16.0.0/12</code>, and <code>192.168.0.0/16</code>.</li><li>Private addresses only need to be unique within their own network, so two homes can both use <code>192.168.1.10</code>.</li><li>A typical topology puts a public load balancer in front, with application servers and databases on private addresses behind it.</li><li>Public reachability is not the same as safety: firewalls, authentication, and the application still decide what is allowed.</li><li>Keeping backends private removes a whole class of direct internet attacks.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Range</th><th>CIDR</th><th>Addresses</th><th>Common use</th></tr></thead><tbody><tr><td>10.0.0.0 – 10.255.255.255</td><td>10.0.0.0/8</td><td>16,777,216</td><td>Cloud VPCs, large corporate networks</td></tr>
+<tr><td>172.16.0.0 – 172.31.255.255</td><td>172.16.0.0/12</td><td>1,048,576</td><td>Enterprise networks, containers</td></tr>
+<tr><td>192.168.0.0 – 192.168.255.255</td><td>192.168.0.0/16</td><td>65,536</td><td>Home networks, small offices</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Network Address Translation (NAT)</h2>
+<p class="lede">NAT lets hosts with private addresses reach public services without owning a public address of their own.</p>
+<ul><li>The NAT device replaces the private source IP with its own public IP before forwarding the packet.</li><li>It also rewrites the source port, so many internal hosts can share one public address without colliding.</li><li>A translation table records the mapping, and replies are delivered back to the correct internal host by port.</li><li>Cloud NAT gateways let private servers call external APIs and download updates without public addresses.</li><li>NAT is the main reason IPv4 is still viable, and it is the same mechanism a home router uses for every device behind it.</li><li>NAT is <strong>not</strong> a security control: you still need firewall rules and network policies.</li><li>Inbound connections to a private host require a load balancer, port forwarding, a VPN, or a proxy.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Private source</th><th>Public source after NAT</th></tr></thead><tbody><tr><td>10.0.2.10:51000</td><td>203.0.113.20:40000</td></tr>
+<tr><td>10.0.2.11:51000</td><td>203.0.113.20:40001</td></tr>
+<tr><td>10.0.2.12:52010</td><td>203.0.113.20:40002</td></tr></tbody></table></div>
+
+<div class="note">A reply arriving at 203.0.113.20:40001 is mapped back to 10.0.2.11, which is why the port matters as much as the address.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Static and dynamic IP addresses</h2>
+<ul><li>A <strong>static</strong> address stays the same until someone changes it, which helps when a peer must allowlist you or you need a predictable endpoint.</li><li>An <strong>elastic IP</strong> or reserved IP is the usual cloud way to hold a stable public address.</li><li>A <strong>dynamic</strong> address is assigned automatically and may change; DHCP does this on home and office networks.</li><li>Cloud instances, containers, and pods change addresses constantly as they are created, replaced, and rescheduled.</li><li>That churn is why hardcoding server IPs into applications is a bug waiting to happen.</li><li>Use DNS, load balancers, and service discovery to reach services by name instead of by address.</li><li>Static addresses are for the few stable entry points; everything behind them should be treated as ephemeral.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>DNS, load balancers, and service discovery</h2>
+<ul><li>Users reach services by name, and <strong>DNS</strong> translates that name into an address at connection time.</li><li>To move a service, update the DNS record; clients pick up the change as their cached records expire according to the TTL.</li><li>In larger systems the name points at a <strong>load balancer</strong>, which then spreads requests across healthy backends.</li><li>The load balancer's address is stable while the pool behind it changes freely.</li><li>For internal traffic, <strong>service discovery</strong> does the same job: Kubernetes Services, Consul, and cloud service registries.</li><li>Together, DNS, load balancing, and discovery decouple “how to reach the service” from “which machine is running it”.</li><li>The remaining risk is caching: a long TTL slows failover, and a short TTL increases query volume.</li></ul>
+
+<div class="flow"><span class="flow-step">Client resolves api.example.com via DNS</span><span class="flow-arrow">→</span><span class="flow-step">DNS returns the load balancer address</span><span class="flow-arrow">→</span><span class="flow-step">Load balancer picks a healthy backend</span><span class="flow-arrow">→</span><span class="flow-step">Backend is reached on a private address</span><span class="flow-arrow">→</span><span class="flow-step">Backend uses service discovery for its own dependencies</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>IPv6 addresses</h2>
+<ul><li>IPv6 uses <strong>128-bit</strong> addresses, written as eight hexadecimal groups separated by colons.</li><li>The address space is astronomically larger than IPv4, which removes the original reason for NAT.</li><li>Two compression rules apply: drop leading zeros in a group, and replace one run of zero groups with <code>::</code>.</li><li>With globally unique addresses, firewalls replace NAT as the control that decides what is reachable.</li><li>IPv4 and IPv6 coexist as <strong>dual-stack</strong>: an A record for IPv4 and an AAAA record for IPv6.</li><li>Clients typically try IPv6 first when available and fall back to IPv4.</li><li>Dual-stack doubles operational surface: firewall rules, load balancer listeners, logs, and monitoring must handle both families.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Common pitfalls in system design</h2>
+<p class="lede">Most IP-related outages are not routing bugs; they are designs that treated an address as something it is not.</p>
+<ul><li><strong>Treating an IP as identity</strong> fails because addresses change, are shared through NAT, or belong to a proxy rather than a user.</li><li>Rate limiting by public IP groups unrelated users behind one NAT, so one abuser can throttle a whole office or carrier.</li><li>Allowlisting office IPs breaks the moment employees work over a VPN or mobile network.</li><li><strong>Losing the client IP</strong> behind a proxy breaks logging, abuse detection, and per-client limits unless the original address is forwarded.</li><li>Use <code>X-Forwarded-For</code> or the Proxy Protocol to preserve the client address, and only trust them when your own infrastructure sets them.</li><li>Special addresses cause subtle bugs: <code>127.0.0.1</code> is loopback, <code>0.0.0.0</code> as a bind address means all interfaces, and <code>169.254.0.0/16</code> usually means DHCP failed.</li><li>A service bound to <code>127.0.0.1</code> works locally and is unreachable from another machine; bind to <code>0.0.0.0</code> only when you mean it.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Address</th><th>Meaning</th></tr></thead><tbody><tr><td>127.0.0.1</td><td>Loopback; traffic stays on the same machine (<code>::1</code> in IPv6)</td></tr>
+<tr><td>0.0.0.0</td><td>As a bind address, listen on all IPv4 interfaces</td></tr>
+<tr><td>0.0.0.0/0</td><td>In a route or firewall rule, any IPv4 address</td></tr>
+<tr><td>169.254.0.0/16</td><td>Link-local; often means DHCP did not succeed</td></tr>
+<tr><td>169.254.169.254</td><td>Cloud instance metadata endpoint; can expose credentials</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Public addresses</strong> simplify inbound access but expose hosts directly and consume scarce IPv4 space.</li><li><strong>Private addressing with NAT</strong> conserves addresses and hides backends but breaks inbound connections and adds stateful translation.</li><li><strong>Large CIDR blocks</strong> leave room to grow but risk overlap with other networks and are painful to change later.</li><li><strong>Small subnets</strong> use space efficiently but run out of addresses when pods or autoscaling arrive.</li><li><strong>Long DNS TTLs</strong> cut query volume but slow failover and record changes.</li><li><strong>Short TTLs</strong> make changes fast but increase resolver load and reduce cache benefit.</li><li><strong>Static IPs</strong> give predictable endpoints and allowlisting but tie clients to infrastructure you must maintain.</li><li><strong>IPv6 dual-stack</strong> removes address scarcity but doubles configuration, monitoring, and firewall work.</li><li><strong>Forwarding the client IP in headers</strong> preserves attribution but is spoofable unless a trusted proxy overwrites it.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why is an IP address not a reliable identity?</summary><div class="answer"><p>Addresses are reassigned as instances, containers, and pods churn, and they are shared through NAT or hidden behind proxies and load balancers. Using one as identity causes rate limits, audit logs, and allowlists to misattribute traffic.</p></div></details>
+<details><summary>2. What is the difference between an IP address and a MAC address?</summary><div class="answer"><p>A MAC address identifies an interface for delivery within one local network. An IP address identifies a location across networks, so the destination MAC changes at each hop while the destination IP normally stays the same.</p></div></details>
+<details><summary>3. How many usable addresses are in a /24?</summary><div class="answer"><p>256 total, with the first reserved as the network address and the last as the broadcast address, leaving 254 usable in a traditional IPv4 subnet. Cloud providers often reserve a few more, so effective capacity is lower.</p></div></details>
+<details><summary>4. What does the prefix length mean?</summary><div class="answer"><p>It is the number of leading bits that identify the network, so the block size is 2^(32 − prefix). A larger prefix is a smaller block, which is why <code>/32</code> is one address and <code>/16</code> is 65,536.</p></div></details>
+<details><summary>5. What is longest prefix match?</summary><div class="answer"><p>When several routes match a destination, the router chooses the most specific one, meaning the longest prefix. The default route <code>0.0.0.0/0</code> matches everything and is used only when nothing more specific exists.</p></div></details>
+<details><summary>6. Why is overlapping CIDR range such a serious mistake?</summary><div class="answer"><p>If two networks use the same block, the same address can exist on both sides, so peering, VPNs, and routing cannot tell them apart. Fixing it means renumbering live infrastructure, which is effectively a migration.</p></div></details>
+<details><summary>7. How does NAT work and what does it cost you?</summary><div class="answer"><p>The NAT device rewrites the private source address and port to its own public address and port, and uses that mapping to route replies back. It costs state and capacity: tables can fill, source ports can be exhausted, idle mappings time out, and inbound connections need extra machinery.</p></div></details>
+<details><summary>8. Why not assign a public IP to every server?</summary><div class="answer"><p>It exposes each server directly to internet scanning and attack, wastes a scarce resource, and makes the security boundary per-host instead of per-subnet. A public load balancer plus private backends keeps the attack surface small.</p></div></details>
+<details><summary>9. How do applications find services when IPs keep changing?</summary><div class="answer"><p>They resolve a stable name rather than an address: DNS for external endpoints, and service discovery such as Kubernetes Services or Consul internally. The registry tracks healthy instances and the client connects to one of them.</p></div></details>
+<details><summary>10. What is the practical difference between IPv4 and IPv6 for a designer?</summary><div class="answer"><p>IPv6 has a vastly larger address space, so every device can have a globally unique address and NAT is not needed for conservation. The design cost is dual-stack operations: both families must be configured in firewalls, load balancers, logs, and monitoring.</p></div></details>
+<details><summary>11. How do you preserve the real client IP behind a proxy?</summary><div class="answer"><p>The proxy forwards the original address in a header such as <code>X-Forwarded-For</code> or via the Proxy Protocol. Trust it only when your own edge overwrites it, because a client can send a forged header directly to the backend.</p></div></details>
+<details><summary>12. Why does a service bound to 127.0.0.1 fail in production?</summary><div class="answer"><p>Loopback only accepts traffic that originates on the same machine, so a load balancer or another host cannot reach it. Binding to <code>0.0.0.0</code> listens on all interfaces, which is what containers and remote clients need.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Using an IP address as a user or device identity when NAT and autoscaling make it unstable.</li><li>Picking the same default CIDR for every VPC and then discovering peering is impossible.</li><li>Sizing subnets for today's server count and forgetting pods, sidecars, and autoscaling.</li><li>Hardcoding backend IPs in configuration instead of using DNS or service discovery.</li><li>Rate limiting by source IP without accounting for carrier NAT putting many users behind one address.</li><li>Forgetting that a <code>/24</code> does not give 256 usable hosts, and that clouds reserve additional addresses.</li><li>Binding to <code>127.0.0.1</code> in a container and then wondering why the health check cannot reach the app.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="osi.html"><span>← Previous</span><strong>OSI Model</strong></a><a class="next" href="tcp-vs-udp.html"><span>Next →</span><strong>TCP vs UDP</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/ip-address">AlgoMaster — IP Address</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

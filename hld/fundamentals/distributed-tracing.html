@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Distributed Tracing — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 122 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Distributed Tracing</h1>
+    <p class="dek">Observability · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/distributed-tracing">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: latency without a location</a>
+<a href="#s2">What distributed tracing is</a>
+<a href="#s3">Spans: the unit of work</a>
+<a href="#s4">Reading the waterfall</a>
+<a href="#s5">Propagating context across boundaries</a>
+<a href="#s6">Instrumentation: automatic and manual</a>
+<a href="#s7">Sampling: making tracing affordable</a>
+<a href="#s8">Collection and storage</a>
+<a href="#s9">Correlating traces with logs and metrics</a>
+<a href="#s10">What tracing reveals that nothing else does</a>
+<a href="#s11">Failure modes and overhead</a>
+<a href="#s12">When tracing is worth the cost</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Distributed tracing records the tree of work a single request triggers across services, so you can say exactly which hop consumed the six seconds instead of guessing from per-service averages.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Trace</dt><dd>The complete record of one request's journey through the system, assembled from all spans sharing a single trace ID.</dd></div><div class="term"><dt>Span</dt><dd>One timed unit of work in a trace, with an operation name, start and end time, status, attributes, and a parent reference.</dd></div><div class="term"><dt>Trace ID</dt><dd>A globally unique identifier generated at the entry point and carried through every downstream call, joining all spans of one request.</dd></div><div class="term"><dt>Parent span ID</dt><dd>The reference that turns a flat set of spans into a call tree by recording which span initiated each child.</dd></div><div class="term"><dt>Trace context</dt><dd>The trace ID, current span ID, and sampling flags propagated between services so each new span attaches to the right trace.</dd></div><div class="term"><dt>Propagation</dt><dd>Forwarding trace context across every boundary — HTTP headers, RPC metadata, queue message attributes, background jobs.</dd></div><div class="term"><dt>Head-based sampling</dt><dd>Deciding whether to record a trace at its start, which is cheap but blind to whether the request later fails or is slow.</dd></div><div class="term"><dt>Tail-based sampling</dt><dd>Deciding after the trace completes, so all errors and slow traces can be kept while normal traffic is sampled lightly.</dd></div><div class="term"><dt>Waterfall</dt><dd>The visualization of a trace as nested horizontal bars, where bar length is duration and nesting is the call hierarchy.</dd></div><div class="term"><dt>Exemplar</dt><dd>A sampled trace ID attached to a metric bucket, linking a spike on a chart to a real request that contributed to it.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: latency without a location</h2>
+<p class="lede">A checkout click can pass through a gateway, order service, inventory service, payment service, fraud check, database, and message queue. When the whole flow takes six seconds, per-service dashboards often show several services slightly elevated and none obviously guilty.</p>
+<ul><li>Metrics aggregate thousands of requests, so they show that a service is slower on average, not which call inside it waited.</li><li>Logs describe events inside one service; nothing in them identifies the same request in the next service's log.</li><li>Correlating logs by timestamp across services fails when clocks differ and requests overlap.</li><li>The question that matters is causal: for <em>this</em> request, which hop consumed the time, and was it waiting on a child call?</li><li>Without a per-request path you end up guessing, restarting services, or adding temporary logging and redeploying.</li><li>Tracing exists to answer that question from data collected before the incident.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What distributed tracing is</h2>
+<ul><li>Tracing instruments each unit of work as a <strong>span</strong> and links spans that belong to the same request into a <strong>trace</strong>.</li><li>It captures <em>causality</em>, not just timing: the order service's span is a child of the gateway's span because the gateway called it.</li><li>The result is a per-request tree, which can be rendered as a timeline and analyzed programmatically.</li><li>Traces are sampled, so they are a statistical view of traffic rather than a complete ledger.</li><li>Tracing is the only pillar that shows cross-service structure: fan-out, sequential dependencies, retries, and queue waits.</li><li>It is also the cheapest way to discover that a call graph is not what the architecture diagram claims.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Spans: the unit of work</h2>
+<ul><li>Every span carries a <strong>trace ID</strong>, its own <strong>span ID</strong>, and the <strong>parent span ID</strong> that placed it in the tree.</li><li>It records an operation name such as <code>POST /checkout</code> or <code>SELECT orders</code>, plus start and end timestamps.</li><li>A status field separates success from error, and often carries an error message or exception type.</li><li>Attributes hold the useful dimensions: route, method, status code, database system, queue name, retry count, tenant.</li><li>Events inside a span mark notable moments — cache miss, retry, exception — without needing a new span.</li><li>A span's duration includes time waiting on its children; <strong>self time</strong> subtracts children to show where the service actually worked.</li><li>Span names should be low-cardinality templates, because the span name is also an index dimension in most backends.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Reading the waterfall</h2>
+<p class="lede">Tracing UIs render a trace as a waterfall: nested bars on a shared time axis, each bar one span.</p>
+<ul><li>The root span is the user-visible duration; children partition it into dependencies and local work.</li><li>Long bars with no children indicate work inside that service — slow queries, serialization, CPU contention.</li><li>Long bars with long children indicate waiting on a dependency, so you follow the tree downward.</li><li>Sequential sibling calls that could be parallel show up as adjacent blocks that do not overlap.</li><li>Gaps between a parent and its children are overhead: connection setup, queueing in a pool, scheduling delay, or clock skew.</li><li>Repeated identical short spans in a row reveal retry loops or N+1 query patterns.</li><li>The <strong>critical path</strong> is the chain of spans that determines total duration; optimizing off-path work changes nothing.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Propagating context across boundaries</h2>
+<ul><li>The entry service creates the trace ID; every downstream service must receive it and create its spans under it.</li><li>The <strong>W3C Trace Context</strong> standard defines <code>traceparent</code>, carrying trace ID, parent span ID, and sampling flags.</li><li>HTTP and gRPC propagate via headers or metadata; message queues must copy context into message attributes, since there is no live call stack.</li><li>Background jobs and scheduled tasks need explicit context handoff, or the trace stops at the enqueue.</li><li>If any single hop drops the header, the trace splits into disconnected fragments and causality is lost.</li><li>Asynchronous fan-out creates sibling spans with the same parent, which is why consumer spans often record a link to the producer.</li><li>Context from untrusted callers is a spoofing risk; validate or regenerate at the edge if trace data drives security decisions.</li></ul>
+
+
+<pre class="code"><code># conceptual propagation
+# gateway
+span = start_span(&quot;GET /checkout&quot;)
+headers[&quot;traceparent&quot;] = format_context(span.context)
+# downstream reads it
+ctx = extract_context(incoming_headers)
+span = start_span(&quot;POST /charge&quot;, parent=ctx)</code></pre>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Instrumentation: automatic and manual</h2>
+<ul><li>Auto-instrumentation wraps HTTP servers and clients, database drivers, caches, and messaging libraries, creating spans without code changes.</li><li>Manual spans cover business operations that no library understands: pricing, fraud rules, allocation, settlement.</li><li>A hybrid is normal: automatic spans for the transport path, manual spans around the domain logic that dominates latency.</li><li>Service meshes can emit spans at the network layer without application changes, but they see hops, not internal semantics.</li><li>OpenTelemetry provides the vendor-neutral API, SDK, and propagation format used by most modern tracing setups.</li><li>Instrumentation must be cheap: creating a span allocates, and a span per loop iteration can measurably slow a hot path.</li><li>Attribute values should avoid secrets and unbounded identifiers; they are stored per span and indexed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Sampling: making tracing affordable</h2>
+<ul><li>Recording every span of every request is usually too expensive at high traffic, so traces are sampled.</li><li><strong>Head-based</strong> sampling decides at the root, keeps a fixed fraction, and is trivially cheap but statistically blind.</li><li><strong>Tail-based</strong> sampling buffers complete traces and keeps all errors and outliers plus a small sample of normal traffic.</li><li>Tail sampling needs a collector tier that groups spans by trace ID and holds them until the trace is complete or times out.</li><li><strong>Adaptive</strong> sampling adjusts the rate per service or route so noisy endpoints do not dominate the sampled set.</li><li>The sampling decision is propagated in the trace context; otherwise one service records spans that another discards.</li><li>Sampling biases every trace-based statistic — a rate computed from sampled traces must be scaled by the sampling rate.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Head-based</th><th>Tail-based</th></tr></thead><tbody><tr><td>Decision time</td><td>At request start</td><td>After the trace completes</td></tr>
+<tr><td>Kept set</td><td>Fixed fraction, chosen blindly</td><td>All errors and slow traces plus a sample of normal ones</td></tr>
+<tr><td>Cost</td><td>Very low</td><td>Buffering and a collector tier</td></tr>
+<tr><td>Blind spot</td><td>Rare failures can be discarded</td><td>Trace assembly delays and memory pressure</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Collection and storage</h2>
+<ul><li>Applications export spans to a local collector, which batches, samples, and forwards them to the tracing backend.</li><li>The collector is the right place for redaction, attribute scrubbing, and fan-out to multiple backends.</li><li>Backends index traces by trace ID and usually by service, operation, duration, and status for search.</li><li>Search by attributes is more expensive than search by indexed fields, so most tools limit arbitrary filtering.</li><li>Span volume is the cost driver: requests times spans per request, multiplied by attribute size.</li><li>Retention is typically short because traces answer <em>what happened</em> questions for recent incidents, not long-term trends.</li><li>Waterfall queries are point lookups by trace ID; aggregate queries over traces are much heavier and often offloaded.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Correlating traces with logs and metrics</h2>
+<ul><li>Put the trace ID in every log line, so a slow trace leads directly to the entries that explain it.</li><li>Attach <strong>exemplars</strong> to metric buckets so a latency spike links to a sampled trace from that bucket.</li><li>Record the trace ID in error responses and support tickets, so a user report can be traced without guesswork.</li><li>Tag spans with the deployment version, so a bad release is one filter away from a suspect.</li><li>Include the span ID in logs when one request produces many log lines, to distinguish concurrent operations inside a service.</li><li>Correlation is what turns three tools into one investigation; without it tracing becomes another silo.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>What tracing reveals that nothing else does</h2>
+<ul><li>Latency attribution: how much time was local work, how much was waiting on each dependency.</li><li>Hidden serialization: calls that could run in parallel but are executed one after another.</li><li>Retry amplification: a failing dependency retried at several layers multiplies load and latency.</li><li>Queue delay versus processing time, by comparing the producer span's end with the consumer span's start.</li><li>Fan-out width: how many services one request touches, which predicts blast radius and cost.</li><li>Version skew: a trace can show requests served by mismatched service versions during a rollout.</li><li>The real call graph, including calls that are invisible in the architecture diagram.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes and overhead</h2>
+<ul><li>Broken propagation is the classic failure: traces appear as disconnected single-span fragments, and nobody notices until an incident.</li><li>Clock skew between hosts warps the waterfall and can make a child appear to start before its parent.</li><li>Span explosion — a span per loop iteration or per item in a batch — inflates cost and makes the waterfall unreadable.</li><li>High-cardinality attributes such as raw URLs, user IDs, or SQL text bloat storage and slow attribute search.</li><li>Instrumentation overhead shows up as CPU and allocation cost on the hot path, and as network egress from span export.</li><li>Sampling bias makes traces look healthier than reality if head sampling drops precisely the failing requests.</li><li>Collector outages silently drop spans; export failures must be monitored, not assumed away.</li></ul>
+
+
+<div class="note">A trace that stops at a service boundary is a data bug, not a property of the request. Alert on propagation gaps the same way you alert on missing metrics.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When tracing is worth the cost</h2>
+<ul><li>Tracing pays off when requests cross many services, when latency is hard to attribute, or when incidents are diagnosed by guesswork.</li><li>It is less valuable in a single-process monolith, where a profiler and logs already show the call path.</li><li>Start with auto-instrumentation at the edges, tail sampling for errors and slow requests, and trace IDs in logs.</li><li>Add manual spans only where the waterfall shows unexplained self time.</li><li>Set a span budget per request by instrumenting meaningful operations, not every function call.</li><li>Review traces during design reviews: the trace of a normal request is a fast way to see coupling and fan-out.</li><li>Measure tracing's own cost and value: export volume, collector load, and how often traces shorten an investigation.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Full-fidelity tracing</strong> answers any latency question but multiplies storage, network, and instrumentation cost.</li><li><strong>Head-based sampling</strong> is cheap and simple but can discard the rare failure you need to diagnose.</li><li><strong>Tail-based sampling</strong> keeps errors and outliers but requires buffering collectors and more operational complexity.</li><li><strong>Automatic instrumentation</strong> is quick to adopt but produces transport-level spans that miss business logic.</li><li><strong>Manual spans</strong> capture domain detail but add code, maintenance, and hot-path overhead.</li><li><strong>Rich span attributes</strong> make traces searchable but increase span size and cardinality cost.</li><li><strong>Service-mesh tracing</strong> requires no app changes but only shows hops, not what happened inside them.</li><li><strong>Long trace retention</strong> helps post-incident review but retains mostly ordinary traffic at full cost.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is distributed tracing?</summary><div class="answer"><p>It is the practice of recording each request's path through a distributed system as a tree of timed spans sharing one trace ID. It preserves causality — which span called which — so you can attribute latency and errors to a specific hop. It complements metrics, which aggregate, and logs, which stay inside one service.</p></div></details>
+<details><summary>2. What is in a span?</summary><div class="answer"><p>A trace ID, its own span ID, a parent span ID, an operation name, start and end timestamps, a status, and key-value attributes. It may also contain timed events such as retries or exceptions. The parent reference is what lets a backend rebuild the call tree from otherwise independent records.</p></div></details>
+<details><summary>3. How does context propagation work?</summary><div class="answer"><p>The first service creates a trace ID and sends it downstream in a header or message attribute, following a standard such as W3C Trace Context's <code>traceparent</code>. Each service extracts the context, creates a child span, and forwards it on its own outbound calls. If any hop fails to forward it, the trace splits into disconnected fragments.</p></div></details>
+<details><summary>4. Why do traces sometimes appear as isolated single spans?</summary><div class="answer"><p>Because context propagation broke somewhere: a library was not instrumented, a queue message did not carry the header, or a background job started fresh context. The trace tree depends entirely on the parent reference arriving intact. Fixing it usually means using standard auto-instrumentation rather than hand-rolled propagation.</p></div></details>
+<details><summary>5. Head-based versus tail-based sampling?</summary><div class="answer"><p>Head-based sampling decides at request start and keeps a fixed fraction; it is cheap and needs no buffering, but it can throw away the rare error. Tail-based sampling waits for the trace to finish and can keep every error and slow trace while sampling normal traffic lightly. The cost is a collector tier that buffers spans per trace and more infrastructure to operate.</p></div></details>
+<details><summary>6. Why can't you just use per-service latency metrics to find the slow hop?</summary><div class="answer"><p>Metrics aggregate across requests, so a service can look mildly slow while a specific call path is pathological. They also cannot distinguish waiting on a downstream dependency from doing local work. Tracing preserves the per-request structure, which is what attributes the delay to a specific edge in the call graph.</p></div></details>
+<details><summary>7. What is self time and why does it matter?</summary><div class="answer"><p>Self time is a span's duration minus the time spent in its children. It separates <em>this service is slow</em> from <em>this service is waiting on something slow</em>. Without it, a parent span at the top of the tree always looks like the culprit because it contains everything below it.</p></div></details>
+<details><summary>8. How do traces reveal problems that metrics hide?</summary><div class="answer"><p>They show structure: sequential calls that could be parallel, retry amplification across layers, queue waiting time, and unexpected fan-out. Metrics show that latency rose but not that the same dependency was called four times serially. This structural view is usually what turns a vague slowdown into a specific fix.</p></div></details>
+<details><summary>9. How do you connect a trace to its logs?</summary><div class="answer"><p>Every log line includes the trace ID, and ideally the span ID, of the work that produced it. Then a slow trace gives you a filter that returns exactly the relevant entries instead of a time window full of unrelated traffic. This requires consistent propagation, including through asynchronous work.</p></div></details>
+<details><summary>10. What are the main costs of running tracing?</summary><div class="answer"><p>Span volume drives storage and network cost, instrumentation adds CPU and allocation overhead, and tail sampling adds a buffering collector tier. There is also human cost: too many spans make a waterfall unreadable. Control it with deliberate span budgets, sampling, attribute hygiene, and short retention.</p></div></details>
+<details><summary>11. When is tracing not worth it?</summary><div class="answer"><p>In a single-process application where a profiler and structured logs already show the call path, tracing adds infrastructure without new insight. It is also poor value if nobody propagates context or looks at the data. Tracing earns its cost when requests cross many services and latency attribution is otherwise guesswork.</p></div></details>
+<details><summary>12. How would you design tracing for an asynchronous order pipeline?</summary><div class="answer"><p>Propagate context into the message attributes at publish time, and have the consumer start a span linked to the producer's span rather than pretending it is a direct child. That preserves the causal chain without implying a synchronous call. Include queue wait time in the analysis, since that delay is invisible in service latency metrics.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Instrumenting services but never validating that traces are complete end to end, so broken propagation goes unnoticed.</li><li>Sampling at a low head-based rate and then having no slow trace to inspect during the incident.</li><li>Creating a span per item in a batch loop, producing thousands of spans and an unreadable waterfall.</li><li>Putting raw SQL, URLs, or user IDs into span attributes and blowing up storage and cardinality.</li><li>Assuming the longest span is the culprit without subtracting time spent in children.</li><li>Ignoring clock skew when reading a waterfall and blaming the wrong service.</li><li>Treating trace data as complete when sampling means it is only a statistical sample.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="metrics-instrumentation.html"><span>← Previous</span><strong>Metrics and Instrumentation</strong></a><a class="next" href="alert-monitoring.html"><span>Next →</span><strong>Alert &amp; Monitoring</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/distributed-tracing">AlgoMaster — Distributed Tracing</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

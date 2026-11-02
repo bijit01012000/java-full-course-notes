@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Materialized Views — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 59 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Materialized Views</h1>
+    <p class="dek">Database Scaling Techniques · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>11</strong> sections</span>
+      <span class="pill">11 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/materialized-views">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: expensive work repeated on every request</a>
+<a href="#s2">What a materialized view is</a>
+<a href="#s3">How refresh works</a>
+<a href="#s4">Staleness is the central design decision</a>
+<a href="#s5">Where materialized views pay off</a>
+<a href="#s6">Choosing what to materialize</a>
+<a href="#s7">Indexing and storage cost</a>
+<a href="#s8">Keeping the view trustworthy</a>
+<a href="#s9">Alternatives and how they compare</a>
+<a href="#s10">Operational failure modes</a>
+<a href="#s11">Decision rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A materialized view stores the <em>result</em> of a query on disk, so an expensive join or aggregation is computed once instead of on every request — at the cost of storage and controlled staleness.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>View</dt><dd>A saved query definition that runs against base tables every time it is referenced; it stores no rows of its own.</dd></div><div class="term"><dt>Materialized view</dt><dd>A database object that stores the computed result of a query physically, so later reads do not recompute it.</dd></div><div class="term"><dt>Refresh</dt><dd>The operation that recomputes a materialized view and replaces or updates its stored rows.</dd></div><div class="term"><dt>Full refresh</dt><dd>Recomputing the entire query result and rewriting the view's contents.</dd></div><div class="term"><dt>Incremental refresh</dt><dd>Applying only the deltas produced by base-table changes, avoiding a full recomputation.</dd></div><div class="term"><dt>Staleness</dt><dd>How far a materialized view lags behind the base tables it was derived from.</dd></div><div class="term"><dt>Query rewrite</dt><dd>The optimizer transparently answering a query from a matching materialized view instead of the base tables.</dd></div><div class="term"><dt>Refresh window</dt><dd>The schedule or trigger that decides when a materialized view is brought up to date.</dd></div><div class="term"><dt>Base table</dt><dd>A source table whose changes must eventually be reflected in the materialized view.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: expensive work repeated on every request</h2>
+<p class="lede">Some queries are cheap to write and expensive to run: multi-table joins, wide aggregations, ranking, and rollups over large fact tables. When a dashboard or API endpoint runs that query on every page load, the database pays the same cost again and again for the same answer.</p>
+<ul><li>A join across several large tables can take far longer than the surrounding request logic.</li><li>Aggregations must scan or index-scan large ranges to produce a small result.</li><li>Repeated identical queries waste CPU and I/O that could serve other traffic.</li><li>Caching in the application helps, but the cache still has to be filled by a slow first query.</li><li>Business users often want the same rollup refreshed on a predictable schedule, not per request.</li><li>If the underlying data barely changes relative to how often it is read, recomputing is pure waste.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a materialized view is</h2>
+<ul><li>A regular view is only a stored query: referencing it re-executes the SQL against base tables.</li><li>A materialized view executes the query and <strong>stores the rows</strong>, so reads fetch a result set instead of computing one.</li><li>It behaves like a table for reads: it can be indexed, queried, and joined like any other relation.</li><li>It is derived data, so it must be refreshed when the base tables change.</li><li>The stored result is often far smaller than the inputs — a daily rollup over millions of events may be a few thousand rows.</li><li>It is the database-native form of a precomputed result, separate from an application cache.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>View</th><th>Materialized view</th></tr></thead><tbody><tr><td>Stores data</td><td>No</td><td>Yes</td></tr>
+<tr><td>Read cost</td><td>Re-runs the query</td><td>Reads stored rows</td></tr>
+<tr><td>Freshness</td><td>Always current</td><td>As current as the last refresh</td></tr>
+<tr><td>Extra storage</td><td>None</td><td>Proportional to the result</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>How refresh works</h2>
+<ul><li><strong>Full refresh</strong> recomputes the whole query and replaces the contents; simple and correct, but cost scales with the data.</li><li><strong>Incremental refresh</strong> applies only changes since the last refresh, often derived from logs or change tracking.</li><li>Incremental refresh is cheaper but requires the database to prove the delta is computable — not every query shape qualifies.</li><li>Refresh can run on a schedule, on demand, after a commit, or when the view is next queried.</li><li>Some engines refresh lazily: a read triggers the update if the view is marked stale.</li><li>Refresh usually takes a lock or swaps the result, so concurrent readers may briefly block or see a mix of old and new data.</li></ul>
+
+<div class="flow"><span class="flow-step">Base tables receive inserts, updates, and deletes</span><span class="flow-arrow">→</span><span class="flow-step">Changes are captured in a log, trigger, or tracked delta</span><span class="flow-arrow">→</span><span class="flow-step">Refresh job is triggered by schedule or explicitly</span><span class="flow-arrow">→</span><span class="flow-step">View result is recomputed or patched incrementally</span><span class="flow-arrow">→</span><span class="flow-step">New result is swapped in and indexes are updated</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Staleness is the central design decision</h2>
+<ul><li>A materialized view is a <em>snapshot</em>; between refreshes it reports the past.</li><li>Staleness must be bounded by business need, not by refresh speed alone.</li><li>A daily revenue rollup can tolerate hours of lag; an inventory count cannot.</li><li>Choose the refresh cadence from how quickly the answer becomes wrong, not from how cheap the refresh is.</li><li>State the freshness contract in the design: <em>at most N minutes behind</em> is a testable requirement.</li><li>If no staleness is acceptable, a materialized view is the wrong tool for that read.</li></ul>
+
+
+<div class="note">The question to ask is not <em>how often can we refresh</em> but <em>how old may this answer be before it misleads someone</em>.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Where materialized views pay off</h2>
+<ul><li>Dashboards and reporting over large fact tables with a small set of fixed metrics.</li><li>Rollups: counts, sums, averages, and percentiles precomputed per hour, day, or tenant.</li><li>Expensive joins that flatten normalized data into a wide read model.</li><li>Search or feed pages that need a pre-sorted, pre-filtered candidate set.</li><li>Read-heavy endpoints where the same aggregate is requested by many users.</li><li>Analytical workloads on a replica, keeping the primary free for transactions.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Choosing what to materialize</h2>
+<ul><li>Materialize queries that are both frequent and expensive; ignore one-off analytics.</li><li>Prefer results that are small relative to their inputs, so storage cost stays modest.</li><li>Prefer queries whose underlying data changes slowly relative to read volume.</li><li>Group related metrics into one view rather than many overlapping ones that each rescan the same data.</li><li>Keep the definition stable: every change to the query means a rebuild or a new object.</li><li>Design the view around the access pattern — the filter and sort columns users actually query.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Indexing and storage cost</h2>
+<ul><li>A materialized view is a physical relation, so it can and usually should have indexes.</li><li>Index the columns used in the view's own <code>WHERE</code>, <code>JOIN</code>, and <code>ORDER BY</code> clauses.</li><li>Without an index, reading the view may still scan a large stored result.</li><li>Storage cost is the result size plus indexes plus any change-tracking structures.</li><li>Refresh rewrites or patches rows, which consumes I/O and generates its own log volume.</li><li>Over many views, storage and refresh load can rival the cost of the queries they replaced.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Keeping the view trustworthy</h2>
+<ul><li>Refresh must be idempotent: a retried or failed run should not double-count rows.</li><li>Incremental refresh needs a reliable ordering or watermark so a change is applied exactly once.</li><li>Readers should see either the previous complete result or the new one, not a half-applied state.</li><li>Long-running reads on a view being refreshed can block the swap or read stale pages.</li><li>Track and expose the last successful refresh time; silent refresh failures are the worst failure mode.</li><li>A view that has been failing for days looks healthy to the application while returning old numbers.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Alternatives and how they compare</h2>
+<ul><li><strong>Application cache</strong> avoids database work entirely, but you own invalidation and cold-start cost.</li><li><strong>Denormalization</strong> stores duplicate columns in base tables, keeping writes responsible for consistency.</li><li><strong>Plain summary table</strong> written by a job gives full control, at the cost of maintaining the write path yourself.</li><li><strong>Stream processing</strong> maintains aggregates continuously with low latency, but adds a whole pipeline to operate.</li><li><strong>Materialized view</strong> keeps the logic in the database and reuses its optimizer, at the cost of refresh control.</li><li>All of these trade freshness for read speed; the choice is about where the staleness and the maintenance live.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Freshness</th><th>Main cost</th></tr></thead><tbody><tr><td>Materialized view</td><td>Bounded by refresh</td><td>Refresh compute, storage, refresh failures</td></tr>
+<tr><td>Application cache</td><td>Bounded by TTL</td><td>Invalidation, cold starts, memory</td></tr>
+<tr><td>Denormalized columns</td><td>Near real-time</td><td>Write amplification, consistency bugs</td></tr>
+<tr><td>Stream pipeline</td><td>Seconds</td><td>Operational surface, exactly-once logic</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Operational failure modes</h2>
+<ul><li>Refresh jobs that overlap because one run takes longer than the interval.</li><li>Refresh timelines drifting later and later until the view is hours or days stale.</li><li>Full refreshes on a large base table causing I/O spikes that hurt production traffic.</li><li>Refresh and heavy reads contending for the same locks and buffer pool.</li><li>Unbounded growth when the view is never pruned and accumulates old partitions.</li><li>Schema changes to base tables silently breaking the view definition.</li><li>Dashboards that never show the last refreshed timestamp, so nobody notices the staleness.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Decision rules</h2>
+<ul><li>Use a materialized view when reads greatly outnumber writes to the underlying data.</li><li>Use it when the query is expensive but its result is compact.</li><li>Skip it when the answer must always be exact and current.</li><li>Skip it for queries that run rarely or vary per request.</li><li>Always define the freshness budget, the refresh trigger, and who is alerted when refresh fails.</li><li>Start with one high-value view, measure the win, and only then add more.</li><li>If writes are frequent and the view must be fresh, prefer incremental maintenance or a streaming pipeline.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Precomputing a result</strong> turns a repeated expensive query into a cheap read, but adds storage and a refresh path that can fail.</li><li><strong>Full refresh</strong> is simple and always correct, but its cost scales with the source data and it can spike I/O during business hours.</li><li><strong>Incremental refresh</strong> is cheap per run, but requires change tracking and only works for query shapes whose deltas can be computed.</li><li><strong>Shorter refresh intervals</strong> reduce staleness, but increase compute, lock contention, and the chance that runs overlap.</li><li><strong>Query rewrite</strong> lets existing SQL benefit transparently, but makes it harder to reason about which queries actually hit the base tables.</li><li><strong>Database-native views</strong> keep logic near the data, but tie the refresh model to one engine's feature set.</li><li><strong>Materialized views</strong> reduce read latency, but they duplicate data that must be rebuilt during migrations and reindexing.</li><li><strong>Many small views</strong> are easier to refresh, but overlapping definitions multiply storage and rescan the same base data.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a materialized view?</summary><div class="answer"><p>A database object that runs a query once and stores the result rows on disk. Reads then fetch the stored result instead of recomputing the join or aggregation. It must be refreshed to reflect changes in the base tables, so it is always somewhat stale.</p></div></details>
+<details><summary>2. How is it different from a normal view?</summary><div class="answer"><p>A normal view is only a saved query and re-executes against base tables on every reference, so it is always current but never faster than the underlying query. A materialized view stores the computed result, making reads fast but introducing storage cost and a refresh requirement.</p></div></details>
+<details><summary>3. When would you use a materialized view?</summary><div class="answer"><p>When a query is expensive, runs often, returns a comparatively small result, and the business can tolerate bounded staleness. Dashboards, rollups, and flattened read models are typical. Rare or always-exact queries should read the base tables directly.</p></div></details>
+<details><summary>4. How do you decide the refresh strategy?</summary><div class="answer"><p>Start from the freshness requirement: how old may the answer be before it misleads someone? Then pick the cheapest mechanism that meets it — scheduled full refresh for small results, incremental for large fact tables, or on-commit for tiny views. Always make the last successful refresh time visible.</p></div></details>
+<details><summary>5. What is the risk of a full refresh?</summary><div class="answer"><p>It recomputes the entire result, so its cost grows with the source data and it can generate large I/O and log volume. Run during a quiet window, or refresh into a shadow copy and swap, so readers are not blocked. If runs take longer than the interval, they overlap and compound the load.</p></div></details>
+<details><summary>6. How do you keep a materialized view from silently going stale?</summary><div class="answer"><p>Record and expose the last successful refresh timestamp, alert when it exceeds the freshness budget, and fail loudly rather than partially. Make refreshes idempotent and retryable. A dashboard that shows its own data age makes staleness visible to the people relying on it.</p></div></details>
+<details><summary>7. Do materialized views need indexes?</summary><div class="answer"><p>Usually yes. The view is a physical relation, and without an index a read may scan the whole stored result. Index the columns the consuming queries filter, join, and sort on. The indexes add storage and make each refresh more expensive to apply.</p></div></details>
+<details><summary>8. Materialized view vs application cache — which do you choose?</summary><div class="answer"><p>Use a materialized view when the computation belongs in the database, the result is queryable and joinable, and you want the optimizer involved. Use an application cache when you need per-key caching of API responses and can accept TTL invalidation. Both accept staleness; they differ in where the refresh logic lives.</p></div></details>
+<details><summary>9. What happens to consistency during a refresh?</summary><div class="answer"><p>Depending on the engine, readers may block briefly, or see the old result until a swap completes. The safe pattern is to compute into a shadow relation and swap atomically, so no reader observes a half-applied state. Incremental refresh must also guarantee each change is applied exactly once.</p></div></details>
+<details><summary>10. Can a materialized view replace a read replica?</summary><div class="answer"><p>No. A replica copies the whole database and serves arbitrary read queries; a materialized view stores one specific result. Replicas give read capacity and failover, views give latency reduction for a known query. They are often combined: views maintained on a replica for reporting.</p></div></details>
+<details><summary>11. What is the operational cost of adding many views?</summary><div class="answer"><p>Each view adds storage, index maintenance, and a refresh job that can fail or overrun. Overlapping views rescan the same base tables repeatedly. Refresh load can end up competing with production traffic, so views should be few, purposeful, and monitored like any other batch job.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Materializing a query whose result is nearly as large as the base table, gaining little and paying full storage.</li><li>Assuming a materialized view is always current because it is defined in the database.</li><li>Scheduling refreshes so tightly that runs overlap and pile load onto the primary.</li><li>Never surfacing the last refresh time, so a broken job goes unnoticed for days.</li><li>Forgetting indexes on the view and then scanning the whole stored result.</li><li>Using views as a substitute for fixing a missing index or a badly shaped query.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="denormalization.html"><span>← Previous</span><strong>Denormalization</strong></a><a class="next" href="connection-pooling.html"><span>Next →</span><strong>Connection Pooling</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/materialized-views">AlgoMaster — Materialized Views</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

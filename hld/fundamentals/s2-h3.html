@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S2 and H3 — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 92 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>S2 and H3</h1>
+    <p class="dek">Data Structures for Scale · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/s2-h3">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with a flat grid</a>
+<a href="#s2">Two global cell systems</a>
+<a href="#s3">S2: mapping the Earth onto a cube</a>
+<a href="#s4">S2: Hilbert ordering and cell IDs</a>
+<a href="#s5">S2: region coverings</a>
+<a href="#s6">S2 strengths and costs</a>
+<a href="#s7">H3: hexagons on an icosahedron</a>
+<a href="#s8">H3: neighbors and analytics</a>
+<a href="#s9">H3's hierarchy caveat</a>
+<a href="#s10">Choosing between them</a>
+<a href="#s11">Using cell IDs in a system</a>
+<a href="#s12">Practical adoption notes</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>S2 and H3 replace the flat latitude/longitude grid with cells laid out on the sphere itself, so a compact numeric cell ID can serve as an index key, a grouping key, or a shard key anywhere on Earth.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>S2</dt><dd>Google's global cell system that projects the sphere onto a cube, then orders cell positions with a Hilbert curve to produce 64-bit hierarchical cell IDs.</dd></div><div class="term"><dt>H3</dt><dd>Uber's global cell system that tiles the sphere with mostly hexagonal cells arranged on an icosahedron, with an aperture-7 hierarchy.</dd></div><div class="term"><dt>Cell ID</dt><dd>A compact integer that identifies one cell at one resolution and can be indexed, grouped, or hashed.</dd></div><div class="term"><dt>Region covering</dt><dd>The set of cells whose union approximates a query shape such as a circle or polygon, typically expressed as ID ranges.</dd></div><div class="term"><dt>Hilbert curve</dt><dd>A space-filling curve that visits nearby points in nearby order, so a one-dimensional ID range maps to a compact 2D region.</dd></div><div class="term"><dt>Aperture 7</dt><dd>The H3 subdivision rule in which each cell is replaced by seven children: one center cell and six neighbors.</dd></div><div class="term"><dt>Pentagon cell</dt><dd>One of the twelve H3 cells where the hexagonal tiling cannot close, which distorts subdivision and neighbor counts.</dd></div><div class="term"><dt>k-ring</dt><dd>The set of cells within k grid steps of a cell, the natural neighborhood query on a hexagonal grid.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with a flat grid</h2>
+<ul><li>Latitude/longitude grids such as geohash divide <strong>degrees</strong>, not ground distance.</li><li>Lines of longitude converge toward the poles, so a cell near the equator covers far more area than a cell of the same resolution near the Arctic.</li><li>The flat map also has <strong>edges the Earth does not have</strong>: two ships on opposite sides of 180&deg; longitude can be kilometers apart yet appear at opposite ends of the map.</li><li>Neighbor logic near the date line needs special wraparound cases that are easy to get wrong.</li><li>For ride-hailing, shipping, and mapping platforms, these artifacts make distance and neighbor queries inconsistent across the globe.</li><li>The requirement is a cell system that covers the sphere without seams and keeps cells comparable in size everywhere.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Two global cell systems</h2>
+<ul><li>S2 and H3 both tile the whole globe and give every cell a compact numeric ID.</li><li>Both support many resolutions, so the same system can represent a country or a street corner.</li><li>The ID works as an <strong>index key</strong>, a <strong>grouping key</strong> for analytics, or a <strong>shard key</strong> for partitioning.</li><li>They differ in cell shape, hierarchy, and the questions they answer best.</li><li>Neither is a database: they are geometry libraries that produce keys your storage layer can index.</li><li>Choosing between them is really choosing between exact containment and uniform neighborhoods.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>S2</th><th>H3</th></tr></thead><tbody><tr><td>Built by</td><td>Google</td><td>Uber</td></tr>
+<tr><td>Main purpose</td><td>Indexing geographic data and location searches</td><td>Analyzing trips, traffic, and demand across cities</td></tr>
+<tr><td>Cell shape</td><td>Roughly square</td><td>Mostly hexagonal</td></tr>
+<tr><td>Hierarchy</td><td>Each cell splits into 4 children that fit exactly inside it</td><td>Each cell has 7 children that only roughly fit</td></tr>
+<tr><td>Strength</td><td>Representing regions as ranges of IDs</td><td>Neighboring areas and distances across the grid</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>S2: mapping the Earth onto a cube</h2>
+<ul><li>S2 starts from a cube and projects each of its six faces onto the sphere, which removes the single seam a flat map has.</li><li>Every point on Earth maps to one point on one face, so the whole surface is covered with six equal regions.</li><li>Each face is then recursively divided into four quadrants, level by level.</li><li>Level 0 holds the six face cells; deeper levels multiply the cell count by four each time.</li><li>Because the subdivision is exact, every cell is fully contained in its parent — a true hierarchy rather than an approximation.</li><li>The projection distorts shape and area somewhat, so cells are not perfectly uniform, but there are no polar or date-line discontinuities.</li><li>That structure is what allows an S2 cell to be treated as an interval of IDs in a normal index.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>S2: Hilbert ordering and cell IDs</h2>
+<ul><li>Within a face, S2 orders cell positions along a <strong>Hilbert curve</strong>, a space-filling curve that keeps nearby 2D positions close in 1D order.</li><li>A cell's position on the curve plus its face and level becomes a 64-bit cell ID.</li><li>The ID is hierarchical: the prefix bits identify the ancestors, so the children of a cell occupy a contiguous ID range.</li><li>Hilbert ordering gives better locality than a naive row-major or Z-order traversal, because it avoids large jumps between adjacent regions.</li><li>Contiguous IDs are the whole point: a database can store one integer column and answer region queries with range scans.</li><li>Leaf-level cells are much finer than any application needs, so production code works at a chosen level rather than at maximum precision.</li><li>The 64-bit representation keeps keys compact and sortable without strings.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>S2: region coverings</h2>
+<ul><li>A query is usually a shape — a circle around the user, a delivery polygon, a city boundary.</li><li>S2 computes a <strong>covering</strong>: the set of cells at chosen levels whose union contains the shape.</li><li>The covering is tuned by a maximum cell count, a minimum level, and a maximum level.</li><li>A tighter budget yields fewer, larger cells; a looser budget yields a closer fit with more cells.</li><li>Because cell IDs are ordered, a covering can be compressed into a small number of ID <strong>ranges</strong>.</li><li>The database then runs a handful of range scans instead of a spatial join.</li><li>The result is approximate: cells extend beyond the shape, so an exact distance or containment test still filters the candidates.</li></ul>
+
+<div class="flow"><span class="flow-step">Define the query shape</span><span class="flow-arrow">→</span><span class="flow-step">Choose level bounds and a cell budget</span><span class="flow-arrow">→</span><span class="flow-step">Compute the S2 covering</span><span class="flow-arrow">→</span><span class="flow-step">Compress into ID ranges</span><span class="flow-arrow">→</span><span class="flow-step">Range-scan the index</span><span class="flow-arrow">→</span><span class="flow-step">Filter candidates exactly</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>S2 strengths and costs</h2>
+<ul><li>Exact hierarchy: a child is entirely inside its parent, so aggregation and drill-down are consistent.</li><li>ID ranges make region queries work on ordinary indexes, including key-value stores and columnar warehouses.</li><li>No special case for the poles or the date line, because the sphere is covered uniformly by construction.</li><li>The cost is conceptual weight: cube projection, Hilbert ordering, and covering heuristics are more machinery than a geohash string.</li><li>Cells are only roughly square and only roughly equal in area, so distance math must use the geometry library, not the ID.</li><li>Choosing levels and covering budgets is a tuning exercise that changes with the query radius.</li><li>Teams usually adopt a client library rather than implementing the projection themselves.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>H3: hexagons on an icosahedron</h2>
+<ul><li>H3 projects an icosahedron onto the sphere; its twenty triangular faces are filled with hexagonal cells.</li><li>Hexagons are the reason H3 exists: on a hexagonal grid every neighbor shares an edge and sits the same distance from the center.</li><li>A square grid has edge neighbors and diagonal neighbors at different distances, which complicates smoothing, distance, and neighborhood logic.</li><li>Twelve pentagons are unavoidable when covering a sphere with hexagons, and they appear as distortion points in the grid.</li><li>H3 subdivides with <strong>aperture 7</strong>: each cell becomes one center child plus six surrounding children.</li><li>The system offers many resolutions, from continental cells down to street-scale cells.</li><li>Cells at one resolution are close to equal in area, though not exactly equal.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>H3: neighbors and analytics</h2>
+<ul><li>Neighbor queries are expressed as a <strong>k-ring</strong>: all cells within k steps of the origin cell.</li><li>Because every hexagon has six equidistant neighbors, ring shapes are regular and distances are comparable.</li><li>This makes H3 natural for demand smoothing, surge pricing, supply/demand balancing, and heat maps.</li><li>Aggregating counts per cell and rolling up to a parent gives multi-resolution dashboards from one dataset.</li><li>Grid distance (number of steps) is a cheap proxy for travel distance, which is useful for coarse matching.</li><li>The regular neighborhood also helps when comparing a cell with its surroundings, since all six neighbors are the same shape.</li><li>Analytics pipelines often store the H3 cell ID as a partition or grouping column next to the raw coordinates.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>H3's hierarchy caveat</h2>
+<ul><li>Children only <strong>roughly</strong> fit inside their parent, so containment is approximate across resolutions.</li><li>A point may fall near a child boundary and be assigned to a cell whose parent relationship is not geometrically exact.</li><li>Consequently, a parent's aggregate is not a perfect sum over its children, which matters for strict accounting.</li><li>The twelve pentagons have five neighbors instead of six and distort subdivision around them.</li><li>Cell area varies somewhat within a resolution, so counts per cell are not perfectly comparable without normalization.</li><li>For exact region math, compute the geometry rather than relying on parent-child containment.</li><li>This is the main reason S2 is preferred when exact nesting and region ranges drive the design.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Choosing between them</h2>
+<ul><li>Choose <strong>S2</strong> when the workload is indexing and search: point lookups, region coverings, range scans on an ID column, and exact parent-child rollups.</li><li>Choose <strong>H3</strong> when the workload is analysis: neighborhood comparisons, ring queries, demand smoothing, and heat maps.</li><li>Choose S2 when a region must be expressed as a small set of ID intervals for a storage engine.</li><li>Choose H3 when six equally distant neighbors make the model simpler than eight uneven ones.</li><li>Both are preferable to geohash at global scale, where pole and date-line artifacts appear.</li><li>Neither replaces an R-tree when the indexed objects are arbitrary shapes rather than points or cells.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Requirement</th><th>Better fit</th><th>Why</th></tr></thead><tbody><tr><td>Index points and polygons as ID ranges</td><td>S2</td><td>Exact hierarchy and contiguous ranges</td></tr>
+<tr><td>Compare a cell with its six neighbors</td><td>H3</td><td>Equidistant hexagonal adjacency</td></tr>
+<tr><td>Roll up counts across resolutions</td><td>S2</td><td>Children nest exactly in parents</td></tr>
+<tr><td>Smooth demand across a city grid</td><td>H3</td><td>Regular ring shapes</td></tr>
+<tr><td>Avoid pole and date-line bugs</td><td>Both</td><td>Cells are defined on the sphere</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Using cell IDs in a system</h2>
+<ul><li>Store the cell ID as a 64-bit integer alongside the raw latitude and longitude; the ID is a key, not a position.</li><li>Always store the resolution with the ID, because the same integer space means different sizes at different levels.</li><li>Use the ID as an index key for nearby lookups, and as a grouping key for counts and rollups.</li><li>As a shard key, cell IDs concentrate a city on one shard — convenient for local queries, dangerous for hot spots.</li><li>Sharding by cell therefore needs a salt or a split of dense cells, exactly like geohash prefix sharding.</li><li>For live position updates, keep the current cell in memory and let the durable store hold history.</li><li>Recompute the cell when the resolution changes; never mix levels in one column without recording which is which.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Practical adoption notes</h2>
+<ul><li>Use a maintained library: the projection, covering, and edge-case geometry are not worth reimplementing.</li><li>Pick the resolution from the query radius and the expected rows per cell, then test in both dense and sparse regions.</li><li>Budget coverings by cell count, not by guesswork; a covering that is too fine explodes the number of ranges.</li><li>Expect approximate answers from cell-based filtering and keep an exact distance step for correctness.</li><li>Watch cell cardinality in dashboards: a handful of very hot cells usually means the resolution is too coarse for that city.</li><li>Keep the raw coordinates for re-indexing, because changing resolution or switching systems requires recomputation.</li><li>Document the resolution everywhere, since a cell ID without its level is ambiguous.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Spherical cells</strong> remove pole and date-line artifacts but add projection and covering complexity.</li><li><strong>S2's exact hierarchy</strong> makes rollups and range queries reliable but its cells are only roughly square.</li><li><strong>H3's hexagons</strong> give equidistant neighbors but break exact parent-child containment.</li><li><strong>Fine resolutions</strong> reduce candidate counts but multiply index entries and covering ranges.</li><li><strong>Coarse resolutions</strong> keep keys few and cheap but blur dense areas into hot cells.</li><li><strong>ID ranges on a normal index</strong> avoid a spatial database dependency but return approximate candidates.</li><li><strong>Cell-ID sharding</strong> co-locates local data but concentrates traffic on popular regions.</li><li><strong>Adopting a global cell system</strong> fixes worldwide geometry but costs more conceptual and library overhead than a geohash string.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why is a geohash not ideal at global scale?</summary><div class="answer"><p>A geohash splits degrees evenly, so cells shrink in ground area toward the poles where longitude lines converge. It also treats the 180&deg; meridian as an edge, so neighboring points can land at opposite ends of the index. S2 and H3 define cells on the sphere itself, so both artifacts disappear.</p></div></details>
+<details><summary>2. How does S2 turn the Earth into cell IDs?</summary><div class="answer"><p>It projects a cube onto the sphere, recursively divides each face into four quadrants, and orders positions within a face along a Hilbert curve. That ordering plus the face and level produces a 64-bit ID whose prefix identifies its ancestors, so a subtree is a contiguous ID range.</p></div></details>
+<details><summary>3. What is a region covering and why does it matter?</summary><div class="answer"><p>It is the set of cells whose union approximates a query shape such as a circle or polygon. Because S2 IDs are ordered, the covering compresses into a few ID ranges that a normal index can scan. The covering is approximate, so candidates are still filtered by exact geometry.</p></div></details>
+<details><summary>4. Why is a Hilbert curve used instead of a simple Z-order?</summary><div class="answer"><p>Both map 2D positions to 1D order, but a Z-order curve makes large jumps between some adjacent regions, which splits a compact area into distant ID ranges. Hilbert ordering keeps neighbors closer in the ordering, so a region becomes fewer, tighter intervals.</p></div></details>
+<details><summary>5. What makes H3's hexagons attractive?</summary><div class="answer"><p>Every hexagon has six neighbors that share an edge and sit at the same distance, so ring queries and neighborhood comparisons are regular. A square grid mixes edge and diagonal neighbors at different distances, which complicates smoothing and distance estimates. That regularity is why H3 is popular for demand and mobility analytics.</p></div></details>
+<details><summary>6. What is aperture 7 in H3?</summary><div class="answer"><p>It is the subdivision rule: each cell is replaced by seven children, one in the center and six around it. That keeps the hexagonal shape and neighbor structure at every resolution, at the cost of children only roughly fitting inside the parent.</p></div></details>
+<details><summary>7. Why do H3 parent aggregates not equal the sum of children?</summary><div class="answer"><p>Because child cells only approximately tile their parent, some area is shared or missed at boundaries. Assigning each point to its own cell at each resolution avoids double counting within a level, but the geometric containment is not exact, so rollups are approximate by construction.</p></div></details>
+<details><summary>8. What are the pentagons in H3 and why do they matter?</summary><div class="answer"><p>A sphere cannot be tiled entirely by hexagons, so twelve pentagons fill the gaps. They have five neighbors instead of six and distort subdivision nearby, which shows up as irregular rings and slightly different cell behavior around those points.</p></div></details>
+<details><summary>9. How would you find all drivers within 2 km using H3?</summary><div class="answer"><p>Choose a resolution whose cells are roughly the size of the search area, take the k-ring around the rider's cell, and look up drivers indexed by cell ID. Then compute exact great-circle distance and filter. The ring gives candidates; geometry gives the answer.</p></div></details>
+<details><summary>10. How would you query a city polygon stored in an ordinary database using S2?</summary><div class="answer"><p>Compute an S2 covering of the polygon within a cell budget, compress it into ID ranges, and run range scans on the cell ID column. The covering returns a superset, so apply exact containment to finish. This gives spatial queries without a spatial index extension.</p></div></details>
+<details><summary>11. Can either system replace an R-tree?</summary><div class="answer"><p>No. S2 and H3 organize <em>space</em>, so arbitrary shapes must be approximated by coverings. An R-tree organizes <em>objects</em> by their bounding rectangles, which handles large, overlapping shapes with one entry each. Use cells for points and regions, R-trees for shape-heavy geometry.</p></div></details>
+<details><summary>12. What is the operational risk of sharding by cell ID?</summary><div class="answer"><p>Dense cities collapse into a few hot cells, so one shard takes most of the traffic while others idle. Mitigations are to split hot cells at a finer resolution, add a salt, or route by a composite key. The same skew exists with geohash prefixes.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Storing a cell ID without its resolution, which makes the same integer mean different areas.</li><li>Treating H3 parent-child containment as exact and using it for strict accounting.</li><li>Assuming cell IDs give exact distance; they give candidates that still need geometry.</li><li>Choosing the finest resolution and exploding the number of index entries and covering ranges.</li><li>Sharding by cell ID and creating a single hot shard for a dense city.</li><li>Mixing S2 and H3 IDs, or different resolutions, in one index column.</li><li>Reimplementing the projection and covering logic instead of using a maintained library.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="r-trees.html"><span>← Previous</span><strong>R-Trees</strong></a><a class="next" href="bloom-filters.html"><span>Next →</span><strong>Bloom Filters</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/s2-h3">AlgoMaster — S2 and H3</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

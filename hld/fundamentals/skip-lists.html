@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skip Lists — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 95 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Skip Lists</h1>
+    <p class="dek">Data Structures for Scale · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/skip-lists">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: sorted data under constant change</a>
+<a href="#s2">Sorted array</a>
+<a href="#s3">Sorted linked list</a>
+<a href="#s4">Why not a balanced tree</a>
+<a href="#s5">The express lane idea</a>
+<a href="#s6">Structure</a>
+<a href="#s7">Search</a>
+<a href="#s8">Insertion with random levels</a>
+<a href="#s9">Deletion</a>
+<a href="#s10">Ranks and range scans</a>
+<a href="#s11">Concurrency</a>
+<a href="#s12">Where it is used, and its limits</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A skip list is a sorted linked list with probabilistic express lanes above it, giving expected logarithmic search, insertion, and deletion without the rotations that make balanced trees hard to implement and hard to update concurrently.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Skip list</dt><dd>A layered sorted linked list where each higher level skips over more nodes, so a search descends instead of walking every element.</dd></div><div class="term"><dt>Level (lane)</dt><dd>One of the stacked linked lists; level zero contains every element, higher levels contain progressively sparser samples.</dd></div><div class="term"><dt>Tower</dt><dd>The stack of forward pointers belonging to one element, whose height is chosen randomly at insertion.</dd></div><div class="term"><dt>Promotion probability (p)</dt><dd>The chance that a new node also appears at the next level up; it controls the balance between search speed and pointer overhead.</dd></div><div class="term"><dt>Header node</dt><dd>A sentinel that owns the forward pointers for the start of every level, so no level needs a special case.</dd></div><div class="term"><dt>Span</dt><dd>The number of bottom-level nodes a forward pointer skips, which lets the list compute ranks without walking.</dd></div><div class="term"><dt>Expected O(log n)</dt><dd>The average cost over the random level choices; the worst case is linear but vanishingly unlikely.</dd></div><div class="term"><dt>Lock-free insertion</dt><dd>Inserting with atomic compare-and-swap on forward pointers, which avoids the global restructuring of a balanced tree.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: sorted data under constant change</h2>
+<p class="lede">An online game needs a leaderboard over millions of players whose scores change every second.</p>
+<ul><li>The leaderboard must support updating a player's score.</li><li>It must return the top players quickly.</li><li>It must find a specific player's current rank.</li><li>It must list players whose scores fall inside a range.</li><li>All of these need the data kept in sorted order at all times.</li><li>With constant updates, the structure must insert and delete fast <em>and</em> search and scan fast — a combination the simple options do not provide.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Sorted array</h2>
+<ul><li>Searching is excellent: binary search finds a key in logarithmic time with predictable memory access.</li><li>Insertion and deletion are expensive: everything after the position must shift to close or open a gap.</li><li>A single insertion near the front can move a very large number of elements.</li><li>The cost is inherent to contiguous storage, not to the algorithm.</li><li>Bulk rebuilds are fine; steady churn is not.</li><li>A sorted array works when the data is mostly static or rebuilt in batches.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Sorted linked list</h2>
+<ul><li>Insertion is cheap once the position is known: a few pointer updates, no shifting.</li><li>Search is the problem: a linked list cannot jump to the middle, so it must walk node by node.</li><li>Finding the insertion position therefore costs a full scan, which cancels the cheap insert.</li><li>Range scans are natural once you are at the start of the range.</li><li>Memory is fragmented across nodes, so pointer chasing replaces cache-friendly scans.</li><li>Neither array nor linked list delivers fast search and fast update at the same time.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Structure</th><th>Search</th><th>Insert / delete</th></tr></thead><tbody><tr><td>Sorted array</td><td>O(log n) via binary search</td><td>O(n): elements shift</td></tr>
+<tr><td>Sorted linked list</td><td>O(n): walk node by node</td><td>O(1) once the position is found</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Why not a balanced tree</h2>
+<ul><li>Balanced search trees such as red-black and AVL trees do provide logarithmic search, insert, and delete.</li><li>They maintain balance with <strong>rotations</strong> after updates, and the rotation cases are easy to get wrong.</li><li>An insertion can require updating nodes all the way to the root.</li><li>Under concurrency, threads modifying nodes near the root must coordinate, which limits parallelism.</li><li>A single structural change can invalidate work other threads are doing.</li><li>Skip lists achieve similar expected performance with a simpler, more local update pattern.</li><li>That simplicity is why some systems pick them even when a tree would be asymptotically equivalent.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The express lane idea</h2>
+<ul><li>Imagine a highway with local lanes and express lanes: the express lanes stop at fewer exits.</li><li>A skip list stacks sorted linked lists, where each higher level contains a random subset of the nodes below.</li><li>A search starts at the top level, travels as far as it can, then drops down a level and continues.</li><li>Each level removes roughly the same fraction of nodes, so the number of levels needed grows logarithmically with the element count.</li><li>The top levels skip large stretches; the bottom level contains everything.</li><li>No rotation or global restructuring is required: balance comes from randomness, not invariant maintenance.</li><li>The structure is a probabilistic alternative to a balanced tree, not an approximation of one.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Structure</h2>
+<ul><li>Level 0 is an ordinary sorted linked list containing every element.</li><li>Level <em>i+1</em> contains a random subset of the nodes at level <em>i</em>, each promoted with probability <code>p</code>.</li><li>Each node owns a <strong>tower</strong> of forward pointers, one per level it participates in.</li><li>A header node holds the entry pointer for every level, so descent never needs a special case.</li><li>The number of levels is bounded by a small maximum derived from the expected element count.</li><li>Total pointer overhead stays linear in the element count, since few nodes reach the high levels.</li><li>Ordering is by key, so duplicates need a tie-break such as insertion sequence or a composite key.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Search</h2>
+<ul><li>Start at the highest level of the header node.</li><li>While the next node's key is less than the target, move forward at the current level.</li><li>When the next key is greater (or the level ends), drop down one level and continue.</li><li>Repeat until level 0, where the next node is either the target or the insertion point.</li><li>Each level costs a few comparisons, and the number of levels is logarithmic in expectation.</li><li>The path is a staircase from the sparse top to the dense bottom.</li><li>Searching for a range is the same descent, followed by a linear walk along level 0.</li></ul>
+
+<div class="flow"><span class="flow-step">Start at top level</span><span class="flow-arrow">→</span><span class="flow-step">Advance while next key is smaller</span><span class="flow-arrow">→</span><span class="flow-step">Drop one level</span><span class="flow-arrow">→</span><span class="flow-step">Repeat until level 0</span><span class="flow-arrow">→</span><span class="flow-step">Compare next node with target</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Insertion with random levels</h2>
+<ul><li>Search first to find the position at every level, keeping the predecessor at each level.</li><li>Choose the new node's height randomly: keep promoting while a random draw succeeds, up to the maximum level.</li><li>Link the node into each level up to its height by updating the predecessors' forward pointers.</li><li>No rotations, no rebalancing, no ancestor updates beyond the predecessors just recorded.</li><li>The geometric distribution of heights is what keeps the structure balanced on average.</li><li>A common <code>p</code> is one half or one quarter; a smaller <code>p</code> means fewer levels and more forward steps per level.</li><li>Because the height is random, two runs over the same data can produce different shapes with the same expected cost.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Deletion</h2>
+<ul><li>Search for the node while recording its predecessor at each level.</li><li>Unlink it from every level where it appears by pointing each predecessor at the node's next pointer.</li><li>Deletion is local: only the tower's own levels are touched.</li><li>No rebalancing follows, because removing a node cannot violate any balance invariant.</li><li>Freeing the node is a memory-management concern, especially under concurrency.</li><li>Repeated insert and delete churn leaves the height distribution slightly different from a fresh build, which is acceptable in expectation.</li><li>If exact reproducibility matters, rebuild rather than relying on the evolved shape.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Ranks and range scans</h2>
+<ul><li>Store a <strong>span</strong> on each forward pointer: how many level-0 nodes it jumps over.</li><li>To compute a rank, accumulate spans while descending and advancing.</li><li>A rank lookup is then a search with an extra accumulator, not a separate traversal.</li><li>Range queries start with a descent to the lower bound, then walk level 0 while keys stay in range.</li><li>The walk touches only matching nodes plus one stop, which is optimal for a linked structure.</li><li>Leaderboard queries such as "top 100" and "players between two scores" map directly onto these operations.</li><li>Without spans, rank requires walking from the head and the structure loses an important capability.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Concurrency</h2>
+<ul><li>An insertion only changes the forward pointers of the nodes it links, so updates are naturally local.</li><li>Forward pointers can be installed with atomic compare-and-swap, which enables lock-free insertion.</li><li>Deletion is harder: a node removed while another thread is reading it needs a mark-and-reclaim scheme.</li><li>Balanced trees need coordination across rotations near the root, which serializes writers.</li><li>This locality is a major reason Java ships <code>ConcurrentSkipListMap</code> and concurrent indexes favor skip lists.</li><li>Correct lock-free memory reclamation is still subtle; most production code uses a tested library.</li><li>In single-threaded engines such as Redis, the win is implementation simplicity rather than concurrency.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Where it is used, and its limits</h2>
+<ul><li><strong>Redis sorted sets</strong> are skip lists with spans, which is how <code>ZRANGE</code>, <code>ZRANK</code>, and score ranges work.</li><li><strong>LSM memtables</strong> in LevelDB and RocksDB use skip lists because they take concurrent inserts and support ordered iteration for flush.</li><li><strong>Java's concurrent collections</strong> use them for ordered maps and sets.</li><li>Some in-memory databases and search structures use them where ordered iteration plus concurrent writes matter.</li><li>Limits: pointer overhead, poor cache locality, randomized worst case, and no native disk layout.</li><li>Choose a skip list when ordered iteration and concurrent updates matter more than raw cache efficiency.</li><li>Choose a B-tree or sorted array when the data is disk-resident and page locality dominates.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Skip list</th><th>Balanced tree</th></tr></thead><tbody><tr><td>Expected search</td><td>O(log n)</td><td>O(log n)</td></tr>
+<tr><td>Rebalancing</td><td>Random levels, none</td><td>Rotations after updates</td></tr>
+<tr><td>Update locality</td><td>Local predecessors only</td><td>May touch the root path</td></tr>
+<tr><td>Concurrency</td><td>Compare-and-swap friendly</td><td>Harder around rotations</td></tr>
+<tr><td>Cache behavior</td><td>Pointer chasing</td><td>Better with page layout</td></tr>
+<tr><td>Worst case</td><td>O(n), very unlikely</td><td>O(log n), guaranteed</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Random levels</strong> remove rotation logic but make the worst case linear instead of guaranteed logarithmic.</li><li><strong>More levels</strong> shorten searches but add pointers and memory per node.</li><li><strong>Smaller promotion probability</strong> reduces pointer overhead but increases forward steps within a level.</li><li><strong>Local pointer updates</strong> make concurrency easier but leave the structure sensitive to memory reclamation bugs.</li><li><strong>Spans</strong> enable rank queries but must be maintained on every insert and delete.</li><li><strong>Ordered iteration</strong> is natural and cheap, unlike a hash table, but cache locality is worse than an array or B-tree.</li><li><strong>In-memory design</strong> suits memtables and leaderboards but not page-oriented disk storage.</li><li><strong>Simpler code</strong> reduces maintenance risk but gives up the deterministic balance guarantees a tree provides.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a skip list?</summary><div class="answer"><p>A sorted linked list with several layers of express pointers. Level zero holds every element, and each higher level holds a random sample of the level below. A search moves forward at high levels and drops down when it overshoots, which yields expected logarithmic cost.</p></div></details>
+<details><summary>2. Why does a sorted array fail for a leaderboard?</summary><div class="answer"><p>Binary search is fast, but every score update shifts the elements after the insertion point. With millions of players and constant updates, that shifting dominates. A skip list inserts by relinking a few pointers instead of moving data.</p></div></details>
+<details><summary>3. Why does a sorted linked list fail?</summary><div class="answer"><p>Insertion is cheap only after you know the position, and finding the position requires walking from the head node by node. Search is linear, so the cheap insert never pays off. The express lanes exist to make that search logarithmic.</p></div></details>
+<details><summary>4. How is a skip list balanced without rotations?</summary><div class="answer"><p>Balance comes from random promotion: each node is promoted to the next level with probability <code>p</code>, producing a geometric height distribution. That keeps the expected number of nodes per level shrinking geometrically, which bounds the expected search path. No invariant needs repair after an update.</p></div></details>
+<details><summary>5. What is the expected complexity and what is the worst case?</summary><div class="answer"><p>Search, insert, and delete are expected <code>O(log n)</code>, and space is expected <code>O(n)</code>. The worst case is <code>O(n)</code> if the random heights happen to degenerate, but that probability falls off extremely fast, so it does not drive design decisions.</p></div></details>
+<details><summary>6. How does a search actually descend?</summary><div class="answer"><p>It starts at the highest level of the header and advances while the next key is smaller than the target. When the next key is larger, it drops one level and repeats. At level zero the next node is the target or the insertion point.</p></div></details>
+<details><summary>7. What is <code>p</code> and how does it affect the structure?</summary><div class="answer"><p>It is the probability that a node is promoted to the next level. A larger <code>p</code> means more nodes per level and fewer levels; a smaller <code>p</code> means sparser levels and more pointer steps per level. Both keep expected search logarithmic; the choice trades memory against comparisons.</p></div></details>
+<details><summary>8. How do you get a player's rank?</summary><div class="answer"><p>Store a span on each forward pointer counting how many bottom-level nodes it skips. During the search, accumulate spans while advancing and descending, which yields the rank in the same pass. Without spans, rank would require a linear walk from the head.</p></div></details>
+<details><summary>9. How do range queries work?</summary><div class="answer"><p>Descend to the lower bound using the normal search, then walk level zero while keys remain within the range. The traversal touches only matching nodes and one terminating node, so it is proportional to the output size.</p></div></details>
+<details><summary>10. Why are skip lists considered concurrency-friendly?</summary><div class="answer"><p>An insert changes only the forward pointers of the nodes it links, so it can be done with atomic compare-and-swap instead of locks. Balanced trees may rotate nodes near the root and touch a shared path. Deletion still needs careful reclamation, so production code relies on proven implementations.</p></div></details>
+<details><summary>11. Where are skip lists actually used?</summary><div class="answer"><p>Redis sorted sets use a skip list with spans to support ranking and score ranges. LSM memtables in LevelDB and RocksDB use one for concurrent ordered inserts and iteration during flush. Java's concurrent ordered collections use them as well.</p></div></details>
+<details><summary>12. Skip list or balanced tree?</summary><div class="answer"><p>Use a skip list when ordered iteration, concurrent updates, and simple code matter, and expected rather than worst-case bounds are acceptable. Use a balanced tree or B-tree when you need deterministic bounds or disk-friendly page layout.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Confusing expected <code>O(log n)</code> with a guaranteed worst case.</li><li>Forgetting spans and then discovering rank queries require a full scan.</li><li>Choosing <code>p</code> without considering the memory cost of tall towers versus the comparison cost of sparse levels.</li><li>Assuming lock-free insertion solves deletion and memory reclamation too.</li><li>Using a skip list for disk-resident data where page locality matters more than pointer simplicity.</li><li>Letting duplicate keys in without a tie-break rule, which breaks deterministic ordering and rank.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="cuckoo-filter.html"><span>← Previous</span><strong>Cuckoo Filter</strong></a><a class="next" href="count-min-sketch.html"><span>Next →</span><strong>Count-Min Sketch</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/skip-lists">AlgoMaster — Skip Lists</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MinHash — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 99 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>MinHash</h1>
+    <p class="dek">Data Structures for Scale · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/minhash">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: near-duplicate content</a>
+<a href="#s2">Why exact hashing does not help</a>
+<a href="#s3">Jaccard similarity</a>
+<a href="#s4">Turning documents into shingles</a>
+<a href="#s5">Two problems at scale</a>
+<a href="#s6">What MinHash is</a>
+<a href="#s7">Why it works</a>
+<a href="#s8">Signature size and accuracy</a>
+<a href="#s9">Locality-sensitive hashing with bands</a>
+<a href="#s10">Tuning the banding scheme</a>
+<a href="#s11">Variants and implementation notes</a>
+<a href="#s12">Uses and limits</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>MinHash compresses a set into a small signature whose matching rate estimates Jaccard similarity, and locality-sensitive hashing turns those signatures into cheap candidate pairs instead of comparing every pair.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Jaccard similarity</dt><dd>The size of the intersection of two sets divided by the size of their union, ranging from 0 to 1.</dd></div><div class="term"><dt>Shingle</dt><dd>A short sequence of consecutive words or characters used as one element of a document's set.</dd></div><div class="term"><dt>MinHash signature</dt><dd>A vector of minimum hash values, one per hash function, that summarizes a set in a fixed number of values.</dd></div><div class="term"><dt>Min-hash property</dt><dd>The probability that two sets produce the same minimum under a random hash equals their Jaccard similarity.</dd></div><div class="term"><dt>Locality-sensitive hashing (LSH)</dt><dd>A family of hash functions that maps similar items to the same bucket with high probability.</dd></div><div class="term"><dt>Band</dt><dd>A contiguous slice of the signature; a banding scheme hashes each band separately to generate candidates.</dd></div><div class="term"><dt>S-curve</dt><dd>The candidate probability as a function of similarity, <code>1 - (1 - s^r)^b</code>, which rises steeply near a chosen threshold.</dd></div><div class="term"><dt>b-bit MinHash</dt><dd>A compact variant that stores only a few low bits of each minimum hash, trading accuracy for memory.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: near-duplicate content</h2>
+<p class="lede">A search engine crawls billions of pages, and a large fraction of them are almost the same as each other.</p>
+<ul><li>The same news article appears on many sites with only the header and footer changed.</li><li>One product page is reachable through several URLs with different tracking parameters.</li><li>A blog post is copied with a few words altered or a paragraph removed.</li><li>Showing all of these in results wastes crawl budget and crowds out distinct content.</li><li>The system needs to group pages whose content is very similar, not just identical.</li><li>Doing it pairwise over the whole corpus is computationally impossible, so the comparison must be restructured.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why exact hashing does not help</h2>
+<ul><li>Exact duplicate detection is easy: hash each page and group by equal hashes.</li><li>A cryptographic or content hash changes completely when a single character changes, which is the property that makes it good for integrity.</li><li>That same avalanche effect destroys any notion of degree: two pages that are 95% identical produce unrelated hashes.</li><li>So hashing answers equality, while the problem is similarity.</li><li>What is needed is a summary that changes gradually as content changes, and a way to compare summaries cheaply.</li><li>MinHash provides the summary; locality-sensitive hashing provides the cheap comparison.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Jaccard similarity</h2>
+<ul><li>Similarity must be defined before it can be estimated, and Jaccard is the standard choice for sets.</li><li>It is the size of the intersection divided by the size of the union.</li><li>Identical sets score 1; disjoint sets score 0; everything else falls in between.</li><li>For sets of four items sharing three, the union has five items, so the similarity is 3/5 = 0.6.</li><li>The measure ignores order, repetition, and magnitude — only membership matters.</li><li>That makes it robust to insertions and deletions of single elements but blind to structure.</li><li>Choosing a different similarity measure means choosing a different sketch, so the decision comes first.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Turning documents into shingles</h2>
+<ul><li>Documents are sequences of words, not sets, so they must first be converted into sets.</li><li>A <strong>shingle</strong> is a short run of consecutive words or characters, taken as one element.</li><li>With three-word shingles, a five-word sentence yields three overlapping shingles.</li><li>Overlapping shingles preserve some word order, so documents that share phrases share shingles.</li><li>A single changed word affects only the shingles that span it; the rest are untouched, so similarity stays high.</li><li>Shingle length is a real decision: too short and unrelated documents collide, too long and minor edits drop similarity.</li><li>Character shingles help for short texts and for languages without easy word boundaries; word shingles are the common default.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Two problems at scale</h2>
+<ul><li>The first problem is <strong>set size</strong>: a long article contains many shingles, so comparing two sets directly is expensive.</li><li>The second problem is <strong>pair count</strong>: with a billion pages there are on the order of 5&times;10^17 pairs.</li><li>Even a microsecond per comparison would take longer than the age of the system.</li><li>These are separate problems and need separate solutions, which is the key structural insight.</li><li>MinHash makes each individual comparison cheap by shrinking the set to a fixed signature.</li><li>LSH avoids most comparisons by bucketing signatures so only plausible pairs are examined.</li><li>Neither alone is sufficient: a cheap comparison still leaves too many pairs, and bucketing alone still needs a compact key.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>What MinHash is</h2>
+<ul><li>Choose <code>k</code> independent random hash functions that map elements to numbers.</li><li>For each function, compute the minimum value over all elements of the set.</li><li>Those <code>k</code> minima form the <strong>signature</strong>, a fixed-size vector regardless of set size.</li><li>Two sets are compared by the fraction of positions where their signatures agree.</li><li>That fraction estimates their Jaccard similarity.</li><li>The signature is computed in one pass per set and needs no pairwise work.</li><li>The estimate is statistical, so more hash functions mean less variance, not exactness.</li></ul>
+
+<div class="flow"><span class="flow-step">Shingle the document</span><span class="flow-arrow">→</span><span class="flow-step">Hash every shingle k ways</span><span class="flow-arrow">→</span><span class="flow-step">Keep the minimum per hash</span><span class="flow-arrow">→</span><span class="flow-step">Store the k-length signature</span><span class="flow-arrow">→</span><span class="flow-step">Compare signatures position by position</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Why it works</h2>
+<ul><li>Consider the union of two sets and the single element with the smallest hash value under one function.</li><li>That element is equally likely to be any member of the union, because the hash is random.</li><li>The two sets produce the same minimum exactly when that element belongs to the <strong>intersection</strong>.</li><li>The probability of that is the intersection size divided by the union size — Jaccard similarity.</li><li>So each hash function is a Bernoulli trial whose success probability is the similarity.</li><li>Averaging <code>k</code> trials gives an unbiased estimate with variance shrinking as <code>k</code> grows.</li><li>This is why the estimate is principled rather than a heuristic: the collision probability equals the quantity being measured.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Signature size and accuracy</h2>
+<ul><li>Estimator variance is proportional to <code>1/k</code>, so error falls with the square root of the signature length.</li><li>The standard guidance is that <code>k</code> scales with <code>1/&epsilon;^2</code> for a target error <code>&epsilon;</code>.</li><li>A signature of a few hundred values already compares thousands of shingles in a fixed budget.</li><li>Signature length also controls storage: every document stores <code>k</code> values.</li><li>Each value is a hash, typically stored as a fixed-width integer, so memory is predictable.</li><li>Very short signatures are noisy enough to reorder near-duplicate candidates.</li><li>The same <code>k</code> and the same hash functions must be used across the corpus, or signatures are incomparable.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Locality-sensitive hashing with bands</h2>
+<ul><li>Split each signature into <code>b</code> bands of <code>r</code> consecutive rows, so <code>b * r = k</code>.</li><li>Hash each band into a bucket table, and treat any two documents sharing a bucket as a candidate pair.</li><li>A pair becomes a candidate if they agree on <strong>all rows of at least one band</strong>.</li><li>The probability of that is <code>1 - (1 - s^r)^b</code> for similarity <code>s</code>.</li><li>This is an S-curve: low-similarity pairs are almost never candidates, high-similarity pairs almost always are.</li><li>Only candidate pairs get a full signature or document comparison.</li><li>Banding converts an all-pairs problem into a small number of hash lookups per document.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Effect</th></tr></thead><tbody><tr><td>More bands (smaller r)</td><td>Higher recall, more candidates, higher threshold moves left</td></tr>
+<tr><td>Fewer bands (larger r)</td><td>Higher precision, fewer candidates, threshold moves right</td></tr>
+<tr><td>Longer signature</td><td>More bands available, less estimation noise</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Tuning the banding scheme</h2>
+<ul><li>The steep part of the S-curve sits near <code>(1/b)^(1/r)</code>, which is the effective similarity threshold.</li><li>Decide the threshold from the product: what counts as a near-duplicate for this corpus.</li><li>Then choose <code>r</code> to place the curve and <code>b</code> to make it steep enough.</li><li>More bands increase recall but generate more candidates and more comparison work.</li><li>Fewer bands reduce work but silently miss duplicate pairs, which is usually the worse failure for deduplication.</li><li>Always measure precision and recall on a labeled sample; the formula assumes independent hash functions.</li><li>Duplicates in a bucket must be deduplicated before comparison, or the same pair is evaluated many times.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Variants and implementation notes</h2>
+<ul><li><strong>One-permutation hashing</strong> derives many signature values from a single permutation, cutting hashing cost at a small accuracy cost.</li><li><strong>b-bit MinHash</strong> stores only a few low bits per value, which can greatly shrink the index with modest error.</li><li><strong>Densification</strong> reuses hash values across bands to reduce computation.</li><li>MinHash can be computed in a streaming pass over documents, which suits large crawls.</li><li>Signature computation parallelizes per document; banding and candidate generation parallelize per bucket.</li><li>Hash functions must be independent and stable across runs, or signatures change between rebuilds.</li><li>Store signatures in a columnar or key-value layout so band lookups are cheap.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Uses and limits</h2>
+<ul><li>Web crawl deduplication and search-result diversity.</li><li>Plagiarism and copy detection across documents or code.</li><li>News and feed deduplication where the same story appears with different framing.</li><li>Recommender systems that measure set overlap between users, items, or tags.</li><li>Clustering and near-duplicate joins in analytics pipelines.</li><li>Limits: it estimates Jaccard over sets, so it is blind to order beyond what shingles capture, and it is sensitive to shingle length.</li><li>It gives candidate pairs, not final answers; the candidates still need an exact or more expensive check.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Exact Jaccard</th><th>MinHash + LSH</th></tr></thead><tbody><tr><td>Per comparison</td><td>Proportional to set size</td><td>Proportional to signature length</td></tr>
+<tr><td>Pairs examined</td><td>All pairs</td><td>Only bucket collisions</td></tr>
+<tr><td>Result</td><td>Exact</td><td>Estimated, with tunable error</td></tr>
+<tr><td>Storage</td><td>Full sets</td><td>Fixed-size signatures</td></tr>
+<tr><td>Failure mode</td><td>Too slow</td><td>False negatives from banding</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Longer signatures</strong> reduce estimation error but increase compute and storage per document.</li><li><strong>Shorter signatures</strong> save space but blur the ranking of near-duplicate candidates.</li><li><strong>More bands</strong> raise recall but generate more candidate pairs to verify.</li><li><strong>Fewer bands</strong> cut comparison work but miss true duplicates below the threshold.</li><li><strong>Smaller shingles</strong> catch paraphrases and edits but create accidental similarity between unrelated texts.</li><li><strong>Larger shingles</strong> reduce false matches but make real edits look less similar.</li><li><strong>Jaccard on sets</strong> is cheap and order-insensitive but cannot express positional or semantic similarity.</li><li><strong>Candidate generation</strong> makes the problem tractable but introduces false positives and false negatives before any exact check.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why doesn't a normal hash find near-duplicate pages?</summary><div class="answer"><p>A content hash changes completely when a single byte changes, which is exactly what integrity checking wants. Two pages that are 95% identical therefore produce unrelated digests. MinHash instead produces a summary whose agreement rate reflects how much the sets overlap.</p></div></details>
+<details><summary>2. What is Jaccard similarity?</summary><div class="answer"><p>It is the size of the intersection divided by the size of the union of two sets. Identical sets score 1 and disjoint sets score 0. It measures membership overlap and ignores order and repetition, which is why documents must first be turned into sets of shingles.</p></div></details>
+<details><summary>3. Why shingle a document instead of using its words?</summary><div class="answer"><p>Word sets discard order, so "dog bites man" and "man bites dog" look identical. Overlapping shingles retain local word order, so shared phrases produce shared elements. They also localize edits: changing one word affects only the shingles that span it.</p></div></details>
+<details><summary>4. How does MinHash compress a set?</summary><div class="answer"><p>It applies <code>k</code> random hash functions to every element and keeps the minimum value each function produces. The resulting <code>k</code> values are the signature, whose size is independent of the set size. Similarity is estimated by the fraction of positions where two signatures agree.</p></div></details>
+<details><summary>5. Why does signature agreement estimate Jaccard similarity?</summary><div class="answer"><p>Under a random hash, the smallest hash in the union is equally likely to come from any element of the union. Two sets share that minimum exactly when the element is in their intersection, which happens with probability equal to Jaccard similarity. Averaging over many hash functions concentrates the estimate.</p></div></details>
+<details><summary>6. What are the two scaling problems MinHash addresses?</summary><div class="answer"><p>Large sets make each comparison expensive, and a huge corpus makes the number of pairs astronomical. MinHash fixes the first by replacing a set with a fixed-length signature. LSH fixes the second by bucketing signatures so only likely pairs are compared.</p></div></details>
+<details><summary>7. How does banding work?</summary><div class="answer"><p>Split the signature into <code>b</code> bands of <code>r</code> rows and hash each band into a bucket table. Two documents become candidates if they land in the same bucket for at least one band, meaning they agree on all rows of that band. The candidate probability is <code>1 - (1 - s^r)^b</code>.</p></div></details>
+<details><summary>8. How do you choose the number of bands and rows?</summary><div class="answer"><p>Pick the similarity threshold that should count as a duplicate, then choose <code>r</code> so the S-curve's steep region sits there and <code>b</code> so it is steep enough. More bands raise recall and cost, fewer bands raise precision and risk missing duplicates. Validate with a labeled sample.</p></div></details>
+<details><summary>9. Does MinHash give exact similarity?</summary><div class="answer"><p>No, it estimates it. The estimate is unbiased, and its variance falls as the signature grows, so longer signatures are more accurate. Two runs with different hash functions can produce slightly different scores for the same pair.</p></div></details>
+<details><summary>10. What are the failure modes in production?</summary><div class="answer"><p>Banding can miss true duplicates below the threshold, and popularity effects can cluster unrelated documents in shared buckets. Wrong shingle length either creates false similarity or hides real edits. Stale signatures after content changes are the other common source of wrong results.</p></div></details>
+<details><summary>11. How would you deduplicate a web crawl end to end?</summary><div class="answer"><p>Normalize and shingle each page, compute a MinHash signature, and index the bands to generate candidate pairs. Verify candidates with a full Jaccard computation or a stronger check, then cluster and keep one representative per cluster. Tune the banding threshold against a labeled duplicate set.</p></div></details>
+<details><summary>12. MinHash or a similarity search index over embeddings?</summary><div class="answer"><p>MinHash measures set overlap, is cheap, interpretable, and strong for near-verbatim text. Embeddings capture paraphrase and semantics but cost more to compute and need an approximate nearest-neighbor index. Many pipelines use MinHash for exact-ish duplicate removal and embeddings for topical similarity.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Forgetting that similarity is measured on shingles, so shingle length silently defines what counts as a duplicate.</li><li>Using different hash functions or signature lengths across the corpus, making signatures incomparable.</li><li>Tuning bands for precision only, then wondering why real duplicates survive deduplication.</li><li>Treating candidate pairs as final duplicates without an exact verification step.</li><li>Comparing signatures position by position when the positions came from different hash seeds.</li><li>Choosing Jaccard when the product actually needs order-sensitive or semantic similarity.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="merkle-trees.html"><span>← Previous</span><strong>Merkle Trees</strong></a><a class="next" href="batch-vs-stream-processing.html"><span>Next →</span><strong>Batch vs Stream Processing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/minhash">AlgoMaster — MinHash</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Three Pillars of Observability — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 118 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Three Pillars of Observability</h1>
+    <p class="dek">Observability · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/three-pillars-observability">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: one slow checkout</a>
+<a href="#s2">Monitoring vs observability</a>
+<a href="#s3">One question per pillar</a>
+<a href="#s4">Metrics and metric types</a>
+<a href="#s5">Why metrics are cheap, and where they mislead</a>
+<a href="#s6">Cardinality: the hard limit on metrics</a>
+<a href="#s7">Logs and structured logging</a>
+<a href="#s8">The limits of logs</a>
+<a href="#s9">Traces, spans, and the request tree</a>
+<a href="#s10">Propagating trace context</a>
+<a href="#s11">Reading a waterfall, and the cost of sampling</a>
+<a href="#s12">Working the pillars together</a>
+<a href="#s13">Correlation, instrumentation, and OpenTelemetry</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Metrics tell you <strong>whether</strong> something is wrong, traces tell you <strong>where</strong>, and logs tell you <strong>why</strong> — but only when the three are linked by a shared trace ID.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Observability</dt><dd>The ability to understand a system's internal state from the telemetry it emits, so you can ask new questions during an incident without shipping new code.</dd></div><div class="term"><dt>Monitoring</dt><dd>Watching a predefined set of signals against thresholds and alerting when they cross, which only catches failures you already anticipated.</dd></div><div class="term"><dt>Counter</dt><dd>A monotonically increasing metric, such as total requests or errors, queried as a rate or an increase over a window.</dd></div><div class="term"><dt>Gauge</dt><dd>A metric that moves both up and down, such as active connections or queue depth, read as a current value.</dd></div><div class="term"><dt>Histogram</dt><dd>A metric that counts observations into buckets so percentiles such as p95 and p99 can be computed later.</dd></div><div class="term"><dt>Cardinality</dt><dd>The number of distinct label-value combinations a metric produces; each new combination creates a separate time series.</dd></div><div class="term"><dt>Structured logging</dt><dd>Writing each log entry as named key-value fields rather than free text, so it can be filtered and aggregated precisely.</dd></div><div class="term"><dt>Span</dt><dd>One unit of work inside a trace, recording its operation name, start and end time, status, parent span, and attributes.</dd></div><div class="term"><dt>Trace</dt><dd>The tree of spans produced by a single request as it moves through services, all sharing one trace ID that acts as the join key for logs and exemplars.</dd></div><div class="term"><dt>Sampling</dt><dd>Keeping only a fraction of traces to control cost, decided either at request start (head) or after completion (tail).</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: one slow checkout</h2>
+<p class="lede">A single user action can cross an API gateway, an order service, a payment service, an inventory service, a cache, and a database. When that action slows down, the interesting question is not <em>is something broken</em> but <em>which hop, for which users, since when</em>.</p>
+<ul><li>On one machine you would read the log file and check CPU. In a distributed system there is no single file and no single CPU graph.</li><li>The request may touch many services, each with many replicas, so the evidence is scattered across hosts and containers.</li><li>Short-lived containers take their filesystem logs with them when they are replaced, so evidence can disappear before you look.</li><li>Symptoms are often partial: slow only for one card type, one region, or one tenant, which aggregate health checks never show.</li><li>You need the system to describe its own internals, because you cannot attach a debugger to production traffic.</li><li><strong>Observability</strong> is that capability: emit enough well-structured telemetry that new questions are answerable with queries, not code changes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Monitoring vs observability</h2>
+<p class="lede">The two words are often used interchangeably, but they describe different relationships between the questions and the data.</p>
+<ul><li><strong>Monitoring</strong> starts from a known failure mode: pick signals in advance, set thresholds, alert on breach.</li><li>Monitoring answers <em>is the error rate above 1%</em>; it cannot answer <em>why is checkout slow only for this card type in this region</em>.</li><li><strong>Observability</strong> starts from arbitrary questions and works backwards through high-dimensional data.</li><li>Observability requires wide events with many attributes, retained long enough and joinable across services.</li><li>A system is not observable because it has three tools installed; it is observable if an engineer can answer an unanticipated question quickly.</li><li>In practice you need both: monitoring for fast, cheap detection of known breakage; observability for diagnosis of the novel case.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Dimension</th><th>Monitoring</th><th>Observability</th></tr></thead><tbody><tr><td>Starting point</td><td>Signals chosen in advance</td><td>Questions asked during the incident</td></tr>
+<tr><td>Typical question</td><td>Is the error rate above 1%?</td><td>Why is checkout slow for one card type?</td></tr>
+<tr><td>Data shape</td><td>Aggregated, low-cardinality</td><td>High-dimensional events and spans</td></tr>
+<tr><td>Main artifact</td><td>Dashboards and threshold alerts</td><td>Queries across metrics, logs, and traces</td></tr>
+<tr><td>Catches</td><td>Problems you expected</td><td>Problems you did not expect</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>One question per pillar</h2>
+<p class="lede">Each pillar is optimized for a different shape of question. Choosing the wrong one is the most common reason an investigation stalls.</p>
+<ul><li><strong>Metrics</strong> answer <em>is something wrong, and when did it start</em>: the checkout error rate jumped from a low baseline to a much higher one.</li><li><strong>Logs</strong> answer <em>what exactly happened to this one thing</em>: this payment request failed with a connection timeout to the fraud service.</li><li><strong>Traces</strong> answer <em>where did the time go</em>: the request spent most of its duration waiting on the fraud check call.</li><li>Metrics are cheap enough to keep on every service and alert on; logs are detailed enough to explain a single event; traces are the only pillar that preserves cross-service causality.</li><li>None is sufficient alone: a metric shows a symptom, a trace localizes it, a log explains the mechanism.</li><li>Start broad with metrics, narrow with traces, then confirm the mechanism with logs.</li></ul>
+
+<div class="flow"><span class="flow-step">Alert on a metric (something is wrong)</span><span class="flow-arrow">→</span><span class="flow-step">Open slow traces (where the time went)</span><span class="flow-arrow">→</span><span class="flow-step">Search logs by trace ID (why it happened)</span><span class="flow-arrow">→</span><span class="flow-step">Fix, then watch the same metric recover</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Metrics and metric types</h2>
+<p class="lede">A metric is a numeric measurement recorded over time, identified by a name plus a set of labels.</p>
+<ul><li>A <strong>counter</strong> only increases — requests served, errors, bytes sent — and is queried as a rate per second or an increase over a window.</li><li>A <strong>gauge</strong> goes up and down — active connections, queue depth, memory in use — and is read as a current, min, or max value.</li><li>A <strong>histogram</strong> counts observations into buckets so the median, p95, or p99 can be computed after the fact.</li><li>Labels turn one metric name into many series: a request counter labeled by service, endpoint, and status code.</li><li>Labels are what make metrics queryable — without them you know <em>an</em> endpoint failed, not <em>which</em> endpoint.</li><li>Status codes, regions, and instance roles are good label dimensions; user IDs and request IDs are not.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Type</th><th>Behavior</th><th>Examples</th><th>Typical query</th></tr></thead><tbody><tr><td>Counter</td><td>Only goes up</td><td>Requests, errors, bytes sent</td><td>Rate per second, increase over a window</td></tr>
+<tr><td>Gauge</td><td>Goes up and down</td><td>Active connections, queue depth, memory</td><td>Current value, min, max</td></tr>
+<tr><td>Histogram</td><td>Buckets of observations</td><td>Latency, response size</td><td>Median, p95, p99</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Why metrics are cheap, and where they mislead</h2>
+<ul><li>A metric stores a summary, not every event: the request counter is one number whether the service handles a hundred or a hundred thousand requests per second.</li><li>That compactness is why metrics drive most dashboards and every threshold alert — storage and query cost stay flat as traffic grows.</li><li>Aggregation is also the weakness: an average can look healthy while a small fraction of users suffer badly.</li><li>If most requests take tens of milliseconds and one percent take seconds, the mean hides the tail entirely — track <strong>p95 and p99</strong> instead.</li><li>The four golden signals — <strong>latency, traffic, errors, saturation</strong> — are a good default set per service.</li><li>Saturation matters because it is the leading indicator; latency and errors are what you see after the resource is already exhausted.</li><li>Metrics cannot tell you which order failed or why, because the individual record was discarded at write time.</li></ul>
+
+
+<div class="note">Percentiles cannot be averaged across instances. Aggregate the underlying histogram buckets, or compute the percentile per instance and compare.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Cardinality: the hard limit on metrics</h2>
+<ul><li>Every unique combination of label values is a separate time series with its own storage and index cost.</li><li>Adding a high-cardinality label such as user ID or order ID can multiply one metric into millions of series.</li><li>This is the <strong>high cardinality problem</strong>, and it degrades the metrics backend for every team, not just the one that added the label.</li><li>High cardinality also slows queries and increases memory pressure on the ingestion path.</li><li>Keep label values bounded and predictable: service, endpoint template, region, status code, deployment version.</li><li>Put unbounded identifiers in logs or span attributes instead, where per-event storage is expected.</li><li>When you need per-request detail from a metric, use an <strong>exemplar</strong> — a sampled trace ID attached to a bucket — rather than a new label.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Logs and structured logging</h2>
+<ul><li>A log is a timestamped record of something that happened: a request received, a payment failed, a retry occurred, a job finished.</li><li>Logs are the most detailed pillar and the one you reach for after you already know roughly where to look.</li><li>Free-text lines are readable but expensive to query, because the backend must guess where each field starts and ends.</li><li><strong>Structured logging</strong> writes each entry as named fields — timestamp, level, service, order ID, error type, retry count — usually as JSON.</li><li>Named fields enable precise filters such as <em>errors from the payment service in the last hour where error type is timeout</em>.</li><li>Emit one entry per meaningful outcome, not one per line of code; a request that produced five log lines is five times the volume to search.</li><li>Always include a correlation identifier — trace ID or request ID — so entries from different services can be joined.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>The limits of logs</h2>
+<ul><li>Volume is the dominant cost: a busy system can emit enormous amounts of log data, and indexing all of it is expensive.</li><li>Log levels are the first control — debug in development, info or warning in production for hot paths.</li><li>Logs live on many machines and inside short-lived containers, so local files vanish when the instance is replaced.</li><li>Central shipping is mandatory for production, but it introduces its own failure modes: agent backpressure, dropped batches, delayed arrival.</li><li>Logs describe events inside one service; they do not by themselves reconstruct a request's path across six services.</li><li>Ordering is unreliable: clock skew between hosts makes naive timestamp sorting misleading during an incident.</li><li>Sensitive data creeps in easily, so redaction has to happen at emit time, not at query time.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Traces, spans, and the request tree</h2>
+<p class="lede">A trace follows a single request through the whole system. Each unit of work inside it is a span.</p>
+<ul><li>A checkout trace might contain spans for the gateway, order service, inventory call, payment call, and fraud check, nested by who called whom.</li><li>A span records a <strong>trace ID</strong>, its own <strong>span ID</strong>, its <strong>parent span ID</strong>, an operation name, start and end times, a status, and attributes.</li><li>Parent links turn the spans into a tree, which is what lets a tool reconstruct the call path rather than just a list of timings.</li><li>Span attributes carry the useful dimensions — HTTP route, database statement shape, queue name, retry count — without polluting metrics cardinality.</li><li>The root span measures the user-visible latency; child spans partition that latency by dependency.</li><li>Self time (span duration minus time waiting on children) is what separates a slow service from a slow dependency.</li><li>Traces capture causality, which neither metrics nor logs can express: <em>this</em> call delayed <em>that</em> response.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Propagating trace context</h2>
+<ul><li>Every service in the path must know which trace a request belongs to, or the trace fragments into disconnected pieces.</li><li>The entry service generates a trace ID and passes it downstream, typically in an HTTP header.</li><li>The <strong>W3C Trace Context</strong> standard defines the <code>traceparent</code> header carrying the trace ID, parent span ID, and sampling flags.</li><li>Each downstream service reads the header, creates a child span under the same trace ID, and forwards the context on its own outbound calls.</li><li>Propagation must cross every boundary: HTTP clients, message queues, background jobs, and scheduled tasks that continue earlier work.</li><li>A single library or service that drops the header breaks the chain, so use auto-instrumentation rather than hand-rolled propagation.</li><li>Headers are also a trust boundary: accept context from untrusted callers only if you can tolerate spoofed trace IDs in your data.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Reading a waterfall, and the cost of sampling</h2>
+<p class="lede">Tracing UIs render a trace as a waterfall: each span is a horizontal bar whose length is its duration, nested by parent.</p>
+<ul><li>The waterfall shows instantly whether latency sits in the service's own code, in a downstream call, or in serialization.</li><li>It also exposes structure that metrics hide: calls executed sequentially that could run in parallel, or a retry storm inside one dependency.</li><li>Recording every span of every request is usually unaffordable, so traces are sampled.</li><li><strong>Head-based sampling</strong> decides at request start and keeps a fixed percentage; it is simple, cheap, and blind to outcome.</li><li><strong>Tail-based sampling</strong> buffers spans until the request finishes, then keeps all errors and slow traces plus a small sample of normal ones.</li><li>Tail sampling needs a collector tier that can hold traces in memory and route by trace ID, which is significant infrastructure.</li><li>The sampling decision must be propagated, or different services will disagree about whether a trace exists.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Head-based</th><th>Tail-based</th></tr></thead><tbody><tr><td>Decision point</td><td>When the request starts</td><td>After the request finishes</td></tr>
+<tr><td>What is kept</td><td>A fixed percentage, chosen blindly</td><td>Every error and slow trace plus a sample of normal ones</td></tr>
+<tr><td>Infrastructure cost</td><td>Low</td><td>Spans buffered per trace, more compute</td></tr>
+<tr><td>Main risk</td><td>Drops the rare failure you needed</td><td>More moving parts to run and scale</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Working the pillars together</h2>
+<p class="lede">The pillars pay off as a sequence, not as three separate tools. The typical investigation moves from symptom to location to mechanism.</p>
+<ul><li><strong>Detect with metrics:</strong> p99 latency for checkout crosses its threshold, and a per-service breakdown shows the payment service degrading first.</li><li><strong>Localize with traces:</strong> several slow checkout traces all show the payment-to-fraud-check call consuming most of the duration.</li><li><strong>Explain with logs:</strong> searching logs for that trace ID shows the fraud service exhausting its database connection pool.</li><li>Each step narrows the search space, so you never grep across the whole fleet.</li><li>The direction matters: starting with logs during a broad outage means reading millions of lines with no filter.</li><li>The conclusion should be a mechanism you can fix, not just a service name you can restart.</li></ul>
+
+<div class="flow"><span class="flow-step">Alert fires on a metric</span><span class="flow-arrow">→</span><span class="flow-step">Break the metric down by service or endpoint</span><span class="flow-arrow">→</span><span class="flow-step">Open exemplar or slow traces for that window</span><span class="flow-arrow">→</span><span class="flow-step">Find the dominant span in the waterfall</span><span class="flow-arrow">→</span><span class="flow-step">Search logs by trace ID for the mechanism</span><span class="flow-arrow">→</span><span class="flow-step">Fix and confirm on the original metric</span></div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Correlation, instrumentation, and OpenTelemetry</h2>
+<ul><li>Correlation is what turns three datasets into one investigation; the <strong>trace ID</strong> is the primary key joining them.</li><li>Put the trace ID in every log line and in error responses, so support and engineering can jump straight to the trace.</li><li><strong>Exemplars</strong> attach sample trace IDs to metric buckets, so a spike on a latency chart links to a real request.</li><li><strong>Instrumentation</strong> is the code that produces this data; HTTP, database, and queue libraries can emit spans and metrics automatically.</li><li>Business metrics — orders per minute, checkout conversion — still have to be added deliberately, because no library knows your domain.</li><li><strong>OpenTelemetry</strong> provides vendor-neutral APIs, SDKs, and a wire format for all three signals, so changing backends does not mean re-instrumenting.</li><li>A collector in front of the backends handles batching, sampling, redaction, and fan-out to different stores.</li><li>Instrumentation rule of thumb: if this broke during an incident, what would I need to know? Capture that by default.</li></ul>
+
+
+<div class="note">Collecting all three signals does not make a system observable. The links between them — trace ID in logs, exemplars on metrics — are what reduce diagnosis time.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Metrics</strong> are cheap to store and fast to query but aggregate away the per-request detail you need to explain a failure.</li><li><strong>Logs</strong> preserve full detail per event but cost the most in volume, indexing, and PII exposure.</li><li><strong>Traces</strong> are the only pillar that shows cross-service causality, but they require context propagation everywhere and generate large data volumes.</li><li><strong>Rich labels</strong> make metrics more queryable but multiply time series and can take down the metrics backend under high cardinality.</li><li><strong>Head-based sampling</strong> is simple and cheap but can discard exactly the rare failure you are investigating.</li><li><strong>Tail-based sampling</strong> keeps the interesting traces but requires buffering infrastructure and more operational capacity.</li><li><strong>Verbose logging</strong> speeds diagnosis but raises cost and the chance that secrets or personal data land in the log store.</li><li><strong>Full-fidelity tracing</strong> answers any question after the fact but is usually unaffordable at high request rates.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is observability, and how is it different from monitoring?</summary><div class="answer"><p>Observability is the ability to infer a system's internal state from the telemetry it emits, including questions nobody anticipated. Monitoring watches a predefined set of signals against thresholds. Monitoring tells you that a known condition is breached; observability lets you investigate a condition you never wrote an alert for.</p></div></details>
+<details><summary>2. Why do you need all three pillars?</summary><div class="answer"><p>They answer different questions: metrics say whether and since when something is wrong, traces say where in the request path the time or error sits, and logs say what exactly happened. Removing any one leaves a gap — metrics lose the individual request, logs lose the cross-service path, traces lose the fine-grained event detail.</p></div></details>
+<details><summary>3. When would you choose a counter over a gauge?</summary><div class="answer"><p>Use a counter for something that only accumulates, such as requests, errors, or bytes, because you can derive rates and totals from it without losing information. Use a gauge for a value that rises and falls, such as queue depth or active connections, where the current value is the signal and history matters less.</p></div></details>
+<details><summary>4. Why are percentiles preferred over averages for latency?</summary><div class="answer"><p>An average is dominated by the fast majority and hides the slow tail. If most requests are fast and a small fraction take seconds, the mean can look healthy while real users are suffering. p95 and p99 describe the experience of the slowest users, which is usually what triggers complaints and timeouts.</p></div></details>
+<details><summary>5. What is the high cardinality problem?</summary><div class="answer"><p>Each unique label-value combination is a separate time series, so a label like user ID or order ID can multiply a single metric into millions of series. That inflates storage and memory, slows queries, and can destabilize the metrics backend. Keep labels bounded and move unbounded identifiers into logs or span attributes.</p></div></details>
+<details><summary>6. Why is structured logging better than plain text?</summary><div class="answer"><p>Structured entries store each value in a named field, so the backend does not have to guess boundaries with regular expressions. That makes filtering, aggregation, and dashboarding reliable, and it lets you query by field such as error type or tenant. Plain text is readable but expensive and brittle to search at scale.</p></div></details>
+<details><summary>7. What is a span, and what does it contain?</summary><div class="answer"><p>A span is one unit of work inside a trace, such as an HTTP handler or a database call. It carries a trace ID, its own span ID, a parent span ID, an operation name, start and end timestamps, a status, and attributes describing the work. The parent links are what allow a tool to rebuild the request tree.</p></div></details>
+<details><summary>8. How does trace context propagate across services?</summary><div class="answer"><p>The first service creates a trace ID and sends it downstream, usually in the <code>traceparent</code> header defined by W3C Trace Context. Each service creates a child span under that trace ID and forwards the context on its outbound calls, including to message queues and background jobs. If any hop drops the header, the trace splits.</p></div></details>
+<details><summary>9. Head-based versus tail-based sampling — what would you pick?</summary><div class="answer"><p>Head-based sampling decides at request start and keeps a fixed fraction: trivial to implement, no buffering, but it can discard the rare error you need. Tail-based sampling buffers spans until the trace completes and can keep every error and slow trace. Start with head-based for cost control, and add tail-based when investigating rare failures matters more than infrastructure simplicity.</p></div></details>
+<details><summary>10. How do you connect a metric spike to the logs that explain it?</summary><div class="answer"><p>Attach exemplars to histogram buckets so a spike links to a sampled trace ID, then search the log store for that trace ID. This requires every log line to include the trace ID of the request that produced it, and every service to propagate trace context. Without those two links, you end up matching timestamps by hand across thousands of concurrent requests.</p></div></details>
+<details><summary>11. What would you instrument first in a new service?</summary><div class="answer"><p>Start with the four golden signals — latency percentiles, traffic, errors, and saturation — plus spans on inbound requests and outbound dependencies. Then add business-level counters that reflect user outcomes, such as orders placed. The test is whether an on-call engineer could answer <em>what is broken and where</em> without deploying new code.</p></div></details>
+<details><summary>12. Why can collecting all three signals still leave a system unobservable?</summary><div class="answer"><p>Because the value comes from the links between them. If logs carry no trace ID, if metrics have no exemplars, and if trace context breaks at one service, an engineer still has three disconnected tools. Observability is a property of the joins and the data quality, not of the number of agents installed.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Installing metrics, logs, and traces but never linking them, so incidents still require manual timestamp matching.</li><li>Adding user ID or request ID as a metric label and creating a cardinality explosion.</li><li>Reporting average latency in reviews and dashboards while the p99 is timing out users.</li><li>Instrumenting a service with rich telemetry but letting one downstream library drop the trace header.</li><li>Logging everything at info level in production and then being unable to afford the log bill or find the signal.</li><li>Treating observability as a purchased tool rather than as data emitted deliberately by the application.</li><li>Confusing monitoring coverage with observability: a hundred green dashboards can coexist with an undiagnosable outage.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="rollbacks-and-immutable-infrastructure.html"><span>← Previous</span><strong>Rollbacks &amp; Immutable Infrastructure</strong></a><a class="next" href="logging.html"><span>Next →</span><strong>Logging</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/three-pillars-observability">AlgoMaster — Three Pillars of Observability</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

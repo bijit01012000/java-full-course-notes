@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anycast Routing — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 18 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Anycast Routing</h1>
+    <p class="dek">Load Balancing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>9</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/anycast-routing">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with DNS-based routing</a>
+<a href="#s2">IP routing models</a>
+<a href="#s3">BGP and autonomous systems</a>
+<a href="#s4">How a packet reaches an anycast location</a>
+<a href="#s5">Failover and withdrawal</a>
+<a href="#s6">Where anycast is used</a>
+<a href="#s7">Limitations</a>
+<a href="#s8">Anycast vs DNS load balancing</a>
+<a href="#s9">Operating an anycast service</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Anycast lets many locations announce the <strong>same IP address</strong>, and the internet's routing system sends each packet to whichever one is nearest according to BGP.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Anycast</dt><dd>A routing model where multiple locations advertise the same address and each packet is delivered to just one of them.</dd></div><div class="term"><dt>Unicast</dt><dd>One address identifies one endpoint, and packets are routed toward that single destination.</dd></div><div class="term"><dt>Broadcast</dt><dd>One sender to every device on a local network, used for discovery such as DHCP.</dd></div><div class="term"><dt>Multicast</dt><dd>One sender to a group of receivers that have joined a multicast group.</dd></div><div class="term"><dt>BGP</dt><dd>Border Gateway Protocol: the routing protocol that exchanges reachability between autonomous systems on the internet.</dd></div><div class="term"><dt>Autonomous System</dt><dd>A network under one administrative routing policy, identified by an AS number and advertising its own prefixes.</dd></div><div class="term"><dt>Route withdrawal</dt><dd>Withdrawing an anycast announcement so routers stop sending traffic to that location.</dd></div><div class="term"><dt>Prefix</dt><dd>A block of addresses advertised in routing, with the longest match usually winning.</dd></div><div class="term"><dt>BGP session</dt><dd>A peering relationship between routers in which prefixes and their attributes are exchanged.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with DNS-based routing</h2>
+<p class="lede">Running a service in Tokyo, Frankfurt, and Virginia means you need to decide which location each user reaches.</p>
+<ul><li>A DNS provider can return the address of a nearby region based on the query location, and that works for the steady state.</li><li>The first problem is <strong>caching</strong>: if Tokyo fails, users keep connecting to its old address until their cached answer expires.</li><li>The second problem is <strong>location accuracy</strong>: DNS often sees the user's recursive resolver, not the user.</li><li>A resolver in another country can send a user to a region that is not actually closest.</li><li>DNS also cannot react to the path between the user and the region, only to coarse geography.</li><li>Anycast removes the choice from DNS: every location advertises the same address and the network decides.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>IP routing models</h2>
+<ul><li><strong>Unicast</strong> is the default: one address maps to one endpoint, and packets route toward it. Web, APIs, and databases all use it.</li><li><strong>Broadcast</strong> sends to every device on a local network, for example DHCP discovery.</li><li><strong>Multicast</strong> delivers to receivers that joined a group, used in some video distribution and market-data networks.</li><li><strong>Anycast</strong> shares one address across many locations, and each packet reaches exactly one of them.</li><li>The difference between anycast and unicast is not the packet format but how many places advertise the prefix.</li><li>Broadcast does not cross routers, which is why it stays a local-network tool.</li><li>Multicast requires network support end to end, so it is rarely available across the public internet.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>Delivery pattern</th><th>Common use</th></tr></thead><tbody><tr><td>Unicast</td><td>One address to one endpoint</td><td>Most internet traffic: web, APIs, databases</td></tr>
+<tr><td>Broadcast</td><td>One sender to every device on a local network</td><td>DHCP discovery</td></tr>
+<tr><td>Multicast</td><td>One sender to receivers that joined a group</td><td>Video distribution, market data</td></tr>
+<tr><td>Anycast</td><td>One address shared by many locations, each packet reaches one</td><td>DNS, CDN edges, DDoS absorption, global entry points</td></tr></tbody></table></div>
+
+<div class="note">The telephone analogy helps: everyone dials the same emergency number, and the network routes the call to the centre responsible for that area.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>BGP and autonomous systems</h2>
+<ul><li>The internet is a network of networks, each an <strong>autonomous system</strong> with its own routing policy and AS number.</li><li>BGP is how those systems tell each other which address prefixes they can reach.</li><li>Each announcement carries attributes such as the AS path, which routers use to compare candidate routes.</li><li>Routers normally prefer the shortest AS path, so a location that is fewer hops away tends to win.</li><li>BGP is a <strong>policy</strong> protocol as much as a shortest-path protocol: operators can prefer, prepend, or filter routes.</li><li>Anycast works because the same prefix can be announced from several AS locations, and each network picks its own best route.</li><li>Convergence is not instant: withdrawals and new announcements take time to propagate across the internet.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>How a packet reaches an anycast location</h2>
+<ul><li>Every location advertises the same prefix, so routers worldwide hold several candidate paths to that address.</li><li>A given network selects one best path based on BGP attributes and local policy, typically the nearest in AS-hop terms.</li><li>Packets from that network then consistently reach that location, which keeps a connection stable.</li><li>Different networks may select different locations, which is exactly how the load is spread geographically.</li><li>Because routing is per network rather than per user, all users behind one provider often hit the same site.</li><li>Within a location, ordinary load balancers still distribute requests across servers.</li><li>The address is shared, but a TCP connection still terminates at one specific machine.</li></ul>
+
+<div class="flow"><span class="flow-step">Every region announces the same prefix</span><span class="flow-arrow">→</span><span class="flow-step">Routers compute their best path</span><span class="flow-arrow">→</span><span class="flow-step">Client packets follow the chosen path</span><span class="flow-arrow">→</span><span class="flow-step">Packets arrive at one region</span><span class="flow-arrow">→</span><span class="flow-step">Regional load balancer picks a server</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Failover and withdrawal</h2>
+<ul><li>When a location fails, it stops announcing the prefix, or its upstream stops accepting the announcement.</li><li>Routers then recompute and send traffic to the next-best location for that prefix.</li><li>Failover is driven by routing convergence, so it is usually much faster than waiting for DNS TTLs.</li><li>Anycast also absorbs some attacks for free: traffic is spread across many locations instead of concentrating on one.</li><li>The catch is <strong>connection state</strong>: existing TCP sessions to a failed site break and must be re-established.</li><li>Convergence time varies by network, so some clients recover sooner than others.</li><li>A common failure is a <em>partial</em> withdrawal, where some networks still route to a degraded site.</li></ul>
+
+
+<div class="note">Anycast failover is often described as “the routing table heals”, but the application must still tolerate broken connections and retries.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Where anycast is used</h2>
+<ul><li><strong>DNS</strong> is the classic case: root and public resolvers share addresses so queries reach a nearby instance.</li><li><strong>CDN edges</strong> announce shared addresses so users terminate at a nearby point of presence.</li><li><strong>DDoS mitigation</strong> uses anycast to spread attack traffic across many scrubbing locations.</li><li><strong>Global entry points</strong> for APIs and load balancers give users one address with regional delivery.</li><li>Public time services and some gaming and voice platforms use it for latency.</li><li>In private networks, anycast is used for resilient DNS and NTP servers inside a data centre.</li><li>The pattern is always the same: stateless or connection-local service, replicated widely, reachable at one address.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Limitations</h2>
+<ul><li>Routing is <strong>coarse and network-based</strong>, not per user, so load distribution follows provider topology rather than population.</li><li>A large ISP can send all of its users to one site, creating imbalance that is hard to correct.</li><li>Existing connections cannot migrate: when a site fails, sessions break rather than move.</li><li>Long-lived TCP sessions are pinned to a location for their entire lifetime.</li><li>BGP convergence is measured in seconds to minutes and is not uniform across the internet.</li><li>Operating anycast means running BGP, which brings prefix hijack and route-leak risk plus a new operational skill set.</li><li>Debugging is harder because the path a user takes depends on their provider's routing decisions.</li><li>Application state, caches, and sessions must tolerate users moving between sites between connections.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Anycast vs DNS load balancing</h2>
+<ul><li>DNS chooses a location <em>before</em> the connection and can be overridden by caching.</li><li>Anycast chooses a location <em>per packet path</em>, so caches cannot override it and failover is not gated by TTL.</li><li>DNS gives explicit control: weights, region rules, and residency policy.</li><li>Anycast gives automatic proximity and resilience, but you surrender fine-grained control.</li><li>DNS can express application meaning such as tenant or canary; anycast can only express network reachability.</li><li>Many systems combine them: anycast addresses for the entry point, with DNS or a global balancer for policy above it.</li><li>For a new global service, anycast is usually the better default for the front door, with DNS as the control plane.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>DNS load balancing</th><th>Anycast</th></tr></thead><tbody><tr><td>Decision point</td><td>Name resolution</td><td>Routing, per packet path</td></tr>
+<tr><td>Failover speed</td><td>Bounded by TTL</td><td>Bounded by BGP convergence</td></tr>
+<tr><td>Control</td><td>High: weights, geography, policy</td><td>Low: network decides</td></tr>
+<tr><td>Client caches</td><td>Can override your intent</td><td>Cannot override routing</td></tr>
+<tr><td>Skill required</td><td>DNS records and health checks</td><td>BGP, peering, prefix management</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Operating an anycast service</h2>
+<ul><li>Keep sites <strong>stateless or locality-aware</strong>; never assume a user stays on one site between connections.</li><li>Replicate data close enough that a user routed to a different site still finds their session or cache.</li><li>Monitor <em>per site</em>: traffic share, health, and latency, because a silent site is invisible in aggregate metrics.</li><li>Watch for traffic shifting unexpectedly after a routing change, which often signals a leak or a bad announcement.</li><li>Test failover by withdrawing a site deliberately and observing real client recovery.</li><li>Guard against prefix hijacks and route leaks with strict filters and RPKI validation where available.</li><li>Use consistent TLS certificates and configuration across sites so a failover does not also become a certificate error.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Anycast</strong> gives automatic proximity and fast failover but removes control over which site a client reaches.</li><li><strong>DNS routing</strong> gives policy control but failover is bounded by caching and TTLs.</li><li><strong>Shared prefixes</strong> spread load and absorb attacks but make traffic distribution depend on ISP topology.</li><li><strong>Connection pinning</strong> keeps TCP stable within a session but guarantees broken connections on failover.</li><li><strong>Running BGP</strong> unlocks global anycast but adds hijack, leak, and operational complexity risk.</li><li><strong>Wide replication</strong> improves locality but multiplies data consistency and cost problems.</li><li><strong>Per-site monitoring</strong> catches silent failures but is more expensive than aggregate dashboards.</li><li><strong>Combining anycast with DNS</strong> gives resilience and control but means operating two control planes.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is anycast in one sentence?</summary><div class="answer"><p>Several locations advertise the same IP address, and the routing system delivers each packet to just one of them, usually the nearest according to BGP. Users see a single address while traffic is served from many sites.</p></div></details>
+<details><summary>2. How does anycast differ from unicast and multicast?</summary><div class="answer"><p>Unicast has one address per endpoint, multicast delivers to a group that joined, and anycast shares one address across many locations with delivery to exactly one. Anycast reuses ordinary unicast packets; the difference is how many places announce the prefix.</p></div></details>
+<details><summary>3. Why is anycast often better than DNS for failover?</summary><div class="answer"><p>DNS failover waits for cached answers to expire, which can take minutes. Anycast failover waits for BGP convergence, which is also imperfect but is not gated by client or resolver caching, so traffic shifts once routes are withdrawn.</p></div></details>
+<details><summary>4. What role does BGP play?</summary><div class="answer"><p>BGP is how autonomous systems tell each other which prefixes they can reach. Anycast works because the same prefix is announced from multiple sites, and each network selects its own best path based on BGP attributes and policy.</p></div></details>
+<details><summary>5. What happens to open connections when an anycast site fails?</summary><div class="answer"><p>They break. Routing changes affect new packets, but an established TCP connection is tied to the failed site's state, so the client must reconnect and may land on a different site. Applications need retries and reconnect logic.</p></div></details>
+<details><summary>6. Why can anycast produce very uneven load?</summary><div class="answer"><p>Routing decisions are made per network, not per user, so a large ISP may send all of its subscribers to one site. Traffic distribution follows internet topology, which rarely matches population or capacity.</p></div></details>
+<details><summary>7. Where is anycast commonly used?</summary><div class="answer"><p>DNS resolvers and root servers, CDN edges, DDoS scrubbing networks, global API entry points, and internal DNS or NTP inside data centres. The common trait is a service that is replicated and does not depend on per-user server state.</p></div></details>
+<details><summary>8. What does anycast cost you operationally?</summary><div class="answer"><p>You need BGP expertise, peering or provider support, prefix filtering, and per-site monitoring. You also accept hijack and route-leak risk, plus a debugging model where the path depends on someone else's routing policy.</p></div></details>
+<details><summary>9. How do you handle sessions with anycast?</summary><div class="answer"><p>Keep them out of local server memory: use signed tokens or a replicated session store so a reconnect to another site still works. Design for the assumption that a user can change sites between connections.</p></div></details>
+<details><summary>10. Would you use anycast for a database?</summary><div class="answer"><p>Not for the primary. Anycast suits stateless or read-mostly services where any site can serve any request; a writable primary needs consistent routing to one location. Read-only replicas can sit behind anycast if staleness is acceptable.</p></div></details>
+<details><summary>11. How does anycast help against DDoS?</summary><div class="answer"><p>Attack traffic is spread across many announcing sites instead of concentrating on one address, and scrubbing capacity is distributed too. It does not remove the attack, but it raises the capacity required to saturate you and shortens the path to mitigation.</p></div></details>
+<details><summary>12. How would you combine anycast and DNS?</summary><div class="answer"><p>Use anycast for the global entry address so users reach a nearby point of presence automatically, and keep DNS or a global traffic manager above it for policy, weights, canaries, and residency rules.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming anycast migrates live connections; it only changes where new packets are routed.</li><li>Expecting anycast to distribute load evenly across sites regardless of ISP topology.</li><li>Running anycast without per-site monitoring, so a silent site keeps attracting traffic.</li><li>Forgetting that BGP convergence is not instant or uniform across the internet.</li><li>Putting a stateful primary behind anycast and expecting consistent writes.</li><li>Announcing prefixes without route filters, exposing yourself to hijacks and leaks.</li><li>Treating anycast as a replacement for a load balancer inside a region; it only chooses the site.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="dns-load-balancing.html"><span>← Previous</span><strong>DNS Load Balancing</strong></a><a class="next" href="what-is-an-api.html"><span>Next →</span><strong>What is an API?</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/anycast-routing">AlgoMaster — Anycast Routing</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

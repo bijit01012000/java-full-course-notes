@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Canary Releases — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 113 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Canary Releases</h1>
+    <p class="dek">Deployment Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/canary-releases">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why production still surprises you</a>
+<a href="#s2">How a canary release works</a>
+<a href="#s3">How traffic is split</a>
+<a href="#s4">Deciding whether a canary is healthy</a>
+<a href="#s5">Automation and progressive delivery</a>
+<a href="#s6">The traffic requirement</a>
+<a href="#s7">Mixed versions and data</a>
+<a href="#s8">Where canaries fall short</a>
+<a href="#s9">Canary compared with other strategies</a>
+<a href="#s10">Operating a canary well</a>
+<a href="#s11">Failure modes</a>
+<a href="#s12">When to choose a canary</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A canary release sends a small slice of real production traffic to the new version, compares its behavior against the old version, and widens the slice only while the evidence stays healthy.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Canary release</dt><dd>A rollout that exposes a small, controlled share of production traffic to a new version before promoting it to everyone.</dd></div><div class="term"><dt>Traffic split</dt><dd>The mechanism that routes a defined percentage or population of requests to the canary and the rest to the baseline.</dd></div><div class="term"><dt>Baseline (control)</dt><dd>The stable version whose metrics are compared against the canary during the ramp.</dd></div><div class="term"><dt>Guardrail metric</dt><dd>A signal such as error rate or latency that must not degrade, and whose breach aborts the rollout.</dd></div><div class="term"><dt>Business metric</dt><dd>A product-level measure such as conversion or order completion that reveals harm the technical metrics miss.</dd></div><div class="term"><dt>Progressive delivery</dt><dd>An automated controller that shifts traffic in steps and promotes or aborts based on measured results.</dd></div><div class="term"><dt>Sticky assignment</dt><dd>Routing a stable identifier such as user ID to a version so each user stays on one version for the whole session.</dd></div><div class="term"><dt>Canary analysis</dt><dd>The comparison step that decides whether the canary's metrics differ meaningfully from the baseline.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why production still surprises you</h2>
+<ul><li>Testing catches many defects, but staging cannot reproduce production's data distribution, dependency versions, or traffic shape.</li><li>Some bugs only appear under concurrency, large datasets, specific client versions, or particular tenants.</li><li>A single all-at-once release converts such a bug into a full outage before anyone can observe it.</li><li>A canary converts one large bet into a sequence of small bets, each with evidence before the next.</li><li>The mechanism is exposure control: keep the number of affected users small until behavior is proven.</li><li>It is a risk-reduction technique, not a testing replacement; a canary does not find bugs staging never could if the slice is too small.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>How a canary release works</h2>
+<ul><li>Deploy the new version alongside the current one, so both are running and both are reachable.</li><li>Route a small share of production traffic to the new version and the remainder to the baseline.</li><li>Compare error rate, latency, saturation, and business metrics between the two groups.</li><li>If the canary is healthy, increase its share in steps; if not, route everything back to the baseline.</li><li>Stop widening once the canary carries all traffic, then decommission the old version after a stability period.</li><li>The old version must stay deployed for the whole ramp, because it is both the comparison baseline and the escape route.</li></ul>
+
+<div class="flow"><span class="flow-step">Deploy canary alongside baseline</span><span class="flow-arrow">→</span><span class="flow-step">Send a small traffic share</span><span class="flow-arrow">→</span><span class="flow-step">Compare metrics per version</span><span class="flow-arrow">→</span><span class="flow-step">Promote one step or abort</span><span class="flow-arrow">→</span><span class="flow-step">Repeat until 100%</span><span class="flow-arrow">→</span><span class="flow-step">Retire the baseline</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>How traffic is split</h2>
+<ul><li>Load balancer or proxy weights split by request percentage and are the simplest mechanism.</li><li>A service mesh can split at the sidecar layer without changing application code.</li><li>Feature flags split inside the application by user attributes, which works even when infrastructure cannot route by version.</li><li>Header or cookie based routing lets testers and internal users reach the canary deliberately.</li><li>Splitting by stable identifier such as user ID gives consistent per-user experience across the ramp.</li><li>Whatever the mechanism, the split must be observable: you need to know which version served each request.</li></ul>
+
+
+<div class="note">Percentage-based splitting at the request level is easy but can flip a single user between versions; identifier-based splitting is usually the better default for user-facing changes.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Deciding whether a canary is healthy</h2>
+<ul><li>Compare the canary against the baseline over the same time window, not against yesterday's numbers.</li><li>Guardrail signals come first: error rate, latency percentiles, timeouts, and saturation.</li><li>Business signals come next: signup completion, checkout success, or whatever the feature is supposed to move.</li><li>Set thresholds before the rollout; deciding what counts as bad while watching the graph invites rationalization.</li><li>Require the canary to be no worse than the baseline within a tolerance, rather than merely below an absolute alert threshold.</li><li>Watch for both immediate spikes and slow drift over the observation window.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Signal</th><th>What it catches</th><th>Typical action</th></tr></thead><tbody><tr><td>5xx rate</td><td>Broken code paths, dependency failures</td><td>Abort immediately</td></tr>
+<tr><td>p95/p99 latency</td><td>Slow queries, contention, cold caches</td><td>Hold or abort</td></tr>
+<tr><td>CPU and queue depth</td><td>Saturation that has not yet surfaced as errors</td><td>Hold and investigate</td></tr>
+<tr><td>Business conversion</td><td>Silent product harm despite healthy technical metrics</td><td>Abort</td></tr>
+<tr><td>Restart or crash count</td><td>Instability under real load</td><td>Abort</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Automation and progressive delivery</h2>
+<ul><li>A controller can automate each step: shift traffic, wait, analyze, then promote or roll back.</li><li>Automation removes the human tendency to keep going because the rollout is already partly done.</li><li>The analysis step needs a defined comparison window long enough to collect a meaningful sample.</li><li>Automatic abort should be conservative; a noisy metric that flaps can terminate healthy releases.</li><li>Record every promotion decision with the metrics that justified it, so the process is auditable and improvable.</li><li>Human approval can remain at the largest step, where the remaining risk is highest.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>The traffic requirement</h2>
+<ul><li>A canary needs enough requests in the slice to distinguish a real regression from noise.</li><li>A service handling a few requests per minute cannot learn much from a small percentage of them within a reasonable window.</li><li>Low-traffic services can compensate by using a larger initial slice, a longer window, or splitting by user rather than request.</li><li>Rare failures are especially hard: a defect that affects a small fraction of requests may never appear in the sample.</li><li>Statistical significance depends on the baseline rate; a metric that is already noisy needs far more traffic to detect a change.</li><li>If you cannot measure the difference, a canary provides reassurance rather than evidence.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Mixed versions and data</h2>
+<ul><li>During the ramp, both versions run against the same database, caches, and queues.</li><li>Schema changes must be backward compatible, because the baseline still runs the old code.</li><li>A canary that writes data in a new format can break the baseline, so writes need compatible or dual formats.</li><li>Cache entries written by the canary may be read by the baseline unless keys are versioned.</li><li>Queue consumers of both versions may process the same message stream, so message contracts must be additive.</li><li>Rolling back traffic does not roll back data the canary already wrote, which is the most common surprise.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Where canaries fall short</h2>
+<ul><li>Background jobs, scheduled tasks, and queue consumers bypass request-level traffic splitting unless separately versioned.</li><li>Mobile and desktop clients cannot be traffic-split by the server once the new client is installed; server-side splits only cover API traffic.</li><li>Long-lived connections make percentage routing uneven, because a single connection carries many interactions.</li><li>Stateful services with per-user data may route users inconsistently if the split key is not stable.</li><li>A canary cannot detect problems that only appear at full traffic volume, such as a shared resource saturating.</li><li>It also cannot detect problems that require the new version to be the only version, such as a coordinated cutover.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Canary compared with other strategies</h2>
+<ul><li>Rolling replaces instances in batches with no traffic control; canary controls exposure deliberately.</li><li>Blue-green switches everything at one point but recovers faster; canary limits blast radius but ramps over time.</li><li>Shadow mirrors traffic without serving responses; canary actually serves users from the new version.</li><li>A canary is effectively a rolling deploy plus traffic weighting plus an analysis gate.</li><li>Feature flags split by user attributes rather than by infrastructure, and can complement a canary.</li><li>Many teams combine them: rolling to get the code onto the fleet, canary to ramp traffic, flags to control features.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Exposure</th><th>Rollback</th><th>Needs</th></tr></thead><tbody><tr><td>Recreate</td><td>Everyone at once</td><td>Second outage</td><td>Nothing extra</td></tr>
+<tr><td>Rolling</td><td>Grows by batch</td><td>Slow reverse rollout</td><td>Health checks</td></tr>
+<tr><td>Blue-green</td><td>Everyone at cutover</td><td>Seconds</td><td>Duplicate environment</td></tr>
+<tr><td>Canary</td><td>Small then growing</td><td>Fast, partial</td><td>Traffic split and analysis</td></tr>
+<tr><td>Shadow</td><td>No users</td><td>N/A</td><td>Side-effect isolation</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Operating a canary well</h2>
+<ul><li>Start small enough that a catastrophic bug affects few users, but large enough to produce signal.</li><li>Define the ramp schedule and the abort conditions in the same document as the release.</li><li>Assign an owner who is watching during the ramp; an unattended canary is just a slow full rollout.</li><li>Keep the old version's capacity intact so aborting does not create a capacity problem.</li><li>After promotion, keep monitoring until the canary population is representative of all traffic.</li><li>Review every abort: the gap in detection is a test or monitoring improvement waiting to be written.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes</h2>
+<ul><li><strong>Noise mistaken for signal:</strong> aborting on normal variance, which trains teams to ignore the canary.</li><li><strong>Signal lost in aggregate:</strong> dashboards not split by version, so the canary is invisible.</li><li><strong>Session flapping:</strong> request-level splits move a user between versions mid-session.</li><li><strong>Incomplete coverage:</strong> only HTTP traffic is split while workers and cron jobs run the new code everywhere.</li><li><strong>Data contamination:</strong> the canary writes incompatible data that the baseline then reads.</li><li><strong>Abort leaves residue:</strong> traffic returns to the baseline but new-version sessions and cached values persist.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When to choose a canary</h2>
+<ul><li>Choose it for critical services with enough traffic and high-quality per-version metrics.</li><li>Choose it when the cost of a bad release is large but a duplicate full environment is not justified.</li><li>Avoid it for low-traffic services where the sample cannot support a decision.</li><li>Avoid it when the change requires all instances to move together.</li><li>Avoid it when metrics cannot separate the two versions, because the analysis step is the whole point.</li><li>Pair it with feature flags when the risky part is product behavior rather than infrastructure.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Canary</strong> bounds the blast radius of a bad release but requires traffic-splitting infrastructure and per-version analysis.</li><li><strong>A small initial slice</strong> protects users but may never collect enough data to detect a real regression.</li><li><strong>A large initial slice</strong> produces signal quickly but exposes more users to a defect.</li><li><strong>Automated promotion</strong> removes human optimism bias but can promote confidently on noisy or incomplete metrics.</li><li><strong>Sticky per-user routing</strong> keeps experience consistent but reduces the effective sample and slows the ramp.</li><li><strong>Long observation windows</strong> catch slow-burn problems but delay the release and lengthen the mixed-version period.</li><li><strong>Aggressive guardrails</strong> protect users but produce false aborts that erode trust in the process.</li><li><strong>Canary plus feature flags</strong> gives fine control over both code and behavior but multiplies the configuration surface to reason about.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a canary release?</summary><div class="answer"><p>A rollout that sends a small share of production traffic to the new version while the rest continues on the current version. Its metrics are compared against the baseline, and traffic is widened only while it stays healthy. It reduces the number of users a defect can affect before detection.</p></div></details>
+<details><summary>2. Where does the name come from?</summary><div class="answer"><p>Miners carried canaries into coal mines because the birds reacted to dangerous gas before the miners did. The canary version is the early warning: a small, sensitive population whose distress signals a problem before everyone is exposed.</p></div></details>
+<details><summary>3. How is traffic split in practice?</summary><div class="answer"><p>By load balancer weights, service mesh routing, a reverse proxy rule, or in-application feature flags keyed on user attributes. Percentage splits are simplest, while identifier-based splits keep a user on one version. The requirement is that the split is observable and reversible.</p></div></details>
+<details><summary>4. Which metrics decide promotion?</summary><div class="answer"><p>Guardrail metrics such as error rate, latency percentiles, timeout rate, and saturation come first, then business metrics such as conversion or checkout completion. Each must be compared against the baseline over the same window. Thresholds should be defined before the ramp starts.</p></div></details>
+<details><summary>5. Why is sticky routing usually preferred?</summary><div class="answer"><p>Request-level splitting can serve one user from both versions on consecutive requests, producing inconsistent UI or API behavior and confusing metrics. Routing by a stable identifier such as user ID keeps each session coherent while still splitting the population. The cost is a somewhat smaller effective sample.</p></div></details>
+<details><summary>6. Why do low-traffic services struggle with canaries?</summary><div class="answer"><p>Because a small percentage of a small request rate yields too few samples to distinguish a regression from noise within a practical window. Such services need a larger initial slice, a longer window, or user-level rather than request-level splitting. Otherwise the canary offers comfort rather than evidence.</p></div></details>
+<details><summary>7. What does a canary miss entirely?</summary><div class="answer"><p>Anything that does not flow through the split path: background workers, cron jobs, and queue consumers may run the new code everywhere. Problems that only appear at full traffic volume or under a coordinated cutover also escape detection. The split covers request-serving paths, not the whole system.</p></div></details>
+<details><summary>8. What happens to data written while the canary is live?</summary><div class="answer"><p>It stays. Rolling traffic back does not undo writes, cache entries, or messages produced by the new version. If the new version wrote an incompatible format, the baseline may fail after the abort, which is why schema and message compatibility are prerequisites rather than follow-ups.</p></div></details>
+<details><summary>9. How do you avoid false aborts?</summary><div class="answer"><p>Compare against a baseline over the same window, use metrics with low variance, require a meaningful effect size rather than any difference, and set abort conditions in advance. Where possible require the breach to persist across multiple checks. Constant false aborts teach the team to ignore the canary.</p></div></details>
+<details><summary>10. Canary versus blue-green?</summary><div class="answer"><p>Blue-green moves all traffic at one cutover and optimizes for instant rollback. Canary moves a small share first and optimizes for small blast radius at the cost of a longer ramp. Blue-green with weighted routing blurs the two, keeping a full standby while ramping gradually.</p></div></details>
+<details><summary>11. Canary versus shadow?</summary><div class="answer"><p>A shadow deployment sends copies of requests and discards responses, so no user is ever affected but no user validates the new behavior either. A canary actually serves real users from the new version, which tests the full path including writes and client behavior. Shadow is safer; canary is more conclusive.</p></div></details>
+<details><summary>12. What makes a canary rollout operationally safe?</summary><div class="answer"><p>Predefined ramp steps and abort thresholds, per-version dashboards, an owner watching the ramp, and the baseline kept at full capacity so aborting does not cause a capacity shortfall. Feature flags can then gate the product behavior separately from the infrastructure rollout.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Declaring success without splitting dashboards by version, so the canary's failures hide inside aggregate numbers.</li><li>Running a canary on a service whose traffic is too low for any metric difference to be meaningful.</li><li>Splitting per request so a single user sees both versions mid-session.</li><li>Forgetting background workers, cron jobs, and queue consumers that never pass through the traffic split.</li><li>Letting the canary write an incompatible data format that breaks the baseline after rollback.</li><li>Aborting on ordinary variance and then ignoring the canary because it cries wolf.</li><li>Shifting traffic to 100% and immediately deleting the baseline before slow-burn problems appear.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="blue-green-deployments.html"><span>← Previous</span><strong>Blue-Green Deployments</strong></a><a class="next" href="feature-flags.html"><span>Next →</span><strong>Feature Flags</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/canary-releases">AlgoMaster — Canary Releases</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

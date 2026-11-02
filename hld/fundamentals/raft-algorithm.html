@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Raft Algorithm — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 83 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Raft Algorithm</h1>
+    <p class="dek">Distributed System Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/raft-algorithm">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why Raft exists</a>
+<a href="#s2">The replicated log model</a>
+<a href="#s3">Roles, terms, and authority</a>
+<a href="#s4">Leader election</a>
+<a href="#s5">Log replication</a>
+<a href="#s6">The safety rules that make it correct</a>
+<a href="#s7">Failures and partitions</a>
+<a href="#s8">Membership changes</a>
+<a href="#s9">Snapshots and log compaction</a>
+<a href="#s10">Clients and read consistency</a>
+<a href="#s11">Performance and tuning</a>
+<a href="#s12">Raft versus Paxos and other options</a>
+<a href="#s13">Operational pitfalls</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Raft keeps a replicated log identical across a group of servers by electing one leader per term, appending entries through it, and committing only what a majority has stored — consensus designed to be explainable.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Consensus</dt><dd>Agreement among a set of servers on a single sequence of values despite crashes and network partitions.</dd></div><div class="term"><dt>Replicated state machine</dt><dd>A deterministic service that reaches the same state on every replica by applying the same commands in the same order.</dd></div><div class="term"><dt>Term</dt><dd>A monotonically increasing logical epoch; each term has at most one leader and stale terms are rejected.</dd></div><div class="term"><dt>Leader election</dt><dd>The process where a candidate requests votes and becomes leader after winning a majority.</dd></div><div class="term"><dt>Election timeout</dt><dd>A randomised wait after which a follower that heard no leader starts an election.</dd></div><div class="term"><dt>Log matching property</dt><dd>If two logs contain an entry with the same index and term, then all preceding entries are identical.</dd></div><div class="term"><dt>Commit index</dt><dd>The highest log index known to be stored on a majority; entries up to it will never be lost.</dd></div><div class="term"><dt>Quorum</dt><dd>A majority of the cluster; any two quorums overlap, which is what makes agreement possible.</dd></div><div class="term"><dt>Joint consensus</dt><dd>A two-phase configuration change that requires majorities of both the old and new member sets.</dd></div><div class="term"><dt>Snapshot</dt><dd>A compact image of state at a log index, used to discard old entries and to bring new or lagging followers up to date.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why Raft exists</h2>
+<p class="lede">Replication without agreement gives you copies that disagree. Agreement without a replicated log gives you a value, not a history. Raft supplies both with a structure people can follow.</p>
+<ul><li>Raft is a <strong>consensus algorithm</strong> for a replicated log, not a general-purpose database.</li><li>It was designed for <strong>understandability</strong>: leader election, log replication, and safety are separated into distinct mechanisms.</li><li>It targets crash and partition faults, not Byzantine faults; it assumes nodes fail by stopping or going silent.</li><li>Paxos solves the same problem but is notoriously hard to implement and to reason about operationally.</li><li>The output is a single agreed order of commands, so every replica reaches the same state.</li><li>Correctness is guaranteed only while a majority of the cluster is reachable; a minority cannot make progress.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The replicated log model</h2>
+<ul><li>Each server stores an ordered log of commands; index 1, 2, 3 and so on.</li><li>Every replica applies committed commands <strong>in index order</strong>, so identical logs imply identical state.</li><li>The log is the source of truth; the state machine is just a fold over it.</li><li>Commands must be <strong>deterministic</strong> — anything random or time-dependent belongs in the command payload, not in the apply step.</li><li>A client submits a command to the leader, which assigns it the next index and replicates it.</li><li>Once a command is committed it is durable in the sense that some future leader will contain it.</li><li>This model underlies etcd, Consul's KV store, and the per-range replication in CockroachDB.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Roles, terms, and authority</h2>
+<ul><li>A server is a <strong>follower</strong>, a <strong>candidate</strong>, or the <strong>leader</strong> at any moment.</li><li>Time is divided into <strong>terms</strong>; each term begins with an election and has at most one leader.</li><li>Every message carries a term, and a server that sees a higher term immediately steps down to follower.</li><li>A server votes at most once per term, which is what prevents two leaders in the same term.</li><li>Only the leader accepts client writes; followers redirect clients or forward the request.</li><li>Terms act as a logical clock that orders leadership changes without needing synchronised wall clocks.</li><li>A leader that loses contact with a majority keeps believing it leads until it hears a higher term — hence the need for leases and fencing.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Leader election</h2>
+<p class="lede">A follower that hears nothing from a leader for its election timeout becomes a candidate. Randomisation is what breaks ties.</p>
+<ul><li>The candidate increments the term, votes for itself, and sends <code>RequestVote</code> to all peers.</li><li>It wins with votes from a <strong>majority</strong> and immediately starts sending heartbeats to assert leadership.</li><li>Each election timeout is randomised so simultaneous candidates rarely split the vote the same way twice.</li><li>A split vote means no majority; everyone times out again and a different random delay resolves it.</li><li>A candidate must have a log at least as up to date as any voter's, so a server missing committed entries cannot win.</li><li>Pre-vote extensions ask peers whether they would vote before incrementing the term, preventing a partitioned node from disrupting a healthy leader.</li><li>Election timeouts must be long relative to network round trips, or elections trigger constantly under load.</li></ul>
+
+<div class="flow"><span class="flow-step">Follower misses heartbeats past its election timeout</span><span class="flow-arrow">→</span><span class="flow-step">Increment term, become candidate, vote for self</span><span class="flow-arrow">→</span><span class="flow-step">Request votes from all peers</span><span class="flow-arrow">→</span><span class="flow-step">Majority granted? become leader and send heartbeats</span><span class="flow-arrow">→</span><span class="flow-step">No majority? wait a new random timeout and retry</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Log replication</h2>
+<ul><li>The leader appends the client command at the next index and sends <code>AppendEntries</code> to followers.</li><li>Each request carries the previous entry's index and term, which acts as a <strong>consistency check</strong>.</li><li>A follower that lacks the preceding entry rejects the request; the leader decrements its next index and retries.</li><li>When the check passes the follower appends the entry, fsyncs it, and acknowledges.</li><li>Once a majority has stored an entry, the leader advances its <strong>commit index</strong> and applies it.</li><li>Followers learn the commit index from later <code>AppendEntries</code> messages, so followers commit slightly later than the leader.</li><li>Retries plus the consistency check repair divergent suffixes: the leader overwrites follower entries that never committed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>The safety rules that make it correct</h2>
+<ul><li><strong>Election restriction:</strong> a candidate needs the most up-to-date log, so committed entries are never lost by electing a lagging node.</li><li><strong>Log matching:</strong> same index and term implies identical prefixes, which lets the leader trust the consistency check.</li><li><strong>Leader completeness:</strong> a leader holds every entry committed in previous terms.</li><li><strong>Commit only current-term entries by counting replicas:</strong> older-term entries become committed indirectly once a current-term entry commits.</li><li>A leader never overwrites its own log; it only appends, and only followers truncate conflicting suffixes.</li><li>State transitions are applied to the state machine only after commit, never on append.</li><li>These rules are why Raft does not need the complicated recovery logic that makes Paxos implementations diverge.</li></ul>
+
+
+<div class="note">The subtle rule is the current-term commit restriction. Counting replicas for an old-term entry can commit an entry that a future leader might still overwrite.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Failures and partitions</h2>
+<ul><li>A leader crash causes a timeout, an election, and a new leader that repairs any half-replicated suffix.</li><li>A leader isolated in a minority keeps accepting requests but cannot commit them; it must step down or clients must time out.</li><li>The majority side elects a new leader and continues; this is exactly the split-brain scenario quorums are designed to survive.</li><li>Uncommitted entries on the isolated leader are discarded when it rejoins, so clients must treat an unacknowledged write as unknown.</li><li>A cluster of <code>2f + 1</code> nodes tolerates <code>f</code> failures; even-sized clusters add cost without extra tolerance.</li><li>Losing a majority stops all writes and, depending on read policy, may stop reads too.</li><li>Slow disks and slow followers translate directly into commit latency, because the leader waits for a quorum of acknowledgements.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Cluster size</th><th>Majority</th><th>Failures tolerated</th></tr></thead><tbody><tr><td>3</td><td>2</td><td>1</td></tr>
+<tr><td>4</td><td>3</td><td>1</td></tr>
+<tr><td>5</td><td>3</td><td>2</td></tr>
+<tr><td>7</td><td>4</td><td>3</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Membership changes</h2>
+<ul><li>You cannot simply edit a member list: different nodes would apply different quorum rules at the same time and could elect two leaders.</li><li>The standard solution is <strong>joint consensus</strong>: first commit a configuration requiring majorities of both old and new sets, then commit the new configuration alone.</li><li>Single-server changes are a simpler special case and are safe when only one change is in flight at a time.</li><li>The leader should step down once the new configuration no longer includes it, after committing the change.</li><li>New members usually join as non-voting learners and catch up before they count toward quorum.</li><li>Raft does not shard by itself: large datasets use many independent Raft groups, one per shard or range.</li><li>Membership changes are rare, slow, and risky — treat them as an operational procedure, not a routine write.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Snapshots and log compaction</h2>
+<ul><li>An unbounded log eventually exceeds disk and slows restart, so committed prefixes are discarded.</li><li>A <strong>snapshot</strong> captures the state machine at a specific index, and the log before that index can be removed.</li><li>A follower that has fallen behind the leader's retained log receives an <code>InstallSnapshot</code> instead of entries.</li><li>Snapshotting can be expensive; copy-on-write or incremental snapshots avoid stalling writes.</li><li>Snapshot transfer competes with replication traffic, so throttle it to protect leader latency.</li><li>Snapshot metadata must record the last included index and term so the log can continue consistently.</li><li>Keep enough log after the snapshot to serve normal follower catch-up without shipping a full image.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Clients and read consistency</h2>
+<ul><li>Writes go to the leader; a follower returns a redirect or forwards the request internally.</li><li>A write is only acknowledged as successful after commit, not after the local append.</li><li>Clients must retry with a <strong>request identifier</strong> so the state machine can deduplicate and avoid applying a command twice.</li><li>Reading from the leader's state machine directly can return stale data if the leader has been deposed but does not know it.</li><li><strong>ReadIndex</strong> confirms leadership with a heartbeat quorum, waits for the applied index to catch up, then serves locally.</li><li><strong>Leader leases</strong> skip the round trip but depend on bounded clock drift between nodes.</li><li>Routing reads through the log is the simplest correct option and the slowest; choose per endpoint based on staleness tolerance.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Performance and tuning</h2>
+<ul><li>Throughput is bounded by the leader and by the slowest quorum member, not by the fastest follower.</li><li>Batch and pipeline <code>AppendEntries</code> requests so one fsync covers many entries.</li><li>Group commit on followers matters as much as on the leader; disk fsync dominates commit latency.</li><li>Use fast local disks for the log; network storage adds jitter that shows up as election instability.</li><li>Spread the cluster across failure domains while keeping quorum latency low — geo-distributed majorities pay round-trip cost on every commit.</li><li>Keep the state machine apply path off the replication critical path so slow applies do not block acknowledgements.</li><li>Monitor leader changes, commit latency, follower match index lag, and snapshot duration as first-class metrics.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Raft versus Paxos and other options</h2>
+<ul><li>Multi-Paxos and Raft provide the same guarantee; Raft constrains the design (strong leader, ordered log) to make implementation tractable.</li><li>Zab, used by ZooKeeper, shares the leader-plus-log structure with different recovery details.</li><li>Raft is a good fit for metadata, configuration, leader election, and small strongly consistent datasets.</li><li>It is a poor fit for high-volume data that needs sharding; use many Raft groups or a system built on them.</li><li>CRDTs avoid consensus by accepting concurrent merges, but they cannot enforce global invariants such as uniqueness.</li><li>Gossip spreads membership and health cheaply but cannot order writes or commit transactions.</li><li>Choose Raft when you need a single agreed order and can afford a majority round trip per write.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Guarantee</th><th>Typical use</th></tr></thead><tbody><tr><td>Raft / Paxos</td><td>Linearizable agreed order</td><td>Metadata, leases, config, small state</td></tr>
+<tr><td>Gossip</td><td>Eventual dissemination</td><td>Membership, health, cluster state</td></tr>
+<tr><td>CRDT</td><td>Strong eventual consistency</td><td>Counters, sets, collaborative text</td></tr>
+<tr><td>2PC</td><td>Atomic commit across participants</td><td>Transactions, with a blocking coordinator</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Operational pitfalls</h2>
+<ul><li>Deploying an even number of voters: more machines, no additional failure tolerance.</li><li>Running Raft across regions and then blaming the algorithm for commit latency.</li><li>Using wall-clock time as the ordering mechanism instead of terms and log indexes.</li><li>Forgetting client-side deduplication, so retries apply a command twice.</li><li>Changing membership by editing configuration files on live nodes instead of using the protocol.</li><li>Ignoring snapshot behaviour until the log fills the disk and the node cannot restart.</li><li>Treating a leader as authoritative without leases or fencing, which reintroduces split-brain at the storage layer.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Strong consistency</strong> makes every write a majority round trip, so availability and latency depend on quorum health.</li><li><strong>A single leader</strong> simplifies ordering but caps write throughput at one node and one disk.</li><li><strong>Understandability</strong> comes from constraining the design, which makes Raft less flexible than general Paxos variants.</li><li><strong>More voters</strong> increase durability but widen the quorum and slow every commit.</li><li><strong>Randomised election timeouts</strong> resolve ties quickly but can produce needless elections under heavy load or slow networks.</li><li><strong>Snapshots</strong> bound log growth but add CPU, I/O, and a large transfer that competes with replication.</li><li><strong>Leader leases</strong> make reads fast but rely on bounded clock drift and correct lease handling.</li><li><strong>Joint consensus</strong> makes membership safe but requires two commits and careful orchestration.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does Raft solve?</summary><div class="answer"><p>It keeps a replicated log identical across servers so every replica applies the same commands in the same order. That gives a linearizable, fault-tolerant state machine as long as a majority of the cluster is available.</p></div></details>
+<details><summary>2. Why is Raft easier to understand than Paxos?</summary><div class="answer"><p>Raft separates leader election, log replication, and safety into distinct mechanisms with a strong leader and an ordered log. Paxos describes agreement on single values and leaves much of the multi-value, recovery, and membership design to the implementer.</p></div></details>
+<details><summary>3. Walk through leader election.</summary><div class="answer"><p>A follower that hears no leader past a randomised election timeout increments the term, votes for itself, and requests votes. A majority elects it, and it starts sending heartbeats. Split votes are resolved by new random timeouts on the next attempt.</p></div></details>
+<details><summary>4. How does Raft repair a divergent log?</summary><div class="answer"><p>The leader sends the previous entry's index and term with each append. A follower missing that prefix rejects the request, the leader backs up its next index, and retries until it finds the match point. The follower then truncates its conflicting suffix and accepts the leader's entries.</p></div></details>
+<details><summary>5. When is an entry committed?</summary><div class="answer"><p>When it is stored on a majority and belongs to the leader's current term. Entries from earlier terms become committed indirectly once a current-term entry commits, because the leader only advances its commit index to that point.</p></div></details>
+<details><summary>6. Why can only a current-term entry be committed by counting replicas?</summary><div class="answer"><p>An old-term entry replicated on a majority may still be overwritten by a future leader that lacks it. Committing a current-term entry forces the whole prefix to be committed, so the older entries become safe through that single event.</p></div></details>
+<details><summary>7. What happens during a network partition?</summary><div class="answer"><p>The majority side elects a new leader and continues. A leader stranded in the minority cannot commit anything and should step down. When the partition heals, the stale leader discards uncommitted entries and follows the new leader.</p></div></details>
+<details><summary>8. How many failures can a five-node cluster tolerate?</summary><div class="answer"><p>Two. Quorum is three, so the cluster keeps operating while three of five nodes are reachable. A four-node cluster tolerates only one, which is why even-sized voter sets are wasteful.</p></div></details>
+<details><summary>9. How do you serve a consistent read without writing to the log?</summary><div class="answer"><p>Use ReadIndex: confirm leadership by getting heartbeat acknowledgements from a quorum, wait until the state machine has applied up to the commit index, then answer locally. Leader leases achieve the same with less latency but rely on bounded clock drift.</p></div></details>
+<details><summary>10. How are cluster membership changes made safely?</summary><div class="answer"><p>Use joint consensus: commit a configuration that requires majorities of both old and new sets, then commit the new configuration alone. Adding one voter at a time, and letting new members catch up as non-voting learners, avoids overlapping quorum changes.</p></div></details>
+<details><summary>11. Why are snapshots necessary?</summary><div class="answer"><p>Committed log entries accumulate indefinitely, and replaying a long log makes restarts slow. A snapshot captures state at an index so earlier entries can be discarded, and it lets a lagging follower catch up without shipping the entire history.</p></div></details>
+<details><summary>12. When would you not use Raft?</summary><div class="answer"><p>When you need to store high write volumes across many machines, when concurrent merges are acceptable, or when a global order is unnecessary. In those cases use sharded Raft groups, CRDTs, or gossip rather than one cluster-wide consensus group.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Thinking Raft tolerates Byzantine faults or malicious nodes.</li><li>Assuming a leader is always right about its own leadership.</li><li>Committing entries from previous terms by counting replicas instead of waiting for a current-term commit.</li><li>Expecting writes to survive when a majority of the cluster is unreachable.</li><li>Adding voters by editing configuration instead of using joint consensus or single-server changes.</li><li>Ignoring snapshot size until the log fills the disk.</li><li>Leaving client retries undeduplicated, so a command is applied twice.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="heartbeats.html"><span>← Previous</span><strong>Heartbeats</strong></a><a class="next" href="gossip-protocol.html"><span>Next →</span><strong>Gossip Protocol</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/raft-algorithm">AlgoMaster — Raft Algorithm</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

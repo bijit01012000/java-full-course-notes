@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Distributed File Systems — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 62 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Distributed File Systems</h1>
+    <p class="dek">Storage Systems · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/distributed-file-systems">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with a single file system</a>
+<a href="#s2">What a distributed file system is</a>
+<a href="#s3">Architecture: metadata plane and data plane</a>
+<a href="#s4">How a large file is stored</a>
+<a href="#s5">Read and write paths</a>
+<a href="#s6">Fault tolerance</a>
+<a href="#s7">Metadata and coordination limits</a>
+<a href="#s8">Consistency model</a>
+<a href="#s9">Performance characteristics</a>
+<a href="#s10">Scaling and rebalancing</a>
+<a href="#s11">Limitations and failure modes</a>
+<a href="#s12">DFS vs block and object storage</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A distributed file system (DFS) presents one familiar namespace — <code>/logs/2026/05/24/app.log</code> — while the bytes behind that path are chunked and replicated across many machines.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Distributed file system</dt><dd>A file system whose data and metadata are spread across multiple machines but exposed through one namespace.</dd></div><div class="term"><dt>Namespace</dt><dd>The logical directory and file tree that clients see, independent of where the data physically lives.</dd></div><div class="term"><dt>Metadata server</dt><dd>The component that holds the namespace, file-to-chunk mappings, and chunk locations; the namenode in HDFS.</dd></div><div class="term"><dt>Data node</dt><dd>A worker machine that stores chunks and serves reads and writes for them.</dd></div><div class="term"><dt>Chunk</dt><dd>A large fixed-size slice of a file, stored and replicated independently across data nodes.</dd></div><div class="term"><dt>Replication factor</dt><dd>How many copies of each chunk the system keeps, usually three in HDFS-style designs.</dd></div><div class="term"><dt>Data locality</dt><dd>Scheduling computation on nodes that already hold the needed chunks, so data does not cross the network.</dd></div><div class="term"><dt>Block report</dt><dd>A periodic message from a data node listing the chunks it holds, which the metadata server uses to track placement.</dd></div><div class="term"><dt>Rebalancing</dt><dd>Moving chunks between nodes to even out utilization or restore the replication factor after a failure.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with a single file system</h2>
+<ul><li>A local file system is bounded by one machine's disks, CPU, and network interfaces.</li><li>A file larger than any single disk cannot be stored at all.</li><li>Aggregate throughput is capped by one server's I/O path.</li><li>Losing that machine loses the data unless something else copies it.</li><li>Adding capacity means replacing disks or migrating to a bigger machine.</li><li>Analytics jobs that read the same large dataset from many machines create a hot spot on one server.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a distributed file system is</h2>
+<ul><li>A DFS manages files across many machines while presenting one logical namespace.</li><li>Applications keep using ordinary paths; the split into pieces is invisible.</li><li>A single path may map to pieces stored on dozens of servers.</li><li>The DFS tracks where pieces live, reassembles them on read, and checks them for corruption.</li><li>It also keeps data available when machines fail, typically by replicating pieces.</li><li>The design goal is capacity and throughput at scale, not low per-operation latency.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Architecture: metadata plane and data plane</h2>
+<ul><li>A <strong>metadata server</strong> owns the namespace: directories, file names, permissions, and the mapping from file to chunks.</li><li>It also tracks which data nodes hold each chunk, built from node registrations and block reports.</li><li>Clients ask the metadata server where a file's chunks live, then talk to data nodes directly.</li><li>Data nodes store chunks on local disks and serve read and write requests.</li><li>The metadata server is not in the data path, so bulk traffic bypasses it.</li><li>That separation is what lets a modest metadata service coordinate enormous data throughput.</li><li>It also makes the metadata server the coordination point that must be made highly available.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Plane</th><th>Holds</th><th>Scales with</th></tr></thead><tbody><tr><td>Metadata</td><td>Namespace, permissions, chunk map</td><td>Number of files and chunks</td></tr>
+<tr><td>Data</td><td>Chunk contents on local disks</td><td>Bytes stored and read</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>How a large file is stored</h2>
+<ul><li>Files are split into large fixed-size chunks rather than whole-file objects or tiny blocks.</li><li>Large chunks keep the metadata small: one entry per chunk instead of per small block.</li><li>Each chunk is placed on a data node and replicated to several others.</li><li>The default placement spreads replicas across machines and racks so one rack failure is survivable.</li><li>A file's chunk order is recorded in metadata, so reads can reconstruct the byte stream.</li><li>Chunk size is a trade-off: bigger chunks mean less metadata but coarser load balancing and more wasted space for small files.</li></ul>
+
+<div class="flow"><span class="flow-step">Client asks the metadata server to create a file</span><span class="flow-arrow">→</span><span class="flow-step">Metadata server allocates a new chunk and chooses data nodes</span><span class="flow-arrow">→</span><span class="flow-step">Client streams data to the first node</span><span class="flow-arrow">→</span><span class="flow-step">That node forwards the pipeline to the next replica</span><span class="flow-arrow">→</span><span class="flow-step">Acknowledgements flow back once replicas are written</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Read and write paths</h2>
+<ul><li><strong>Read:</strong> the client asks for chunk locations, then reads the nearest replica directly.</li><li>If a read fails or a checksum mismatches, the client retries another replica and reports the bad one.</li><li>Writes normally flow through a pipeline of data nodes so each replica is written in order.</li><li>Replication happens during the write, not as a later background copy, for newly written chunks.</li><li>A client that fails mid-write leaves an incomplete chunk that must be cleaned up.</li><li>Files are typically append-oriented; random in-place overwrite is not the design centre.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Fault tolerance</h2>
+<ul><li>Hardware failure is treated as normal, not exceptional: disks and nodes fail continuously at scale.</li><li>Replication is the primary defense; losing one node does not lose a chunk.</li><li>Data nodes send periodic heartbeats; missing heartbeats mark a node dead.</li><li>The metadata server then re-replicates the missing chunks onto healthy nodes.</li><li>Checksums detect silent corruption, and a corrupt replica is replaced from a good one.</li><li>Detecting and repairing is continuous background work, which is why cluster health needs monitoring.</li><li>The metadata server itself must be replicated or backed by a standby, or it becomes the single point of failure.</li></ul>
+
+<div class="flow"><span class="flow-step">Data node stops sending heartbeats</span><span class="flow-arrow">→</span><span class="flow-step">Metadata server marks it dead after a timeout</span><span class="flow-arrow">→</span><span class="flow-step">Chunks that were only on that node drop below the replication factor</span><span class="flow-arrow">→</span><span class="flow-step">New replicas are copied from surviving copies</span><span class="flow-arrow">→</span><span class="flow-step">Cluster returns to full replication</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Metadata and coordination limits</h2>
+<ul><li>All namespace operations go through the metadata server, so it caps file and directory operation rates.</li><li>Chunk location state is held in memory, which bounds how many chunks a single metadata server can track.</li><li>A single metadata server is a single point of failure unless a standby or replicated design is used.</li><li>Failover to a standby requires shared or replicated edit logs so the namespace is not lost.</li><li>Client-side caching of chunk locations reduces metadata round trips but can go stale.</li><li>Very large clusters often shard the namespace across multiple metadata services.</li><li>This is the classic tension in DFS design: simple central metadata versus scale and availability.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Consistency model</h2>
+<ul><li>A DFS usually gives strong consistency for namespace operations such as create, rename, and delete.</li><li>File content consistency is weaker for concurrent writers to the same file.</li><li>The common model guarantees that once a write is acknowledged, readers see those bytes, but not a global ordering across independent writers.</li><li>Append-oriented workloads with one writer per file avoid most conflicts.</li><li>Many analytics systems assume immutable or append-only files, which sidesteps concurrency entirely.</li><li>Leases coordinate who may write a chunk and expire if the writer stalls.</li><li>Design questions should ask who writes a file and whether concurrent mutation is needed at all.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Performance characteristics</h2>
+<ul><li>A DFS optimizes for high aggregate throughput on large sequential reads, not low latency per operation.</li><li>Reading many chunks in parallel from many nodes multiplies bandwidth.</li><li>Data locality lets computation run where the data already is, avoiding network transfer.</li><li>Small random I/O is a poor fit because each operation pays metadata and network overhead.</li><li>Many small files stress the metadata server far more than a few large files holding the same bytes.</li><li>Network topology awareness matters: rack-local reads are cheaper than cross-rack reads.</li><li>Caching and short-circuit reads help, but the design still favours streaming access.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Scaling and rebalancing</h2>
+<ul><li>Capacity grows by adding data nodes; the system rebalances chunks onto them.</li><li>Throughput grows with node count because reads are served in parallel.</li><li>Decommissioning a node drains its chunks to other nodes before removal.</li><li>Rebalancing consumes network and disk bandwidth, so it is throttled and scheduled.</li><li>Skewed placement or hot files create hot nodes even when total capacity is fine.</li><li>The metadata tier does not scale as easily as the data tier, so it usually needs attention first.</li><li>Cluster growth is an operational process, not just a hardware purchase.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Limitations and failure modes</h2>
+<ul><li>The small-file problem: millions of tiny files bloat metadata and overwhelm the namespace server.</li><li>Low-latency random updates are slow compared with a local disk or block volume.</li><li>A metadata server outage blocks all namespace operations even if data nodes are healthy.</li><li>Under-replication after a large failure creates a window where another failure loses data.</li><li>Slow or flapping nodes cause repeated re-replication and constant background traffic.</li><li>Misconfigured replication across racks can put all copies in one failure domain.</li><li>Clients that cache stale chunk locations retry unnecessarily and add load.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>DFS vs block and object storage</h2>
+<ul><li>Block storage gives one server a fast disk; a DFS gives many servers one shared namespace.</li><li>Object storage offers a flat key space with high durability and HTTP access, without a real directory tree or in-place writes.</li><li>A DFS supports hierarchical paths, permissions, and append semantics that object stores do not natively provide.</li><li>Object storage usually wins for cheap archival and serving media over HTTP.</li><li>A DFS wins when analytics jobs need to read huge files in parallel with locality.</li><li>A shared file system is also the practical answer when several servers must read and write the same files.</li><li>Choose by access pattern: random low-latency, shared hierarchical files, or cheap durable objects.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Need</th><th>Best fit</th></tr></thead><tbody><tr><td>Low-latency random I/O for one server</td><td>Block storage</td></tr>
+<tr><td>One hierarchical namespace shared by many servers</td><td>Distributed file system</td></tr>
+<tr><td>Cheap durable storage of large objects over HTTP</td><td>Object storage</td></tr>
+<tr><td>Parallel analytics over huge files with locality</td><td>Distributed file system</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Centralized metadata</strong> keeps the namespace simple and consistent, but caps namespace throughput and needs its own failover.</li><li><strong>Large chunks</strong> shrink metadata and improve streaming, but waste space on small files and make balancing coarser.</li><li><strong>Replication factor 3</strong> survives multiple failures, but triples raw storage cost.</li><li><strong>Data locality</strong> avoids network transfer for analytics, but ties computation to placement and complicates scheduling.</li><li><strong>High aggregate throughput</strong> comes from parallel chunk reads, at the cost of poor small-random latency.</li><li><strong>Append-oriented semantics</strong> simplify consistency, but make in-place updates and random writes awkward.</li><li><strong>Lazy re-replication</strong> avoids overreacting to transient failures, but leaves a window of reduced redundancy.</li><li><strong>Growing the data tier</strong> is straightforward, but the metadata tier remains the harder scaling problem.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a distributed file system?</summary><div class="answer"><p>A file system that stores data across many machines while presenting a single hierarchical namespace to applications. Files are split into chunks, placed on data nodes, and usually replicated. The system tracks placement, reassembles reads, verifies checksums, and repairs lost copies.</p></div></details>
+<details><summary>2. Why not just use one big server with many disks?</summary><div class="answer"><p>A single server caps capacity and throughput at its own hardware and is a single failure domain. A DFS adds nodes to increase both capacity and parallel read bandwidth, and tolerates node loss through replication. It also lets computation run next to the data.</p></div></details>
+<details><summary>3. How does the metadata server stay out of the data path?</summary><div class="answer"><p>Clients ask it only where chunks live, then read and write directly to data nodes. Bulk bytes therefore never flow through the metadata server, which keeps it from becoming a throughput bottleneck. It handles namespace operations and placement decisions instead.</p></div></details>
+<details><summary>4. How is a large file stored?</summary><div class="answer"><p>It is split into large fixed-size chunks, each stored on a data node and replicated to others. Metadata records the ordered list of chunks and their locations. On read, the client fetches chunks in parallel and assembles the byte stream.</p></div></details>
+<details><summary>5. What happens when a data node fails?</summary><div class="answer"><p>The metadata server notices missing heartbeats and marks the node dead. Chunks that were only on that node fall below the replication factor, so new copies are made from surviving replicas. Reads continue from other replicas in the meantime, possibly with higher latency.</p></div></details>
+<details><summary>6. What consistency does a DFS provide?</summary><div class="answer"><p>Namespace operations such as create and rename are strongly consistent because they go through one metadata authority. File content guarantees are usually weaker for concurrent writers, often only promising that acknowledged bytes are visible. Append-oriented, single-writer workloads avoid most of the problem.</p></div></details>
+<details><summary>7. Why are many small files a problem?</summary><div class="answer"><p>Each file and chunk consumes metadata entries in the namespace server's memory. Millions of tiny files exhaust that capacity and drive far more metadata operations than a few large files with the same total bytes. Small files also make chunk-level placement and balancing inefficient.</p></div></details>
+<details><summary>8. What is data locality and why does it matter?</summary><div class="answer"><p>It means running computation on nodes that already store the needed chunks, so the data does not cross the network. For analytics scanning huge datasets, moving computation is far cheaper than moving bytes. This is why DFS designs are paired with schedulers that respect placement.</p></div></details>
+<details><summary>9. How does a DFS scale?</summary><div class="answer"><p>Capacity and read throughput scale by adding data nodes, with background rebalancing to spread chunks. The metadata tier does not scale as easily, since it holds namespace state and coordinates placement. Large clusters may shard the namespace or use replicated metadata services.</p></div></details>
+<details><summary>10. DFS vs object storage — when do you pick which?</summary><div class="answer"><p>Pick a DFS when you need a shared hierarchical namespace, append semantics, and parallel reads for analytics with locality. Pick object storage for cheap, durable storage of large immutable objects served over HTTP, such as media and backups. A DFS is not a low-latency random-access store for a database.</p></div></details>
+<details><summary>11. What is the single point of failure in a DFS?</summary><div class="answer"><p>The metadata server. If it is unavailable, clients cannot resolve paths or learn chunk locations even though data nodes are healthy. Designs address this with a standby, replicated edit logs, and fast failover, or by sharding the namespace.</p></div></details>
+<details><summary>12. Would you run a database on a distributed file system?</summary><div class="answer"><p>Usually not. Databases need low-latency random writes and fsync semantics, which a network DFS serves poorly. They run better on local or network-attached block storage, with the database's own replication providing durability. A DFS suits large append-heavy files and analytics workloads.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Using a DFS as a low-latency database volume and blaming the database for slow commits.</li><li>Storing millions of tiny files and exhausting metadata memory.</li><li>Assuming replication replaces backups, when a deleted file is deleted from every replica.</li><li>Forgetting that the metadata server is a single point of failure.</li><li>Declaring the cluster healthy while chunks sit under-replicated after a node loss.</li><li>Placing all replicas in one rack and losing them together.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="block-storage.html"><span>← Previous</span><strong>Block Storage</strong></a><a class="next" href="object-storage.html"><span>Next →</span><strong>Object Storage</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/distributed-file-systems">AlgoMaster — Distributed File Systems</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

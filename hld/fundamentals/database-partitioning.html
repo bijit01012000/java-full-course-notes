@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Partitioning — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 54 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Partitioning</h1>
+    <p class="dek">Database Scaling Techniques · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/database-partitioning">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: one enormous table</a>
+<a href="#s2">What partitioning is</a>
+<a href="#s3">Horizontal vs vertical partitioning</a>
+<a href="#s4">Range partitioning</a>
+<a href="#s5">List partitioning</a>
+<a href="#s6">Hash partitioning</a>
+<a href="#s7">Partition pruning</a>
+<a href="#s8">Choosing the partition key</a>
+<a href="#s9">Partitioning and indexes</a>
+<a href="#s10">Lifecycle and maintenance benefits</a>
+<a href="#s11">Pitfalls: uneven partitions and too many partitions</a>
+<a href="#s12">Partitioning vs sharding</a>
+<a href="#s13">When to use partitioning</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Partitioning splits one logical table into smaller physical pieces so queries can skip most of the data and old data becomes cheap to drop — but only if the partition key matches how the table is actually queried.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Partition</dt><dd>One physical piece of a logically single table, holding a subset of the rows under the same schema.</dd></div><div class="term"><dt>Horizontal partitioning</dt><dd>Splitting a table by rows, so every partition keeps all columns but only some rows.</dd></div><div class="term"><dt>Vertical partitioning</dt><dd>Splitting a table by columns, usually moving large or rarely read columns into a separate table.</dd></div><div class="term"><dt>Partition key</dt><dd>The column whose value decides which partition a row is stored in and which partitions a query must read.</dd></div><div class="term"><dt>Range partitioning</dt><dd>Assigning rows to partitions by value ranges such as months or numeric ID bands.</dd></div><div class="term"><dt>List partitioning</dt><dd>Assigning rows to partitions by an explicit set of discrete values such as region or category.</dd></div><div class="term"><dt>Hash partitioning</dt><dd>Applying a hash function to the key to scatter rows evenly across a fixed number of partitions.</dd></div><div class="term"><dt>Partition pruning</dt><dd>The optimizer's ability to skip partitions that cannot contain matching rows because of the query's filter on the partition key.</dd></div><div class="term"><dt>Sharding</dt><dd>Spreading partitions across multiple independent database servers, which adds capacity rather than just manageability.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: one enormous table</h2>
+<p class="lede">A table that starts with a few thousand rows behaves well. After a few years the same table may hold hundreds of millions or billions of rows, and the problems that appear are operational as much as they are about raw query speed.</p>
+<ul><li>Indexes grow until they no longer fit comfortably in memory, so more lookups go to disk.</li><li>Queries may scan far more data than they used to, even when the query shape has not changed.</li><li>Deleting or archiving old records becomes an expensive, long-running operation.</li><li>Backups, index rebuilds, and vacuum-style maintenance take longer and touch more data.</li><li>The table can become hard to manage even when the server still has spare CPU, memory, and disk.</li><li>The fix is not necessarily a bigger machine: it is a smaller unit of work.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What partitioning is</h2>
+<p class="lede">Partitioning splits one logical table into multiple smaller physical pieces called partitions. The application keeps writing to <code>orders</code> exactly as before.</p>
+<ul><li>The database decides which partition receives a row at insert time, based on the partition key.</li><li>Collectively the partitions still represent one logical table with one schema.</li><li>The application does not need to know how many physical pieces sit underneath.</li><li>Each partition can be read, indexed, backed up, and dropped independently.</li><li>The win comes from reading fewer partitions, not from a faster disk.</li></ul>
+
+
+<div class="note">Partitioning is a physical layout decision. If queries never filter on the partition key, the layout changes nothing about how much data they read.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Horizontal vs vertical partitioning</h2>
+<ul><li><strong>Horizontal partitioning</strong> divides rows: every partition keeps all columns but only a subset of rows.</li><li><strong>Vertical partitioning</strong> divides columns: all rows stay together but a group of columns moves elsewhere.</li><li>Classic horizontal example: orders split by year, each year its own partition.</li><li>Classic vertical example: keeping <code>name</code> and <code>email</code> in one table and moving a large <code>bio</code> column to another.</li><li>When engineers say partitioning in a large-scale design, they almost always mean horizontal partitioning.</li><li>Vertical partitioning is closer to a schema refactor and is usually chosen to keep hot rows narrow.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Horizontal</th><th>Vertical</th></tr></thead><tbody><tr><td>What gets split</td><td>Rows</td><td>Columns</td></tr>
+<tr><td>Each piece holds</td><td>All columns, a subset of rows</td><td>All rows, a subset of columns</td></tr>
+<tr><td>Typical example</td><td>Orders split by year</td><td>Large or rarely read columns moved out</td></tr>
+<tr><td>Main benefit</td><td>Pruning and lifecycle management</td><td>Narrower hot rows, less I/O per read</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Range partitioning</h2>
+<ul><li>Rows are assigned by ranges of a value, most often a timestamp such as month or year.</li><li>Range bounds are typically lower-inclusive and upper-exclusive, so a row at exactly midnight on February 1 lands in February.</li><li>Ranges work on numbers too: customer IDs 1–1,000,000 in one partition, the next million in another.</li><li>It keeps related values physically together, which suits range queries such as <em>orders from last week</em>.</li><li>It is the natural fit for time-series and append-heavy data where recent partitions are hot and old ones are cold.</li><li>The weakness is skew: a burst of traffic in one period can create a partition far larger than its neighbours.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>List partitioning</h2>
+<ul><li>Rows are assigned by an explicit list of discrete values rather than a continuous range.</li><li>It suits low-cardinality categorical keys such as region, country, tenant tier, or status.</li><li>One partition can accept several values, which is how a <em>Europe</em> partition collects many countries.</li><li>A catch-all partition (often a default) keeps unlisted values from failing inserts.</li><li>Distribution depends entirely on the data: if most users sit in one region, that partition dominates.</li><li>Adding a new category later means altering the partition definitions, so plan for growth.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Hash partitioning</h2>
+<ul><li>The database hashes the partition key and uses the result to select a partition.</li><li>A good hash spreads rows evenly, which fixes the skew problems of range and list partitioning.</li><li>Nearby values land in unrelated partitions: customer 1000 and 1001 may be stored far apart.</li><li>Range queries lose pruning, because the optimizer cannot infer which partitions hold a value range.</li><li>Choose it when even write and storage distribution matters more than locality.</li><li>Changing the number of hash partitions later means reshuffling data, so pick the count deliberately.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Range</th><th>List</th><th>Hash</th></tr></thead><tbody><tr><td>Assignment</td><td>Value range</td><td>Explicit value list</td><td>Hash of the key</td></tr>
+<tr><td>Typical key</td><td>Date, timestamp, numeric ID</td><td>Region, country, category</td><td>User ID, customer ID</td></tr>
+<tr><td>Keeps related values together</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+<tr><td>Even distribution</td><td>Depends on data</td><td>Depends on data</td><td>Usually even</td></tr>
+<tr><td>Good for</td><td>Time-series and range queries</td><td>Small known category sets</td><td>Spreading load evenly</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Partition pruning</h2>
+<p class="lede">Pruning is where partitioning earns its keep. With five years of orders in monthly partitions, a query for September 2026 needs exactly one of sixty partitions.</p>
+<ul><li>The optimizer knows each partition's bounds and eliminates those that cannot match.</li><li>The query then reads roughly one sixtieth of the table instead of all of it.</li><li>Pruning requires a filter on the partition key; a filter on another column rules nothing out.</li><li>Pruning usually needs a literal or a stable expression, not a function wrapped around the partition key.</li><li>The fewer partitions a query must open, the lower the I/O and the planning cost.</li><li>This is why the partition key — not the partitioning syntax — is the real design decision.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends a query with a filter on the partition key</span><span class="flow-arrow">→</span><span class="flow-step">Planner compares the filter to each partition's bounds</span><span class="flow-arrow">→</span><span class="flow-step">Non-matching partitions are skipped entirely</span><span class="flow-arrow">→</span><span class="flow-step">Remaining partitions are scanned or index-probed</span><span class="flow-arrow">→</span><span class="flow-step">Rows are merged into one result set</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Choosing the partition key</h2>
+<ul><li>Look at the <code>WHERE</code> clauses of the most frequent queries, not at the table's primary key.</li><li>For an events table queried as <em>last 24 hours</em>, partitioning by timestamp lets a query touch one or two partitions.</li><li>Partitioning the same table by <code>user_id</code> scatters recent events across every partition, so nothing is pruned.</li><li>The better key is workload-dependent: if the common query is <em>all events for user 42</em>, <code>user_id</code> wins.</li><li>Avoid keys with a dominant value, such as a status column where most rows are <em>active</em>.</li><li>Prefer keys that appear in joins and range filters, and that grow in a predictable direction.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Partition by created_at</th><th>Partition by user_id</th></tr></thead><tbody><tr><td>Common query</td><td>Events from last 24 hours</td><td>Events from last 24 hours</td></tr>
+<tr><td>Partitions skipped</td><td>Almost all</td><td>None</td></tr>
+<tr><td>Work done</td><td>A small slice of the table</td><td>Every partition</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Partitioning and indexes</h2>
+<p class="lede">Partitioning does not replace indexing. They operate at different levels and are usually combined.</p>
+<ul><li>Each partition can carry its own index, for example an index on <code>customer_id</code> inside every monthly partition.</li><li>A query for one customer in September first prunes to September, then uses that partition's index.</li><li>Per-partition indexes are smaller, so they are more likely to stay resident in memory.</li><li>Index maintenance is cheaper because a rebuild touches one partition, not the whole table.</li><li>Some databases require the partition key in every primary key or unique constraint, since uniqueness can only be enforced inside a partition.</li><li>In PostgreSQL that constraint rule is explicit: a unique key on a partitioned table must include the partition columns.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Lifecycle and maintenance benefits</h2>
+<ul><li>Retention becomes a metadata operation: dropping a monthly partition removes its files instead of deleting rows one by one.</li><li>A large <code>DELETE</code> writes enormous transaction logs, burns I/O, and can leave dead space behind; dropping a partition avoids all of that.</li><li>A detached partition can be archived, exported to a warehouse, or kept read-only instead of being destroyed.</li><li>Statistics can be collected per partition, so a busy recent partition is analyzed more often than cold ones.</li><li>Backups can follow partition boundaries, so an unchanging old partition is backed up once.</li><li>Append-heavy workloads — logs, events, transactions, metrics — benefit most because active and historical data separate cleanly.</li></ul>
+
+<div class="flow"><span class="flow-step">Create next month's partition ahead of time</span><span class="flow-arrow">→</span><span class="flow-step">Write new rows into the active partition</span><span class="flow-arrow">→</span><span class="flow-step">Detach the oldest partition at the retention boundary</span><span class="flow-arrow">→</span><span class="flow-step">Archive, export, or drop the detached partition</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Pitfalls: uneven partitions and too many partitions</h2>
+<ul><li><strong>Skew:</strong> one partition can hold the overwhelming majority of rows, making it nearly as large as the original table.</li><li>A skewed partition gives little pruning benefit and makes its index rebuilds far more expensive than its neighbours'.</li><li>Fix skew by re-splitting the hot partition — sub-partition by country or hash — while leaving small partitions alone.</li><li><strong>Over-partitioning:</strong> minute-level partitions mean hundreds of thousands per year and over a million within two years.</li><li>Too many partitions add metadata to track, planning cost to consider, and a create/cleanup job that becomes its own system.</li><li>Each partition then holds so little data that splitting further buys nothing.</li><li>Sizing rule: match granularity to the most common query window, so a <em>last 7 days</em> query opens seven partitions, not hundreds.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Granularity</th><th>Partitions per year</th><th>Fits</th></tr></thead><tbody><tr><td>Hourly</td><td>8,760</td><td>Very high-volume event or metric data</td></tr>
+<tr><td>Daily</td><td>365</td><td>High-volume logs with short retention</td></tr>
+<tr><td>Monthly</td><td>12</td><td>Orders, transactions, moderate logs</td></tr>
+<tr><td>Yearly</td><td>1</td><td>Low-volume data kept for years</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Partitioning vs sharding</h2>
+<ul><li>Partitioning divides a dataset into smaller pieces that can all live on one database server.</li><li>Sharding distributes those pieces across multiple independent servers.</li><li>With partitioning the database routes queries; with sharding the application, a proxy, or a routing layer does.</li><li>Partitioning makes a large table easier to query and manage but adds no CPU, memory, or disk.</li><li>Sharding adds capacity but brings cross-server queries, distributed transactions, and rebalancing.</li><li>Real systems combine them: data is sharded across servers, and each shard's tables are partitioned internally.</li><li>If one server still has headroom, partitioning is usually the cheaper first step.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Partitioning</th><th>Sharding</th></tr></thead><tbody><tr><td>Where pieces live</td><td>Usually one server</td><td>Multiple servers</td></tr>
+<tr><td>Who routes</td><td>The database</td><td>App, proxy, or routing layer</td></tr>
+<tr><td>Main benefit</td><td>Faster queries, easier data management</td><td>More storage and write capacity</td></tr>
+<tr><td>New failure modes</td><td>Skew, partition count</td><td>Network partitions, cross-shard queries</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use partitioning</h2>
+<ul><li>Use it when a table is large enough that size itself causes query or operational pain.</li><li>It works best when the data has a natural grouping, with time being the most common one.</li><li>It is a strong fit when old data must be deleted or archived on a schedule.</li><li>Small tables do not need it: a few million rows with good indexes is often already fast.</li><li>Ask whether common queries filter on a natural partition key and whether pruning removes a meaningful share of data.</li><li>Ask whether partitioning will genuinely simplify maintenance or retention.</li><li>If most answers are no, better indexes or query tuning solve the problem with less complexity.</li></ul>
+
+<div class="flow"><span class="flow-step">Is the table large enough to hurt?</span><span class="flow-arrow">→</span><span class="flow-step">Do common queries filter on a natural key?</span><span class="flow-arrow">→</span><span class="flow-step">Does pruning remove most of the data?</span><span class="flow-arrow">→</span><span class="flow-step">Does retention or maintenance get simpler?</span><span class="flow-arrow">→</span><span class="flow-step">If yes to most, partition; otherwise tune indexes first</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Partition pruning</strong> cuts the data a query reads, but only for filters on the partition key; other filters pay the full cost plus planning overhead.</li><li><strong>Range partitioning</strong> keeps time-ordered data together and makes retention trivial, but recent or bursty periods create hot, oversized partitions.</li><li><strong>Hash partitioning</strong> spreads rows evenly, but destroys locality and forces range queries to touch every partition.</li><li><strong>List partitioning</strong> maps cleanly to known categories, but a dominant category recreates the original single-big-table problem.</li><li><strong>Per-partition indexes</strong> are smaller and cheaper to rebuild, but a global unique constraint may become impossible without the partition key.</li><li><strong>Dropping a partition</strong> is far cheaper than a bulk delete, but it is all-or-nothing: you cannot keep a few rows from the dropped range.</li><li><strong>More partitions</strong> improve pruning granularity, but add metadata, planning cost, and background create/drop work.</li><li><strong>Partitioning</strong> improves manageability on one server, but it does not add CPU, memory, or disk the way sharding does.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is database partitioning?</summary><div class="answer"><p>It is splitting one logical table into multiple physical pieces called partitions while the application still sees and queries a single table. The database routes each inserted row to a partition based on the partition key. Each partition can then be indexed, scanned, backed up, or dropped independently.</p></div></details>
+<details><summary>2. How does partitioning actually make queries faster?</summary><div class="answer"><p>Through <strong>partition pruning</strong>: when a query filters on the partition key, the optimizer skips partitions whose bounds cannot match. A monthly-partitioned table queried for one month reads one partition instead of the whole table. Without a filter on the partition key, the query still touches every partition.</p></div></details>
+<details><summary>3. Horizontal vs vertical partitioning — what is the difference?</summary><div class="answer"><p>Horizontal partitioning splits rows, so each partition has all columns but a subset of rows; orders split by year is the classic case. Vertical partitioning splits columns, keeping all rows together and moving large or rarely read columns into another table. Large-scale system design almost always means horizontal partitioning.</p></div></details>
+<details><summary>4. When would you choose range partitioning over hash partitioning?</summary><div class="answer"><p>Choose range when queries filter on ranges and locality matters, especially time-series data where recent periods are hot and old data can be archived. Choose hash when the key has no natural ranges and you need even distribution of writes and storage. Range gives pruning for range filters; hash gives balance but scatters related rows.</p></div></details>
+<details><summary>5. Why does hash partitioning hurt range queries?</summary><div class="answer"><p>Because the hash destroys ordering: adjacent keys land in unrelated partitions, so the optimizer cannot infer which partitions hold a value range. A query for customer IDs 1000–2000 must open every partition. Hash partitioning trades pruning for even distribution.</p></div></details>
+<details><summary>6. How do you pick the partition key?</summary><div class="answer"><p>Start from the <code>WHERE</code> clauses of the most frequent queries and pick a column those queries filter on. The key should also distribute data reasonably evenly and avoid a single dominant value. If the common query is <em>last 24 hours</em>, partition by time; if it is <em>all events for a user</em>, partition by user ID.</p></div></details>
+<details><summary>7. Does partitioning remove the need for indexes?</summary><div class="answer"><p>No. Partitioning reduces how much data the database must consider, and indexes locate rows inside the chosen partition. Combined, a query prunes to one partition and then probes its local index. Per-partition indexes are also smaller and more likely to stay cached.</p></div></details>
+<details><summary>8. What constraint problem can partitioning create?</summary><div class="answer"><p>Unique constraints can usually only be enforced within a partition. PostgreSQL, for example, requires a primary key or unique constraint on a partitioned table to include the partition key columns. If you need global uniqueness on another column, partitioning alone cannot provide it.</p></div></details>
+<details><summary>9. How does partitioning help with deleting old data?</summary><div class="answer"><p>Instead of a large <code>DELETE</code> that finds and removes each row while writing a huge transaction log, you drop or detach the whole partition. The cost depends on the number of partitions, not the number of rows. A detached partition can also be archived or kept read-only instead of deleted.</p></div></details>
+<details><summary>10. What goes wrong with uneven partitions?</summary><div class="answer"><p>One partition can hold most of the data, so queries against it scan nearly as much as the original table and its index rebuilds dominate maintenance. The fix is to re-split the hot partition — by sub-region or by hash — while leaving the small partitions alone. Partition boundaries must follow the real data distribution.</p></div></details>
+<details><summary>11. Why can too many partitions be a problem?</summary><div class="answer"><p>Every partition adds metadata to track and work for the planner to consider, so query planning gets slower. Creating future partitions and cleaning up old ones becomes its own operational job, and each tiny partition yields almost no extra pruning. Match granularity to the dominant query window.</p></div></details>
+<details><summary>12. Partitioning vs sharding — how do they differ?</summary><div class="answer"><p>Partitioning splits a table into pieces that usually stay on one database server, with the database routing queries. Sharding spreads pieces across multiple servers, which adds storage and write capacity but brings cross-shard queries and distributed coordination. Systems commonly shard first and partition within each shard.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Partitioning by the primary key or by an <code>id</code> column that queries never filter on, so pruning never fires.</li><li>Assuming partitioning adds capacity — it only reorganizes data inside the same server.</li><li>Choosing monthly or yearly partitions for data whose queries always ask for the last few hours.</li><li>Creating minute-level partitions and drowning the planner in metadata.</li><li>Forgetting that unique constraints usually must include the partition key.</li><li>Leaving a single dominant partition in place and expecting list partitioning to help.</li><li>Dropping a partition for retention when a few rows from that range were meant to be kept.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="indexing.html"><span>← Previous</span><strong>Indexing</strong></a><a class="next" href="database-replication.html"><span>Next →</span><strong>Replication</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/database-partitioning">AlgoMaster — Partitioning</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

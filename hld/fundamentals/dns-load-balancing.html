@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DNS Load Balancing — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 17 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>DNS Load Balancing</h1>
+    <p class="dek">Load Balancing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>10</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/dns-load-balancing">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why DNS load balancing exists</a>
+<a href="#s2">How a DNS lookup works</a>
+<a href="#s3">Round-robin DNS</a>
+<a href="#s4">Health checks and failover</a>
+<a href="#s5">TTL is the real control knob</a>
+<a href="#s6">Weighted and geographic routing</a>
+<a href="#s7">Latency- and proximity-based answers</a>
+<a href="#s8">DNS alongside regional load balancers</a>
+<a href="#s9">Limitations and failure modes</a>
+<a href="#s10">When to use DNS load balancing</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>DNS load balancing spreads traffic by returning different IP addresses during name resolution, which makes it the only layer that can choose a <strong>region</strong> before a connection exists.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>DNS load balancing</dt><dd>Distributing traffic by answering name-resolution queries with different addresses, chosen by health, weight, or client location.</dd></div><div class="term"><dt>Round-robin DNS</dt><dd>Returning the multiple A/AAAA records for a name in a rotating order so clients spread across several addresses.</dd></div><div class="term"><dt>TTL</dt><dd>Time to live: how long a resolver or client may cache a record before asking again.</dd></div><div class="term"><dt>Recursive resolver</dt><dd>The DNS server that walks the hierarchy on a client's behalf and caches the answer it finds.</dd></div><div class="term"><dt>GeoDNS</dt><dd>Answering queries with region-specific addresses based on the location of the resolver or client subnet.</dd></div><div class="term"><dt>Health-checked DNS</dt><dd>A DNS service that removes an address from answers when the corresponding endpoint fails its probe.</dd></div><div class="term"><dt>Authoritative nameserver</dt><dd>The server that holds the definitive records for a zone and answers queries for it.</dd></div><div class="term"><dt>Anycast DNS</dt><dd>Announcing the same nameserver address from many locations so queries reach a nearby instance.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why DNS load balancing exists</h2>
+<p class="lede">A regional load balancer distributes requests among the servers behind it, but it cannot decide which region a user should reach, because that decision has to happen before the connection is made.</p>
+<ul><li>A single-region load balancer gives you no answer when the whole region fails.</li><li>Sending a user in Singapore to a data centre in Virginia adds round-trip latency to every request, including the TLS handshakes.</li><li>DNS is the first step of every connection: the client must resolve <code>api.example.com</code> to an address before it can connect.</li><li>Returning different addresses per user lets you steer traffic to the nearest or healthiest region.</li><li>Because it works at resolution time, DNS can express <strong>regional policy</strong> that no HTTP-layer device can apply.</li><li>It is also the cheapest global control plane available: no additional hop in the data path.</li><li>The trade-off is coarse control: you are choosing an address, not a server, and you cannot see the request.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>How a DNS lookup works</h2>
+<ul><li>The client asks its configured <strong>recursive resolver</strong> for the name; the resolver does the walking.</li><li>The resolver checks its cache first, which is why a previously resolved name returns instantly.</li><li>On a miss it queries a root server, which points to the TLD servers, which point to the zone's authoritative nameservers.</li><li>The authoritative server returns the record, such as an A record for IPv4 or an AAAA record for IPv6.</li><li>The resolver caches the answer for the record's TTL and returns it to the client.</li><li>The client may cache it again, so several layers can hold a stale answer independently.</li><li>Every answer in this chain is a routing decision when the zone is configured for traffic management.</li></ul>
+
+<div class="flow"><span class="flow-step">Client asks recursive resolver</span><span class="flow-arrow">→</span><span class="flow-step">Resolver cache miss</span><span class="flow-arrow">→</span><span class="flow-step">Root server referral</span><span class="flow-arrow">→</span><span class="flow-step">TLD server referral</span><span class="flow-arrow">→</span><span class="flow-step">Authoritative nameserver answers</span><span class="flow-arrow">→</span><span class="flow-step">Resolver caches for TTL</span><span class="flow-arrow">→</span><span class="flow-step">Client connects to the returned address</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Round-robin DNS</h2>
+<ul><li>Publish several A records for one name and rotate the order in which they are returned.</li><li>Most clients try the first address, so rotation spreads connections across the pool over many lookups.</li><li>There is no state to maintain beyond the record list, and no extra infrastructure in the request path.</li><li>It balances <strong>lookups</strong>, not requests: one client that caches an answer sends all its traffic to one address.</li><li>Distribution is uneven whenever resolvers cache aggressively or client volumes differ wildly.</li><li>Removing an address does not take effect until caches expire, so failed endpoints keep receiving traffic.</li><li>It ignores capacity: every address gets an equal share regardless of how big the region behind it is.</li></ul>
+
+
+<div class="note">Round-robin DNS is best treated as a coarse spread across equivalent endpoints, never as the only mechanism protecting a pool.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Health checks and failover</h2>
+<ul><li>A health-checked DNS service probes each endpoint and withdraws the address when the probe fails.</li><li>Withdrawal only helps once caches expire, so failover time is bounded by the TTL, not by the probe interval.</li><li>Probes must test the dependency path, not just whether a host answers on a port.</li><li>Flapping endpoints create flapping answers; require several consecutive failures and successes before changing state.</li><li>Keep a manual override so an operator can drain a region even when automated checks look healthy.</li><li>The check itself is a single point of failure: if the health service cannot reach endpoints, it may withdraw everything.</li><li>Never let DNS health checks be the only failover mechanism; the regional load balancer still needs its own.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>TTL is the real control knob</h2>
+<ul><li>TTL decides how long resolvers and clients may reuse an answer, so it directly controls how fast changes propagate.</li><li>Long TTLs reduce query volume and improve resolution latency but slow failover and migrations.</li><li>Short TTLs make changes fast but increase resolver traffic and give caches less benefit.</li><li>Some resolvers enforce a minimum TTL, so a very low value may be ignored in practice.</li><li>Lower the TTL <em>before</em> a planned migration, wait at least the old TTL, then change the records.</li><li>Keep the old endpoint serving until the new TTL window has passed, otherwise in-flight cached clients break.</li><li>TTL is advisory: clients, proxies, and some ISPs may cache longer than you asked.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>TTL setting</th><th>Change propagation</th><th>Query load</th></tr></thead><tbody><tr><td>Long, such as hours</td><td>Slow; hours before everyone sees it</td><td>Low</td></tr>
+<tr><td>Short, such as a minute</td><td>Fast for well-behaved resolvers</td><td>High</td></tr>
+<tr><td>Very short, seconds</td><td>Fastest, but often clamped by resolvers</td><td>Highest</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Weighted and geographic routing</h2>
+<ul><li><strong>Weighted</strong> answers send a configured share of resolutions to each endpoint, which supports canaries and gradual regional ramps.</li><li>Weights are enforced per lookup, so a client that caches gets no re-weighting until its TTL expires.</li><li><strong>Geographic</strong> routing maps a query's location to the nearest or designated region.</li><li>Location is usually inferred from the resolver's address, which may be far from the actual user.</li><li>EDNS Client Subnet can pass a truncated client subnet to the authoritative server for better accuracy, at some privacy cost.</li><li>Geographic routing also expresses policy: data residency, market-specific endpoints, and legally required local termination.</li><li>Defaults matter: always configure a fallback region for queries that match no rule.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Latency- and proximity-based answers</h2>
+<ul><li>Instead of static geography, some services measure which region actually responds fastest for a given resolver network.</li><li>The measurement is periodic and coarse, so it reacts to persistent differences rather than momentary jitter.</li><li>This handles asymmetric internet paths where the geographically nearest region is not the network-nearest one.</li><li>It still cannot see the individual request, so a slow request-type mix inside a region is invisible to DNS.</li><li>Combining latency data with health and capacity weights gives better results than any single signal.</li><li>Any latency-based policy needs a fallback for regions with too little measurement data.</li><li>Beware of using these controls during incidents: stale measurements can keep sending users to a degraded region.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>DNS alongside regional load balancers</h2>
+<p class="lede">DNS and load balancers solve different halves of the problem, and production systems use both.</p>
+<ul><li>DNS picks the <strong>region or entry point</strong>; the load balancer picks the <strong>server</strong> inside it.</li><li>The name typically points at a load balancer address, so backends can change without touching DNS.</li><li>The load balancer has per-request visibility, immediate health knowledge, and sub-second failover.</li><li>DNS has global reach, no data-path cost, and the only pre-connection view of the client.</li><li>Layering them means a regional failure is handled by DNS and an instance failure is handled by the balancer.</li><li>Using DNS for per-request balancing is a category error: it is too coarse and too cached.</li><li>A common pattern is DNS to a global anycast entry point, then a regional balancer behind it.</li></ul>
+
+<div class="flow"><span class="flow-step">Client resolves api.example.com</span><span class="flow-arrow">→</span><span class="flow-step">DNS returns the nearest healthy region</span><span class="flow-arrow">→</span><span class="flow-step">Client connects to that region's load balancer</span><span class="flow-arrow">→</span><span class="flow-step">Load balancer chooses a healthy backend</span><span class="flow-arrow">→</span><span class="flow-step">Backend serves the request</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Limitations and failure modes</h2>
+<ul><li><strong>Caching defeats control</strong>: clients keep using withdrawn addresses until their TTLs expire.</li><li>The resolver's location is a proxy for the user's location, and it is often wrong.</li><li>Clients may ignore the returned order and always pick the first or a random address.</li><li>There is no per-request signal, so DNS cannot react to a single slow backend or a hot tenant.</li><li>Long-lived connections never re-resolve, so a client may hold a dead region for hours.</li><li>Misconfigured health checks can withdraw a healthy region and cause a self-inflicted global outage.</li><li>DNS itself is a dependency: if resolution fails or is slow, nothing else can start.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Failure</th><th>Symptom</th><th>Mitigation</th></tr></thead><tbody><tr><td>Region down, cached answer</td><td>Some users keep failing after failover</td><td>Short TTL, connection retry, client re-resolution</td></tr>
+<tr><td>Wrong resolver location</td><td>Users routed to a distant region</td><td>EDNS Client Subnet, latency-based policy</td></tr>
+<tr><td>Health check false positive</td><td>Whole region withdrawn</td><td>Consecutive-failure thresholds, manual override</td></tr>
+<tr><td>Long-lived connections</td><td>Clients pinned to a dead endpoint</td><td>Connection age limits, reconnect on error</td></tr>
+<tr><td>Resolver outage</td><td>Total inability to connect</td><td>Multiple resolvers, local caching, anycast DNS</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>When to use DNS load balancing</h2>
+<ul><li>Use it for <strong>multi-region entry</strong>: choosing which region a user connects to, and failing over between regions.</li><li>Use it for <strong>coarse traffic shaping</strong> such as canaries, blue-green cutovers, and gradual regional ramps.</li><li>Use it when you need no extra hop, no extra TLS termination, and no per-request state.</li><li>Do not use it as the only balancer for a pool of equivalent servers; a real balancer does that better.</li><li>Do not expect sub-second failover; treat DNS failover as a minutes-scale mechanism.</li><li>Always pair it with health checks, a low-but-not-zero TTL, and a client that retries on connection failure.</li><li>Document the fallback region and test the failover path on a schedule, because it is rarely exercised.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>DNS balancing</strong> adds no data-path hop but cannot see requests or react per request.</li><li><strong>Round-robin DNS</strong> is free and simple but balances lookups rather than load and ignores capacity.</li><li><strong>Long TTLs</strong> reduce query volume and improve resolution speed but stretch failover to hours.</li><li><strong>Short TTLs</strong> speed up changes but multiply resolver traffic and are often clamped anyway.</li><li><strong>Geographic routing</strong> improves locality but depends on resolver location, which can be far from the user.</li><li><strong>Health-checked DNS</strong> automates regional failover but adds a control plane that can withdraw a healthy region.</li><li><strong>DNS plus a regional balancer</strong> gives global and per-request control at the cost of two systems to operate.</li><li><strong>EDNS Client Subnet</strong> improves location accuracy but leaks part of the client's address to more parties.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why is DNS needed for load balancing at all?</summary><div class="answer"><p>Because a load balancer can only choose among servers behind it, and it cannot choose a region before the client connects. DNS is the only step where a different destination can be selected per user, which is what makes multi-region routing possible.</p></div></details>
+<details><summary>2. How does round-robin DNS work?</summary><div class="answer"><p>You publish multiple A or AAAA records for one name and rotate the order in each answer. Clients typically try the first address, so lookups spread connections across the endpoints without any extra infrastructure.</p></div></details>
+<details><summary>3. Why is round-robin DNS not real load balancing?</summary><div class="answer"><p>It distributes lookups, not requests or work. A client that caches an answer sends all its traffic to one address, and every address receives an equal share regardless of capacity or current load.</p></div></details>
+<details><summary>4. What determines how fast DNS failover happens?</summary><div class="answer"><p>The TTL on the record and the behaviour of downstream caches. Even after a health check withdraws an address, clients keep using it until their cached answer expires, so failover is a minutes-scale mechanism unless TTLs are short.</p></div></details>
+<details><summary>5. How would you plan a migration between two addresses?</summary><div class="answer"><p>Lower the TTL well before the change, wait for the old TTL to elapse so caches hold the short value, then switch the record. Keep the old endpoint serving until the new short-TTL window has passed, then retire it.</p></div></details>
+<details><summary>6. What is wrong with using the resolver's IP to locate a user?</summary><div class="answer"><p>Recursive resolvers are often shared and centrally located, so many users appear to come from one place. A user in one country may be routed to a region near the resolver rather than near themselves.</p></div></details>
+<details><summary>7. How do DNS and a regional load balancer divide responsibilities?</summary><div class="answer"><p>DNS chooses the region or global entry point; the load balancer chooses the server inside that region. DNS handles region-level failure, and the balancer handles instance-level health with sub-second reaction.</p></div></details>
+<details><summary>8. What is EDNS Client Subnet and what does it cost?</summary><div class="answer"><p>It forwards a truncated client subnet in the DNS query so the authoritative server can answer more accurately than by resolver location. The cost is additional exposure of client addressing information to parties in the resolution path.</p></div></details>
+<details><summary>9. Why can long-lived connections break DNS failover?</summary><div class="answer"><p>A client only resolves the name when it opens a connection. An established connection or a pooled channel can stay pinned to a region that has since failed, so it never sees the updated DNS answer.</p></div></details>
+<details><summary>10. What health-check mistakes make DNS dangerous?</summary><div class="answer"><p>Probing only a port instead of the dependency path, flapping without consecutive-failure thresholds, and having no manual override. A false negative can withdraw a whole healthy region and turn a small fault into a global outage.</p></div></details>
+<details><summary>11. When would you choose DNS balancing over anycast?</summary><div class="answer"><p>When you need explicit per-region control, weighted ramps, or residency-based routing that you can express as policy. Anycast gives faster, automatic failover but gives you less control over which location a user reaches.</p></div></details>
+<details><summary>12. How do you make DNS-based failover testable?</summary><div class="answer"><p>Schedule regular game days that withdraw a region and verify that clients re-resolve and reconnect within the expected window. Also monitor resolution latency and answer correctness, since the failure path is otherwise never exercised.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Calling round-robin DNS a load balancer when it only rotates lookups.</li><li>Relying on DNS for sub-second failover while using hour-long TTLs.</li><li>Forgetting that clients and resolvers may cache longer than the TTL you set.</li><li>Lowering the TTL at the same moment you change the record, so old caches still point at the old address.</li><li>Routing by resolver location and assuming it matches the user's location.</li><li>Adding geographic rules with no default fallback, so unmatched queries fail to resolve.</li><li>Trusting DNS health checks as the only failover mechanism for a region.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="load-balancing-algorithms.html"><span>← Previous</span><strong>Load Balancing Algorithms</strong></a><a class="next" href="anycast-routing.html"><span>Next →</span><strong>Anycast Routing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/dns-load-balancing">AlgoMaster — DNS Load Balancing</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

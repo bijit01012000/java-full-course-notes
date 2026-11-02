@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connection Pooling — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 60 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Connection Pooling</h1>
+    <p class="dek">Database Scaling Techniques · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>11</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/connection-pooling">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why opening a connection is expensive</a>
+<a href="#s2">What a connection pool is</a>
+<a href="#s3">Inside the pool</a>
+<a href="#s4">Benefits</a>
+<a href="#s5">Sizing the pool</a>
+<a href="#s6">Borrow, use, return — and what can go wrong</a>
+<a href="#s7">Exhaustion, queueing, and timeouts</a>
+<a href="#s8">External poolers and multiplexing</a>
+<a href="#s9">Pools in elastic and serverless environments</a>
+<a href="#s10">Monitoring and tuning</a>
+<a href="#s11">Decision rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A connection pool keeps a set of already-open database connections and lends them to requests, so the application pays the TCP, TLS, and authentication cost once instead of on every query.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Connection</dt><dd>An established session between an application and a database, involving a socket, authentication state, and server-side resources.</dd></div><div class="term"><dt>Connection pool</dt><dd>A managed collection of reusable connections that requests borrow, use, and return.</dd></div><div class="term"><dt>Idle connection</dt><dd>An open connection currently sitting in the pool, ready to be borrowed.</dd></div><div class="term"><dt>Active connection</dt><dd>A connection checked out by a request and unavailable to others.</dd></div><div class="term"><dt>Wait queue</dt><dd>Requests blocked because no connection is available, waiting for one to be returned.</dd></div><div class="term"><dt>Pool exhaustion</dt><dd>The state where all connections are in use, so new requests queue or fail.</dd></div><div class="term"><dt>Max lifetime</dt><dd>A cap on how long a pooled connection may exist before it is retired and replaced.</dd></div><div class="term"><dt>External pooler</dt><dd>A separate process such as PgBouncer that multiplexes many clients onto fewer database connections.</dd></div><div class="term"><dt>Connection multiplexing</dt><dd>Sharing one backend connection across many client sessions, usually by returning it to the pool between transactions.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why opening a connection is expensive</h2>
+<p class="lede">A query cannot run until a connection exists, and creating one involves several steps that have nothing to do with the query itself.</p>
+<ul><li>A <strong>TCP handshake</strong> establishes the socket to the database host.</li><li>A <strong>TLS handshake</strong> adds certificate exchange and key agreement when encryption is enabled.</li><li>The client must <strong>authenticate</strong>, which may involve password hashing, SCRAM, or an external identity provider.</li><li>The server allocates backend memory, a process or thread, and bookkeeping state per connection.</li><li>For a small query, setup can easily take longer than the query itself.</li><li>Repeating that setup per request wastes CPU, latency, and server-side slots that could serve other clients.</li></ul>
+
+<div class="flow"><span class="flow-step">Open TCP connection</span><span class="flow-arrow">→</span><span class="flow-step">Complete TLS handshake</span><span class="flow-arrow">→</span><span class="flow-step">Authenticate and select database</span><span class="flow-arrow">→</span><span class="flow-step">Allocate server-side backend resources</span><span class="flow-arrow">→</span><span class="flow-step">Execute the query</span><span class="flow-arrow">→</span><span class="flow-step">Close the connection and free everything</span></div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a connection pool is</h2>
+<ul><li>A pool holds a set of connections that stay open across requests.</li><li>A request <strong>borrows</strong> a connection, runs its work, and <strong>returns</strong> it instead of closing it.</li><li>The next request reuses the same connection, skipping setup entirely.</li><li>The pool enforces limits: how many connections exist, how long a borrower may hold one, and how long to wait.</li><li>In most libraries, calling <code>close()</code> on a pooled connection just returns it to the pool.</li><li>The pool is usually a library inside the app, but it can also be a standalone proxy in front of the database.</li></ul>
+
+
+<div class="note">The unit of reuse matters: a pool can reuse a connection between queries, between transactions, or for a whole session.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Inside the pool</h2>
+<ul><li><strong>Idle list:</strong> open connections ready to be handed out.</li><li><strong>Active set:</strong> connections currently checked out, tracked so they cannot be double-lent.</li><li><strong>Wait queue:</strong> requests blocked until a connection is returned or the timeout expires.</li><li><strong>Reaper:</strong> a background task that closes stale, expired, or unhealthy connections.</li><li><strong>Validator:</strong> a cheap liveness check, such as a ping, that discards dead connections before lending.</li><li><strong>Metrics:</strong> counts, wait times, timeouts, and errors that tell you whether the pool is sized correctly.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Component</th><th>Purpose</th></tr></thead><tbody><tr><td>Idle connections</td><td>Ready to be borrowed immediately</td></tr>
+<tr><td>Active connections</td><td>Currently checked out by requests</td></tr>
+<tr><td>Wait queue</td><td>Requests waiting for a free connection</td></tr>
+<tr><td>Reaper / housekeeper</td><td>Closes stale, expired, or unhealthy connections</td></tr>
+<tr><td>Metrics</td><td>Usage, wait time, timeouts, errors</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Benefits</h2>
+<ul><li><strong>Lower latency:</strong> requests skip TCP, TLS, and authentication on the hot path.</li><li><strong>Predictable load:</strong> the database sees a bounded number of connections instead of one per request.</li><li><strong>Resource efficiency:</strong> memory and process slots on the database are not multiplied by request concurrency.</li><li><strong>Backpressure:</strong> a bounded pool makes overload visible as queueing rather than letting the database collapse.</li><li><strong>Reuse of session state:</strong> prepared statements and session settings can persist across borrowers.</li><li><strong>Central control:</strong> timeouts, limits, and health checks live in one configured place.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Sizing the pool</h2>
+<ul><li>The pool must be smaller than the database's connection limit, with headroom for admin and background work.</li><li>Too small a pool serializes requests and shows up as wait-queue time, not slow queries.</li><li>Too large a pool pushes contention into the database, where it becomes lock waits, context switching, and memory pressure.</li><li>Estimate concurrency as <em>queries per second × average hold time</em>; that is the number of connections actually needed in parallel.</li><li>Give each application instance its own share: total connections equal instances × pool size.</li><li>Sizing must be revisited whenever you add instances, because autoscaling multiplies pool size.</li><li>A useful default is a modest pool per instance plus an external pooler when instance counts are high.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Borrow, use, return — and what can go wrong</h2>
+<ul><li>A borrower that never returns a connection leaks it, permanently shrinking effective capacity.</li><li>Long-running transactions hold a connection for their whole duration, including time spent waiting on application logic.</li><li>A connection killed by a network reset stays in the pool until a validator or the next use detects it.</li><li>Session state set by one borrower, such as a temporary table or altered setting, can leak into the next.</li><li>A max lifetime rotates connections so that DNS changes, credential rotation, and failovers eventually take effect.</li><li>Always return connections in a <code>finally</code> or equivalent scope so exceptions cannot leak them.</li></ul>
+
+<div class="flow"><span class="flow-step">Request asks the pool for a connection</span><span class="flow-arrow">→</span><span class="flow-step">Pool validates and hands over an idle connection</span><span class="flow-arrow">→</span><span class="flow-step">Request runs queries inside a transaction</span><span class="flow-arrow">→</span><span class="flow-step">Transaction commits or rolls back</span><span class="flow-arrow">→</span><span class="flow-step">Connection is reset if needed and returned to the idle list</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Exhaustion, queueing, and timeouts</h2>
+<ul><li>Pool exhaustion happens when concurrency exceeds the number of available connections.</li><li>Requests then wait in the queue, so latency rises even though each individual query is fast.</li><li>A borrow timeout converts waiting into a fast failure, which protects the rest of the system.</li><li>Without a timeout, requests pile up until threads or memory are exhausted upstream.</li><li>The classic symptom is a latency spike with a healthy database and a saturated pool.</li><li>The fix is usually shorter transactions, fewer round trips, or a bigger pool — in that order.</li></ul>
+
+
+<div class="note">Queue time is the missing metric in most incidents: teams watch query latency while requests wait for a connection they never got.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>External poolers and multiplexing</h2>
+<ul><li>A proxy pooler sits between the app and the database and holds one shared set of backend connections.</li><li>It lets many app instances share a modest number of database connections.</li><li><strong>Session mode</strong> assigns a backend connection for the whole client session; safest, least sharing.</li><li><strong>Transaction mode</strong> returns the backend connection to the pool at commit, giving much higher sharing.</li><li><strong>Statement mode</strong> releases after each statement; maximum sharing, most restrictions.</li><li>Higher sharing modes break session-level features such as prepared statements, advisory locks, and <code>SET</code> persistence.</li><li>Poolers also help during failover and credential rotation, because apps reconnect to the proxy rather than the primary.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Mode</th><th>Backend released</th><th>Compatibility</th></tr></thead><tbody><tr><td>Session</td><td>When the client disconnects</td><td>Full session semantics</td></tr>
+<tr><td>Transaction</td><td>At transaction end</td><td>No session-level state across transactions</td></tr>
+<tr><td>Statement</td><td>After each statement</td><td>Most restrictive; no multi-statement transactions</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Pools in elastic and serverless environments</h2>
+<ul><li>Autoscaling multiplies pool size with instance count, which can overwhelm the database during a scale-out event.</li><li>Serverless functions may each open a pool and then vanish, leaving connections to time out server-side.</li><li>An external pooler or a data API is the usual answer in serverless architectures.</li><li>Warm-up behaviour matters: a cold pool pays setup cost on the first requests after a deploy.</li><li>Scale-in must close connections gracefully; abrupt termination leaves the database holding dead sessions.</li><li>Set max lifetime below the infrastructure's idle-connection timeout so the pool retires connections before the network does.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Monitoring and tuning</h2>
+<ul><li>Watch active versus idle connections over time, not just the current value.</li><li>Track wait-queue depth and the time requests spend waiting for a connection.</li><li>Alert on borrow timeouts and on repeated validation failures.</li><li>Compare database-side connection counts with the sum of application pool sizes; mismatches reveal leaks or misconfiguration.</li><li>Correlate pool saturation with slow queries: a single slow query can hold a connection and starve everyone else.</li><li>Tune in this order: shorten transactions, reduce round trips, then resize the pool, then add a pooler.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Decision rules</h2>
+<ul><li>Pool every connection to a database or a chatty remote service; per-request connections are almost always wrong.</li><li>Keep the total connection count well under the database's limit.</li><li>Use short transactions so connections are returned quickly.</li><li>Use an external pooler when many instances or functions share one database.</li><li>Pick the highest multiplexing mode the application can actually tolerate.</li><li>Never treat a large pool as a substitute for fixing slow queries.</li><li>Make exhaustion observable, or you will diagnose it as a mysterious latency problem.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Connection reuse</strong> removes setup latency from the hot path, but introduces shared state that must be reset between borrowers.</li><li><strong>A large pool</strong> reduces queueing, but pushes contention into the database where it is harder to see and control.</li><li><strong>A small pool</strong> protects the database, but converts load spikes into queueing and borrow timeouts.</li><li><strong>Transaction-mode pooling</strong> shares connections efficiently, but breaks session-level features and prepared statements.</li><li><strong>Long max lifetime</strong> avoids churn, but delays recovery from DNS changes, credential rotation, and failover.</li><li><strong>Short max lifetime</strong> adapts quickly to infrastructure changes, but pays recurring setup cost and creates connection churn.</li><li><strong>Per-instance pools</strong> are simple to operate, but their total grows with instance count and can exceed database limits.</li><li><strong>Borrow timeouts</strong> fail fast and protect the system, but turn overload into visible errors instead of slow successes.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is connection pooling?</summary><div class="answer"><p>Keeping a set of open database connections and reusing them across requests instead of opening a new one each time. A request borrows a connection, runs its queries, and returns it to the pool. This removes TCP, TLS, and authentication cost from the request path.</p></div></details>
+<details><summary>2. Why is creating a connection expensive?</summary><div class="answer"><p>It requires a TCP handshake, often a TLS handshake, authentication, and server-side allocation of a process or thread plus memory. For a small query, that setup can dominate total latency. The cost is paid per connection, so reusing connections amortizes it.</p></div></details>
+<details><summary>3. How do you size a connection pool?</summary><div class="answer"><p>Estimate the number of queries actually executing in parallel as throughput multiplied by average hold time, then add headroom. Keep the total across all instances below the database's connection limit. Oversizing just moves contention into the database, where it appears as lock waits and memory pressure.</p></div></details>
+<details><summary>4. What happens when the pool is exhausted?</summary><div class="answer"><p>Requests wait in a queue for a connection, so latency rises even though queries themselves are fast. With a borrow timeout they fail quickly; without one they pile up until upstream threads or memory run out. The usual cause is long transactions or too few connections for the concurrency.</p></div></details>
+<details><summary>5. What does close() do on a pooled connection?</summary><div class="answer"><p>In most libraries it returns the connection to the pool rather than closing the socket. The physical connection stays open for the next borrower. Code that assumes the connection is truly closed can be surprised by lingering session state.</p></div></details>
+<details><summary>6. Why does session state leak matter?</summary><div class="answer"><p>A borrower may set session variables, create temporary tables, or leave an open transaction. If the pool hands that connection to the next request without resetting it, the new borrower inherits the state. Pools should roll back open transactions and reset session settings on return.</p></div></details>
+<details><summary>7. What is an external pooler and when do you need one?</summary><div class="answer"><p>A separate proxy process that holds a shared set of database connections and multiplexes client sessions onto them. You need one when many app instances or serverless functions would otherwise each open their own pool and exceed the database's connection limit. It also centralizes failover and credential handling.</p></div></details>
+<details><summary>8. What is the difference between session and transaction pooling?</summary><div class="answer"><p>Session mode gives a client its own backend connection for the entire session, preserving all session semantics. Transaction mode returns the backend connection to the shared pool at commit, which allows far more clients per connection but breaks session state such as prepared statements and advisory locks.</p></div></details>
+<details><summary>9. How do connection pools interact with autoscaling?</summary><div class="answer"><p>Each new instance brings its own pool, so total connections equal instances multiplied by pool size. A rapid scale-out can exceed the database limit and cause refusals. Cap pool size per instance, add an external pooler, or scale the database connection budget deliberately.</p></div></details>
+<details><summary>10. How do you detect pool problems in production?</summary><div class="answer"><p>Watch active versus idle connections, wait-queue depth, borrow latency, and timeout counts. Compare the database's own connection count against the sum of configured pool sizes to find leaks. Correlate saturation with long-running queries holding connections.</p></div></details>
+<details><summary>11. Is a bigger pool always better?</summary><div class="answer"><p>No. Beyond the point where the database can execute queries in parallel, extra connections only add contention, context switching, and memory use. Throughput can fall while latency rises. Fix slow queries and shorten transactions first, then size the pool to real parallelism.</p></div></details>
+<details><summary>12. What is max lifetime for?</summary><div class="answer"><p>It retires connections after a fixed period so that DNS changes, credential rotation, load balancer changes, and database failovers eventually reach every client. Without it, a pool can hold connections to a dead primary indefinitely. Set it below any infrastructure idle timeout.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Opening a connection per request and calling it a pooling strategy because the driver caches something.</li><li>Sizing each instance's pool as if it were the only instance, then exceeding the database's connection limit on scale-out.</li><li>Holding a connection while calling external services or doing slow application work.</li><li>Leaking connections on exception paths because the return is not in a finally block.</li><li>Using transaction-mode pooling with session-level features and blaming the database for the failures.</li><li>Treating pool exhaustion as a database problem when the real cause is long transactions.</li><li>Setting no borrow timeout, so overload turns into a hang instead of a fast error.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="materialized-views.html"><span>← Previous</span><strong>Materialized Views</strong></a><a class="next" href="block-storage.html"><span>Next →</span><strong>Block Storage</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/connection-pooling">AlgoMaster — Connection Pooling</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

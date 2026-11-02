@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schema Migrations — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 116 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Schema Migrations</h1>
+    <p class="dek">Deployment Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/schema-migrations">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: a simple rename breaks a fleet</a>
+<a href="#s2">Expand and contract</a>
+<a href="#s3">Why each phase must be independently safe</a>
+<a href="#s4">Classifying operations by safety</a>
+<a href="#s5">Backfilling data safely</a>
+<a href="#s6">Dual write and the switch of reads</a>
+<a href="#s7">Locking and online DDL</a>
+<a href="#s8">Rollback and irreversibility</a>
+<a href="#s9">Migration tooling and discipline</a>
+<a href="#s10">Failure modes</a>
+<a href="#s11">A safe-migration checklist</a>
+<a href="#s12">Working with rolling, blue-green, and canary</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>The hard part of a schema migration is not changing the schema — it is changing it while old and new application versions both run against the same database.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Schema migration</dt><dd>A versioned, ordered change to database structure or data applied as part of a release process.</dd></div><div class="term"><dt>Expand and contract</dt><dd>A migration pattern that adds the new structure, keeps both versions working, then removes the old structure in a later release.</dd></div><div class="term"><dt>Backward-compatible change</dt><dd>A change the old application version can still operate against, such as adding a nullable column.</dd></div><div class="term"><dt>Backfill</dt><dd>Populating a new column or table from existing data, usually in throttled batches.</dd></div><div class="term"><dt>Dual write</dt><dd>Writing to both old and new structures for a transition period so either version can read valid data.</dd></div><div class="term"><dt>Dual read</dt><dd>Reading from the old structure and falling back to the new one (or the reverse) while both are populated.</dd></div><div class="term"><dt>Online DDL</dt><dd>A schema change performed without blocking writes for the duration of the operation.</dd></div><div class="term"><dt>Irreversible migration</dt><dd>A change whose data cannot be reconstructed, making rollback of the application version unsafe.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: a simple rename breaks a fleet</h2>
+<p class="lede">Renaming <code>name</code> to <code>full_name</code> is trivial in development: change the column, change the code, restart.</p>
+<ul><li>In production the application runs on many servers that share one database and are upgraded gradually.</li><li>Rename the column first and old servers fail, because the column they query no longer exists.</li><li>Deploy the new code first and new servers fail, because the column they expect does not exist yet.</li><li>The rollout guarantees a window where both versions run, so neither ordering works.</li><li>The real problem is <strong>mixed-version compatibility</strong>, not the DDL statement itself.</li><li>Every migration must therefore be safe for the version mix that exists while it is being applied.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Expand and contract</h2>
+<ul><li>Phase 1 — expand: add the new column or table without touching the old one.</li><li>Phase 2 — dual write: new code writes both the old and new structures.</li><li>Phase 3 — backfill: copy existing rows into the new structure in small, throttled batches.</li><li>Phase 4 — switch reads: new code reads the new structure, with a fallback while data catches up.</li><li>Phase 5 — deploy everywhere: after all instances run the new code, the old structure is unused.</li><li>Phase 6 — contract: drop the old column or table in a later, separate release.</li></ul>
+
+<div class="flow"><span class="flow-step">Add new structure</span><span class="flow-arrow">→</span><span class="flow-step">Write both</span><span class="flow-arrow">→</span><span class="flow-step">Backfill in batches</span><span class="flow-arrow">→</span><span class="flow-step">Read new</span><span class="flow-arrow">→</span><span class="flow-step">Confirm old code is gone</span><span class="flow-arrow">→</span><span class="flow-step">Drop old structure</span></div>
+<div class="note">Each phase is its own deployable change, and each is safe for every version that can be running at that moment.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Why each phase must be independently safe</h2>
+<ul><li>A migration runs while the deployment is in progress, so the version mix is not under your control.</li><li>If a phase only works when all instances are new, it must wait for a later release.</li><li>If a phase only works when all instances are old, it must happen before the code that breaks it.</li><li>The contract phase is the dangerous one: it breaks old code, so it must be strictly after the last old instance is gone.</li><li>Intermediate releases may need to tolerate both shapes for longer than expected, especially with slow rollouts or long-lived workers.</li><li>Document which release removes each transitional tolerance, or the cleanup never happens.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Classifying operations by safety</h2>
+<ul><li>Adding a nullable column, a new table, or a new index is generally safe for old code.</li><li>Dropping a column or table breaks any code still referencing it.</li><li>Renaming is a drop plus an add from the old code's perspective, so it is never safe in one step.</li><li>Adding a <code>NOT NULL</code> constraint without a default fails on existing rows and can rewrite the table.</li><li>Changing a column type can break old readers and may require a full table rewrite.</li><li>Adding a foreign key or unique constraint validates existing data and can fail or lock while doing so.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Operation</th><th>Safe during rollout?</th><th>Why</th></tr></thead><tbody><tr><td>Add nullable column</td><td>Yes</td><td>Old code ignores it</td></tr>
+<tr><td>Add index</td><td>Usually, if built online</td><td>Blocks writes otherwise</td></tr>
+<tr><td>Rename column</td><td>No</td><td>Old code loses its column</td></tr>
+<tr><td>Drop column</td><td>No</td><td>Old code still references it</td></tr>
+<tr><td>Add NOT NULL with default</td><td>Depends on engine</td><td>May rewrite or fail on existing rows</td></tr>
+<tr><td>Change column type</td><td>Rarely</td><td>Readers and indexes may be incompatible</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Backfilling data safely</h2>
+<ul><li>Backfill in bounded batches with a sleep or rate limit between them to avoid saturating the database.</li><li>Make each batch idempotent so a retry after failure does not double-apply changes.</li><li>Track progress with a watermark or a processed flag so the job can resume rather than restart.</li><li>Backfill in the background, not inside the migration transaction, or the migration holds locks for its entire duration.</li><li>Watch replication lag: heavy backfills slow replicas and make read paths stale.</li><li>Verify completeness with a count comparison before switching reads to the new structure.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Dual write and the switch of reads</h2>
+<ul><li>Dual write keeps both structures current while old and new code coexist.</li><li>Write order matters: write the old structure first if the new one can be rebuilt, or the new one first if it is authoritative.</li><li>Wrap dual writes in the same transaction where possible, so the two structures cannot diverge.</li><li>Dual read with a fallback covers rows the backfill has not reached yet.</li><li>Log mismatches between the two reads so divergence is measured rather than assumed away.</li><li>Remove dual writes only after reads are fully on the new structure and the backfill is verified.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Locking and online DDL</h2>
+<ul><li>Many schema changes take an exclusive lock, which blocks writes and can queue reads behind it.</li><li>A blocked queue grows quickly under load, so a short lock can still cause a long outage.</li><li>Prefer online or concurrent DDL modes where the engine supports them.</li><li>Adding an index on a large table may need an online build or a shadow-table approach.</li><li>Some engines rewrite the entire table for a type or default change, which is effectively an outage on large tables.</li><li>Set a lock timeout so a migration fails fast instead of stalling traffic.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Rollback and irreversibility</h2>
+<ul><li>Application rollback and schema rollback are different operations; the schema often cannot go back.</li><li>Dropping a column destroys data, so rollback requires a backup or a deliberate retention window.</li><li>Design every migration so the previous application version still works after it is applied.</li><li>Keep the expanded form longer than the observation window; the cost of an extra column is small compared with an unrecoverable release.</li><li>Take a backup or snapshot before destructive phases, and know the restore time before you need it.</li><li>Record which migrations are reversible and which are one-way, and treat the one-way ones as high-risk changes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Migration tooling and discipline</h2>
+<ul><li>Version migrations in source control and apply them in a fixed order, tracked in a migrations table.</li><li>Run migrations as a separate step from the application deployment, with its own logs and failure handling.</li><li>Never edit an applied migration; add a new one, or environments drift.</li><li>Test migrations against a production-like dataset, not an empty schema, because data volume drives lock duration.</li><li>Guard against concurrent runners with a lock so two instances cannot apply the same migration twice.</li><li>Require review for destructive statements as strictly as for code.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Failure modes</h2>
+<ul><li><strong>Half-applied migration:</strong> a multi-statement migration fails midway, leaving a schema no version expects.</li><li><strong>Lock storm:</strong> a DDL statement waits on a long transaction, and every subsequent query queues behind it.</li><li><strong>Silent divergence:</strong> dual writes partially fail, and the new structure is missing rows with no error visible.</li><li><strong>Premature contract:</strong> the old column is dropped while a slow-rolling worker still reads it.</li><li><strong>Backfill saturation:</strong> an unthrottled copy consumes I/O and degrades the whole service.</li><li><strong>Non-idempotent retry:</strong> a retried batch doubles a counter or appends duplicate rows.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>A safe-migration checklist</h2>
+<ul><li>Ask which application versions will exist while this migration runs, and check the change against each of them.</li><li>Prefer additive changes; split rename and drop into separate releases.</li><li>Keep the migration fast; move data changes into a separate throttled job.</li><li>Ensure the old code path keeps working after the migration, so application rollback remains possible.</li><li>Verify with real traffic and per-version error rates before starting the contract phase.</li><li>Delete the transitional code and the old structure in a tracked follow-up, or the schema keeps permanent residue.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Working with rolling, blue-green, and canary</h2>
+<ul><li>Rolling deploys mix versions per instance, so migrations must be compatible with both for the rollout duration.</li><li>Blue-green keeps a full old environment alive, so the contract phase must wait until blue is retired.</li><li>Canary keeps a large baseline population on old code for the entire ramp, which extends the compatibility window.</li><li>Feature flags can gate reads of a new structure, letting you switch behavior without another schema change.</li><li>In all three, the migration and the deployment are separate timelines that must be reasoned about together.</li><li>The safest rule: never let a single release both add and remove the same structure.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Expand and contract</strong> keeps every version working but multiplies the number of releases and leaves temporary duplicate storage.</li><li><strong>Dual writes</strong> keep two structures consistent but add write latency, complexity, and a new partial-failure mode.</li><li><strong>Online DDL</strong> avoids blocking writes but consumes extra I/O and can still be slow or fail under load.</li><li><strong>Fast contract</strong> reclaims storage and simplifies the schema but removes the ability to roll back the application safely.</li><li><strong>Aggressive backfill</strong> finishes quickly but degrades the database for live traffic and replication.</li><li><strong>Keeping the old structure indefinitely</strong> preserves rollback options but accumulates dead columns and confusing code.</li><li><strong>Single-transaction migrations</strong> are atomic and simple but hold locks for their full duration on large tables.</li><li><strong>Longer compatibility windows</strong> reduce risk but prolong the period when two code paths and two data shapes must be maintained.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why is renaming a column hard in production?</summary><div class="answer"><p>Because the fleet upgrades gradually, so old and new code run at the same time against one database. Renaming first breaks the old code, and deploying first breaks the new code. The rename has to be decomposed into add, dual write, backfill, switch reads, and drop.</p></div></details>
+<details><summary>2. What is expand and contract?</summary><div class="answer"><p>A migration pattern in phases: add the new structure, keep both versions working, backfill, switch reads and writes, then remove the old structure in a later release. Each phase is independently safe for the version mix that exists at that moment. It trades extra releases for zero-downtime compatibility.</p></div></details>
+<details><summary>3. Which schema changes are safe during a rolling deploy?</summary><div class="answer"><p>Purely additive ones: adding a nullable column, adding a table, or adding an index built online. Dropping, renaming, narrowing types, and adding constraints that validate existing rows are unsafe because old or new code can break. Safety is always relative to the versions that will be running.</p></div></details>
+<details><summary>4. How should a backfill be run?</summary><div class="answer"><p>As a separate, throttled, resumable job in bounded batches, outside the migration transaction. Each batch should be idempotent so retries are safe, and progress should be tracked with a watermark. Watching replication lag and query latency is part of running it, not an afterthought.</p></div></details>
+<details><summary>5. Why is dual write risky?</summary><div class="answer"><p>Because two writes can partially fail, leaving the structures inconsistent without an obvious error. It also adds latency and requires a deliberate write order. Mitigations include a shared transaction, mismatch logging, and a reconciliation job, but the complexity is real and should be temporary.</p></div></details>
+<details><summary>6. Can you always roll back a migration?</summary><div class="answer"><p>No. Dropping a column or narrowing a type destroys or truncates data, and no down-migration restores what was lost. Some changes are inherently one-way, so they need a backup, a retention window, or a staged approach that keeps the old data available until the release is proven.</p></div></details>
+<details><summary>7. What causes a lock storm during DDL?</summary><div class="answer"><p>A schema change requests an exclusive lock while long-running transactions hold shared locks. The DDL waits, and every subsequent query queues behind it, so a short lock becomes a full outage. Setting a lock timeout and choosing online DDL modes prevents the pile-up.</p></div></details>
+<details><summary>8. How does blue-green change migration planning?</summary><div class="answer"><p>It keeps a complete old environment alive as a rollback target, so the old code must remain functional until blue is retired. That means the contract phase cannot ship with the expand phase. It effectively lengthens the compatibility window compared with a quick rolling deploy.</p></div></details>
+<details><summary>9. How does a canary change migration planning?</summary><div class="answer"><p>The baseline keeps serving a large population on old code for the entire ramp, so both code paths and both data shapes must be supported for longer. Migrations that assume everyone moved to the new code will break the baseline. The canary also makes per-version error rates available, which helps validate the switch.</p></div></details>
+<details><summary>10. Should migrations run inside the application deployment?</summary><div class="answer"><p>Usually as a separate step with its own failure handling, ordered before the code that depends on it. Running them inside application startup causes races when many instances boot at once. A dedicated migration job with a lock gives deterministic ordering and clearer logs.</p></div></details>
+<details><summary>11. How do you verify a migration is complete?</summary><div class="answer"><p>Compare row counts and key aggregates between old and new structures, check for nulls in required fields, and confirm no mismatches in dual-read logs. Then verify with real traffic and per-version error rates. Only after that should the contract phase be scheduled.</p></div></details>
+<details><summary>12. What is the single most important migration rule?</summary><div class="answer"><p>Never let one release both add and remove the same structure. Addition must be proven in production with all versions running before removal is even scheduled. Almost every zero-downtime migration failure comes from collapsing those two steps.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Renaming a column in one step and assuming the deployment is atomic.</li><li>Dropping the old column in the same release that introduces the new one.</li><li>Running an unthrottled backfill that saturates I/O and replication.</li><li>Adding a NOT NULL column with a default and triggering a full table rewrite on a large table.</li><li>Assuming dual writes cannot diverge because they are in the same code path.</li><li>Editing an already-applied migration instead of adding a new one.</li><li>Treating an application rollback as if it also restores the previous schema.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="ab-testing-infrastructure.html"><span>← Previous</span><strong>A/B Testing Infrastructure</strong></a><a class="next" href="rollbacks-and-immutable-infrastructure.html"><span>Next →</span><strong>Rollbacks &amp; Immutable Infrastructure</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/schema-migrations">AlgoMaster — Schema Migrations</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

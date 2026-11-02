@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Event Sourcing — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 73 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Event Sourcing</h1>
+    <p class="dek">Architectural Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/event-sourcing">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with storing only current state</a>
+<a href="#s2">What event sourcing is</a>
+<a href="#s3">Events, commands, and state</a>
+<a href="#s4">Streams, aggregates, and versions</a>
+<a href="#s5">Rebuilding state by replay</a>
+<a href="#s6">Snapshots</a>
+<a href="#s7">Projections and read models</a>
+<a href="#s8">The event store</a>
+<a href="#s9">Schema evolution and event versioning</a>
+<a href="#s10">Benefits</a>
+<a href="#s11">Costs and constraints</a>
+<a href="#s12">Failure modes</a>
+<a href="#s13">When to use it, and what it is not</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Event sourcing stores every state change as an immutable event and derives current state by replaying them, trading simple reads and easy deletes for a complete, replayable history.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Event</dt><dd>An immutable record of something that already happened, named in the past tense and carrying the data needed to explain it.</dd></div><div class="term"><dt>Event store</dt><dd>An append-only store of events, ordered within each stream, that acts as the system of record.</dd></div><div class="term"><dt>Stream</dt><dd>The ordered sequence of events for one entity, such as a single order or account.</dd></div><div class="term"><dt>Aggregate</dt><dd>A consistency boundary whose state is rebuilt from its stream and which validates new commands against that state.</dd></div><div class="term"><dt>Replay</dt><dd>Rebuilding state by applying events in order from the beginning of a stream or from a snapshot.</dd></div><div class="term"><dt>Snapshot</dt><dd>A periodically saved copy of aggregate state that lets replay start from a recent point instead of the first event.</dd></div><div class="term"><dt>Projection</dt><dd>A derived read model built by consuming events, queryable without replaying a stream.</dd></div><div class="term"><dt>Optimistic concurrency</dt><dd>Appending only if the stream is still at the expected version, preventing two commands from overwriting each other.</dd></div><div class="term"><dt>Upcasting</dt><dd>Transforming an older event schema into the current one while reading, so history does not need rewriting.</dd></div><div class="term"><dt>Temporal query</dt><dd>A read that reconstructs state as of a past point in time by replaying only events up to that point.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with storing only current state</h2>
+<p class="lede">Most systems keep only the latest value. A new email replaces the old one; a withdrawal overwrites the balance.</p>
+<ul><li>That is simple and often exactly right for the product.</li><li>History disappears: you cannot answer why a value is what it is.</li><li>You cannot reconstruct what the account looked like last week.</li><li>Audit needs are usually solved later with a separate trail that drifts from the real data.</li><li>Bugs that corrupted state in the past cannot be replayed to see how it happened.</li><li>Denormalized derived fields cannot be rebuilt if the derivation logic changes.</li><li>The alternative is to treat history itself as the primary record.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What event sourcing is</h2>
+<ul><li>Every state change is stored as an <strong>immutable event</strong> describing what happened.</li><li>Current state is not stored as the source of truth; it is <strong>calculated</strong> by applying events in order.</li><li>The event log becomes the system of record for that bounded context.</li><li>Events are facts: they are appended, never updated or deleted in normal operation.</li><li>A new event is the only way to express change, including corrections (for example, a reversal event).</li><li>The design is common in finance, logistics, and audit-heavy domains.</li><li>It is a persistence model, not a UI or messaging pattern.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Events, commands, and state</h2>
+<ul><li>A <strong>command</strong> is a request that may be rejected: <code>WithdrawMoney</code>.</li><li>An <strong>event</strong> is the recorded outcome in the past tense: <code>MoneyWithdrawn</code>.</li><li>Events describe facts; commands describe intent. Mixing the names corrupts the model.</li><li>State is a fold over events: <code>state = reduce(apply, events, initialState)</code>.</li><li>Events should carry enough data to be understood without the current schema.</li><li>Events must not contain decisions or references that only made sense at write time.</li><li>A rejected command produces no event, which is why validation happens before append.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Streams, aggregates, and versions</h2>
+<ul><li>Events are grouped into streams, one per entity such as an order or a bank account.</li><li>A stream is ordered; order across streams is not guaranteed unless the store provides a global position.</li><li>The aggregate loads its stream, replays it, and validates a new command against the resulting state.</li><li>Each append includes the expected version, so concurrent writes fail instead of silently overwriting.</li><li>The store assigns a monotonically increasing version per stream.</li><li>Cross-entity invariants need a different boundary or a process manager, not a bigger stream.</li><li>Stream design is the hardest part: too large and writes contend; too small and invariants fragment.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Rebuilding state by replay</h2>
+<ul><li>To handle a command, load the events for that stream from the store.</li><li>Apply them in version order through the aggregate's apply function.</li><li>The result is the current state, which is then validated and used to decide the next event.</li><li>The same mechanism answers questions about the past by replaying only up to a timestamp.</li><li>Replay is deterministic only if apply logic is pure and does not call external systems.</li><li>Long streams make replay slow, which is what snapshots solve.</li><li>Replay is also the recovery tool when a projection or cache is wrong.</li></ul>
+
+<div class="flow"><span class="flow-step">Receive command</span><span class="flow-arrow">→</span><span class="flow-step">Load stream events</span><span class="flow-arrow">→</span><span class="flow-step">Apply events to rebuild state</span><span class="flow-arrow">→</span><span class="flow-step">Validate command against state</span><span class="flow-arrow">→</span><span class="flow-step">Append new event with expected version</span><span class="flow-arrow">→</span><span class="flow-step">Publish event for projections</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Snapshots</h2>
+<ul><li>A snapshot stores aggregate state at a specific stream version.</li><li>Loading then reads the latest snapshot and replays only events after it.</li><li>Snapshots are an optimization, not the source of truth; they can be deleted and rebuilt.</li><li>Snapshot frequency trades write and storage cost against replay length.</li><li>Snapshots must be versioned with the code that produced them, or schema changes make them unreadable.</li><li>A corrupt snapshot must never be trusted over the events.</li><li>Slow-changing entities may never need snapshots at all.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Projections and read models</h2>
+<ul><li>Reading a stream and replaying it is too slow for queries and lists.</li><li>Projections consume events and maintain denormalized read models for specific screens.</li><li>They are usually eventually consistent and must be idempotent under at-least-once delivery.</li><li>Projections can be rebuilt from zero, which makes schema and logic changes safe.</li><li>Multiple projections can serve different views over the same events.</li><li>A checkpoint per projection tracks how far it has consumed.</li><li>Event sourcing is often paired with CQRS, but each is an independent decision.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>The event store</h2>
+<ul><li>Append-only writes with no in-place updates; correction means appending another event.</li><li>Ordering within a stream is guaranteed; global ordering enables subscriptions.</li><li>Optimistic concurrency is enforced with expected version numbers.</li><li>Durability and fsync policy decide whether an acknowledged event can be lost.</li><li>A global position or subscription feed lets projections and other consumers tail the log.</li><li>Retention is permanent for the business-meaningful history, which drives storage planning.</li><li>Some systems implement the store on relational tables; others use purpose-built event databases or log systems.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Schema evolution and event versioning</h2>
+<ul><li>Events are contracts that live for years, so changing them is a migration problem, not a refactor.</li><li>Prefer additive changes: new optional fields with safe defaults.</li><li>Version event types and use <strong>upcasting</strong> to convert old shapes on read.</li><li>Never reinterpret an existing field's meaning; write a new event type instead.</li><li>Unreadable old events break replay, which breaks rebuilds and audits.</li><li>Keep a schema registry or documented contract tests for event payloads.</li><li>Serialization format choice matters: text formats are easier to evolve and debug than opaque binary blobs.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Benefits</h2>
+<ul><li><strong>Complete audit trail</strong> by construction, not as a bolted-on side table.</li><li><strong>Temporal queries</strong> answer what the state was at any point.</li><li><strong>Debugging</strong> can replay the exact sequence that produced a bad state.</li><li><strong>Rebuildable views</strong> let you change read models or fix bugs and reprocess history.</li><li><strong>Loose coupling</strong> because consumers subscribe to facts instead of being called synchronously.</li><li><strong>No lost intent</strong>: every change is explained by the event that caused it.</li><li>New features can often be added by building a new projection over existing history.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Costs and constraints</h2>
+<ul><li>Simple reads now require projections, which is extra infrastructure and lag.</li><li>Storage grows without bound, and rebuilding takes real time and compute.</li><li>Deleting data conflicts with immutability; privacy requests need crypto-shredding or redaction strategies.</li><li>Queries across aggregates are awkward without projections or a separate store.</li><li>The team must understand versioning, concurrency, replay, and idempotency.</li><li>Existing reporting, BI, and ad-hoc SQL tools expect tables, not streams.</li><li>Operationally, you now run an event store plus projections plus snapshotting.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Failure modes</h2>
+<ul><li>A non-deterministic apply function makes replay produce different state over time.</li><li>External calls inside apply turn replay into a side-effecting operation.</li><li>Duplicate event delivery double-applies changes in a projection without idempotency.</li><li>Out-of-order projection consumption overwrites newer data with older values.</li><li>Unversioned event schemas break replay after a deploy.</li><li>A missing subscription checkpoint forces a full rebuild or loses events.</li><li>Unbounded streams without snapshots make command handling progressively slower.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use it, and what it is not</h2>
+<ul><li>Use it when history, audit, or temporal reconstruction is a core requirement.</li><li>Use it when multiple derived views must be rebuilt as logic changes.</li><li>Avoid it for simple CRUD where current state is all anyone needs.</li><li>Event sourcing is not event-driven architecture: the latter is about messaging between components.</li><li>It is not change data capture: CDC records database row changes, not domain intent.</li><li>It is not an audit log bolted onto mutable tables; the log is the source of truth.</li><li>Start with one bounded context with clear value, and keep the rest of the system conventional.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Source of truth</th><th>Answers why</th></tr></thead><tbody><tr><td>State-stored CRUD</td><td>Current rows</td><td>Only if a separate audit trail exists</td></tr>
+<tr><td>Audit log beside CRUD</td><td>Current rows</td><td>Partly, and it can drift</td></tr>
+<tr><td>CDC stream</td><td>Current rows</td><td>Shows row diffs, not intent</td></tr>
+<tr><td>Event sourcing</td><td>Immutable event log</td><td>Yes, by design</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Full history</strong> enables audit and temporal queries but grows storage forever.</li><li><strong>Replay</strong> rebuilds any view or fixes bad state but costs time and compute as streams lengthen.</li><li><strong>Snapshots</strong> keep command latency flat but add write amplification and versioning concerns.</li><li><strong>Projections</strong> make reads fast and flexible but introduce lag and rebuild infrastructure.</li><li><strong>Immutability</strong> preserves truth but makes deletion and privacy compliance harder.</li><li><strong>Event contracts</strong> decouple consumers but require long-term schema evolution discipline.</li><li><strong>Intent-rich events</strong> explain changes but couple the model to the domain language at write time.</li><li><strong>Specialized store</strong> fits append-heavy workloads but leaves the team without familiar SQL tooling.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is event sourcing in one sentence?</summary><div class="answer"><p>It is a persistence model where every state change is stored as an immutable event and current state is derived by replaying those events. The event log, not a mutable row, is the source of truth.</p></div></details>
+<details><summary>2. How is current state obtained?</summary><div class="answer"><p>By loading the entity's stream and applying each event in order from the start or from the latest snapshot. The same apply logic always produces the same state, so replay is deterministic.</p></div></details>
+<details><summary>3. Why are snapshots needed?</summary><div class="answer"><p>Long streams make full replay slow, and command handling pays that cost on every load. A snapshot stores state at a version so only newer events must be applied. It is a cache that can be discarded and rebuilt.</p></div></details>
+<details><summary>4. What is the difference between a command and an event?</summary><div class="answer"><p>A command is an intent that may be rejected, such as WithdrawMoney. An event is a recorded fact that already happened, such as MoneyWithdrawn. Only accepted commands produce events.</p></div></details>
+<details><summary>5. How do you handle a correction or reversal?</summary><div class="answer"><p>Append a compensating event rather than editing history. For example, append a reversal or adjustment event so the log still explains what happened and why the current state changed.</p></div></details>
+<details><summary>6. How do you prevent two concurrent commands from conflicting?</summary><div class="answer"><p>Use optimistic concurrency: the append includes the expected stream version, and the store rejects it if another event landed first. The command can then reload and retry or fail.</p></div></details>
+<details><summary>7. How do you query event-sourced data?</summary><div class="answer"><p>Through projections that maintain denormalized read models, or by replaying a stream for a single entity. Ad-hoc queries across many entities need projections or an exported analytical store.</p></div></details>
+<details><summary>8. How do you evolve event schemas?</summary><div class="answer"><p>Prefer additive changes with defaults, version event types, and upcast older shapes when reading. Avoid changing the meaning of an existing field, and test that old events still replay correctly.</p></div></details>
+<details><summary>9. How does event sourcing handle deletion and privacy?</summary><div class="answer"><p>Immutability conflicts with delete requests, so designs use crypto-shredding (discarding the key that decrypts a person's data), redaction of payload fields, or a separate personal-data store referenced by events. The approach must be decided before launch, not after.</p></div></details>
+<details><summary>10. Is event sourcing the same as event-driven architecture?</summary><div class="answer"><p>No. Event-driven architecture is about components communicating through events. Event sourcing is about how one component persists state. You can use events for messaging while storing plain rows, or source events without publishing them anywhere.</p></div></details>
+<details><summary>11. What makes replay go wrong?</summary><div class="answer"><p>Non-deterministic apply logic, external calls or clock reads inside apply, and schema changes that alter interpretation. Replay must be a pure function of events and code, with versions pinned so history is reproducible.</p></div></details>
+<details><summary>12. When should you avoid event sourcing?</summary><div class="answer"><p>When nobody needs history, temporal queries, or rebuildable views, and the domain is simple CRUD. The event store, projections, snapshots, and versioning only pay off when the history is genuinely valuable.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Naming events in the imperative or present tense, which blurs commands and facts.</li><li>Putting external calls, randomness, or current time inside the apply function, breaking replay determinism.</li><li>Skipping event schema versioning until the first breaking change.</li><li>Building projections without idempotency and then meeting at-least-once delivery.</li><li>Replaying unbounded streams on every command because snapshots were never added.</li><li>Treating the event store as an audit side-log while mutable tables remain the source of truth.</li><li>Ignoring privacy deletion requirements until a user requests erasure from an immutable log.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="cqrs.html"><span>← Previous</span><strong>CQRS</strong></a><a class="next" href="service-discovery.html"><span>Next →</span><strong>Service Discovery</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/event-sourcing">AlgoMaster — Event Sourcing</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Idempotency — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 21 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Idempotency</h1>
+    <p class="dek">API Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/idempotency">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: retrying after a failure</a>
+<a href="#s2">What idempotency means</a>
+<a href="#s3">Naturally idempotent operations</a>
+<a href="#s4">Operations that are not idempotent</a>
+<a href="#s5">Idempotency keys</a>
+<a href="#s6">How the server handles a key</a>
+<a href="#s7">Same key, same request</a>
+<a href="#s8">Concurrent requests with the same key</a>
+<a href="#s9">Handling in-progress requests</a>
+<a href="#s10">Storing records and choosing retention</a>
+<a href="#s11">Keeping the operation and the record consistent</a>
+<a href="#s12">Same effect, not always the same response</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>An operation is idempotent when repeating it has the same intended effect as doing it once, which is what makes <strong>safe retries</strong> possible when the client cannot tell whether the first attempt worked.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Idempotency</dt><dd>The property that performing an operation multiple times has the same effect on the system as performing it once.</dd></div><div class="term"><dt>Retry</dt><dd>Re-sending a request after an unknown or failed outcome, which is safe only when the operation is idempotent.</dd></div><div class="term"><dt>Idempotency key</dt><dd>A unique identifier the client generates for one logical operation and reuses on every retry of that operation.</dd></div><div class="term"><dt>Request hash</dt><dd>A fingerprint of the original request stored with the key so a different payload under the same key can be rejected.</dd></div><div class="term"><dt>In-progress state</dt><dd>A record marking that a key is reserved and the operation is running, but no final response exists yet.</dd></div><div class="term"><dt>Atomic reservation</dt><dd>Inserting the key and checking its absence in one indivisible step, usually through a unique constraint.</dd></div><div class="term"><dt>Retention period</dt><dd>How long idempotency records are kept before the key can be treated as new again.</dd></div><div class="term"><dt>Duplicate suppression</dt><dd>Returning the stored result of the first attempt instead of executing the operation a second time.</dd></div><div class="term"><dt>Exactly-once effect</dt><dd>The practical goal: at-least-once delivery plus idempotent handling yields one real side effect.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: retrying after a failure</h2>
+<p class="lede">A user pays ₹1,000. The payment service charges the card successfully, but the response is lost before the client sees it.</p>
+<ul><li>The client cannot distinguish three cases: the payment succeeded, it failed, or the request never arrived.</li><li>Retrying is the standard reaction, and it is correct when the first attempt failed.</li><li>Retrying is destructive when the first attempt succeeded, because the user is charged twice.</li><li>The same problem appears for order creation, refunds, emails, and any write with an external side effect.</li><li>Timeouts are inherently ambiguous: a timeout is not a failure, it is an absence of information.</li><li>At-least-once delivery is the realistic guarantee in distributed systems, so duplicates must be handled somewhere.</li><li>Idempotency moves that handling to the server, where the operation's meaning is known.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What idempotency means</h2>
+<ul><li>An operation is idempotent if performing it multiple times has the same <strong>intended effect</strong> as performing it once.</li><li>The key word is effect, not response: the system state must end up the same, even if status codes differ.</li><li><code>set status = active</code> is idempotent: after one or five executions the status is still active.</li><li><code>add $10 to balance</code> is not: each execution adds another $10.</li><li>Idempotency is about the final state, so it tolerates intermediate repeated work if that work is overwritten.</li><li>It is a property of the operation's semantics, not of HTTP or of a database feature.</li><li>Reads are naturally idempotent because they do not change state, which is why retrying a GET is uncontroversial.</li></ul>
+
+
+<div class="note">A safe method does not change state at all; an idempotent method may change state but converges to the same result.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Naturally idempotent operations</h2>
+<ul><li>Setting a field to an absolute value: <code>UPDATE users SET email = ? WHERE id = ?</code>.</li><li>Transitioning status to a fixed value, such as moving an order to <code>SHIPPED</code>.</li><li>Deleting a specific resource by ID: after the first delete, the resource is gone and stays gone.</li><li>Replacing an entire object with a supplied representation, which is what PUT is defined to do.</li><li>These operations are idempotent because they express an <strong>end state</strong> rather than a delta.</li><li>Design rule: prefer absolute state over increments when the client may retry.</li><li>Natural idempotency still needs care when side effects fire, such as sending an email after an update.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Operations that are not idempotent</h2>
+<ul><li>Creating a resource: <code>POST /orders</code> twice may create order 1001 and then order 1002.</li><li>Increments and decrements: balance changes, counters, and inventory reservations.</li><li>Appending: adding a message to a list or an event to a stream grows the data with every attempt.</li><li>Triggering external effects: charging a card, sending an email, calling a third-party API.</li><li>HTTP methods reflect this: POST is not idempotent by default, while PUT and DELETE are designed to be.</li><li>The response may look identical while the side effect duplicated, which is what makes this dangerous.</li><li>These are exactly the operations that need an explicit mechanism, because semantics cannot save them.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Request</th><th>Server result</th></tr></thead><tbody><tr><td>POST /orders (first attempt)</td><td>Creates order 1001</td></tr>
+<tr><td>POST /orders (retry)</td><td>Creates order 1002</td></tr>
+<tr><td>PUT /orders/1001 with a body</td><td>Order 1001 ends in the supplied state</td></tr>
+<tr><td>DELETE /orders/1001 twice</td><td>Order 1001 stays deleted</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Idempotency keys</h2>
+<p class="lede">The standard fix is a key generated by the client for one logical operation and reused on every retry of it.</p>
+<ul><li>The client generates a unique value before the first attempt, such as <code>payment:7842</code> or a UUID.</li><li>It sends the key with the request, usually in a header such as <code>Idempotency-Key</code>.</li><li>The server stores the key together with the status and result of processing.</li><li>On a repeat, the server finds the key and returns the stored result instead of executing again.</li><li>Crucially, the client must reuse the <strong>same</strong> key on retries; a new key per attempt defeats the mechanism entirely.</li><li>The key should identify the operation, so it is generated once per user action, not once per HTTP call.</li><li>Keys must be scoped to the caller, so two different clients cannot collide on the same string.</li></ul>
+
+
+<pre class="code"><code>POST /payments
+Idempotency-Key: 9f1c2b7e-4a6d-4d1e-9c3a-2f0b7d5e8a11
+Content-Type: application/json
+
+{&quot;amount&quot;: 1000, &quot;currency&quot;: &quot;INR&quot;, &quot;card&quot;: &quot;tok_visa&quot;}</code></pre>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>How the server handles a key</h2>
+<ul><li>Receive the request and read the idempotency key, rejecting requests that omit a required one.</li><li>Look up the key for this caller before doing any work.</li><li>If absent, reserve the key as <code>IN_PROGRESS</code> and start the operation.</li><li>Perform the business action, then store the outcome and mark the record <code>COMPLETED</code>.</li><li>Return the response to the client.</li><li>On a repeat, return the stored result rather than executing again.</li><li>If the reservation exists but is still in progress, apply the in-progress policy instead of starting a second execution.</li><li>A stored record typically holds the key, owner, request hash, status, created resource, and response.</li></ul>
+
+<div class="flow"><span class="flow-step">Read Idempotency-Key</span><span class="flow-arrow">→</span><span class="flow-step">Look up record for this caller</span><span class="flow-arrow">→</span><span class="flow-step">Absent: reserve atomically as IN_PROGRESS</span><span class="flow-arrow">→</span><span class="flow-step">Execute the business operation</span><span class="flow-arrow">→</span><span class="flow-step">Store result and mark COMPLETED</span><span class="flow-arrow">→</span><span class="flow-step">Return response</span><span class="flow-arrow">→</span><span class="flow-step">Repeat arrives: return stored result</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Same key, same request</h2>
+<ul><li>A key must only ever describe one logical request; reusing it for different parameters is a client bug.</li><li>If a ₹1,000 charge and a ₹2,000 charge share a key, silently returning the first result would hide a real error.</li><li>Store a <strong>hash of the significant request fields</strong> next to the key.</li><li>When a duplicate arrives, compare hashes: identical means a genuine retry, different means a conflict.</li><li>Reject mismatches explicitly, typically with a 4xx response, rather than executing or returning the old result.</li><li>Hashing selected fields rather than the raw body avoids false mismatches from irrelevant ordering or formatting.</li><li>This check turns accidental key reuse into a visible error instead of a silent wrong outcome.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Request</th><th>Key</th><th>Request hash</th><th>Result</th></tr></thead><tbody><tr><td>Charge ₹1,000</td><td>A</td><td>h1</td><td>Processed</td></tr>
+<tr><td>Charge ₹1,000 (retry)</td><td>A</td><td>h1</td><td>Original result returned</td></tr>
+<tr><td>Charge ₹2,000</td><td>A</td><td>h2</td><td>Rejected: key reused with a different request</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Concurrent requests with the same key</h2>
+<ul><li>Two requests with the same key can arrive almost simultaneously, for example when a client times out and retries immediately.</li><li>A naive check-then-insert lets both requests see no record, so both execute.</li><li>The duplicate problem returns in exactly the situation idempotency was meant to solve.</li><li>The fix is an <strong>atomic</strong> check and reserve, such as a unique constraint on the key.</li><li>The first insert wins; the second detects the conflict and must not execute the operation.</li><li>Distributed stores need a conditional write or a compare-and-set, not a read followed by an unconditional write.</li><li>Locking works too, but adds contention and expiry handling; a unique constraint is simpler and more reliable.</li></ul>
+
+
+<pre class="code"><code>INSERT INTO idempotency_keys (key, owner, request_hash, status)
+VALUES (?, ?, ?, &#x27;IN_PROGRESS&#x27;)
+ON CONFLICT (key, owner) DO NOTHING;
+-- zero rows inserted means another request owns this key</code></pre>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Handling in-progress requests</h2>
+<ul><li>A retry can arrive while the original request is still running, so the record exists but has no final result.</li><li>Option one: return <code>202 Accepted</code> with a way to poll for the outcome.</li><li>Option two: wait briefly for the original to finish, then return its stored result.</li><li>Option three: return <code>409 Conflict</code> to signal that the operation is already in progress.</li><li>Any of these is acceptable; what is not acceptable is starting a second copy of the operation.</li><li>Waiting needs a bounded timeout, otherwise a stuck original request holds the retry open too.</li><li>Stale <code>IN_PROGRESS</code> records must eventually expire, or a crashed request blocks the key forever.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Option</th><th>What the client sees</th><th>When it fits</th></tr></thead><tbody><tr><td>202 Accepted</td><td>Request is being processed; poll later</td><td>Long-running operations</td></tr>
+<tr><td>Wait briefly</td><td>Result of the original request</td><td>Fast operations, short wait</td></tr>
+<tr><td>409 Conflict</td><td>Operation already in progress</td><td>Clients that can retry later</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Storing records and choosing retention</h2>
+<ul><li>Records must be durable enough for the side effect they protect: a payment needs stronger guarantees than a preference update.</li><li>Typical fields: key, owning client, request hash, status, created resource, and optionally the full response.</li><li>A relational database with a unique constraint gives atomicity and durability in one place.</li><li>A fast store such as Redis works when losing a record cannot cause real damage.</li><li>A cache that can lose data must never be the only protection for a financial operation.</li><li>Retention should cover the window in which clients are expected to retry, for example a day for payment APIs.</li><li>Longer retention blocks late retries better but costs storage and lookups; shorter retention frees space but reopens the duplicate window.</li></ul>
+
+
+<div class="note">Retention is a design decision about client behaviour, not a storage default: set it from the maximum retry window you promise.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Keeping the operation and the record consistent</h2>
+<ul><li>The hard part is not storing a key, it is writing the key and the business change together.</li><li>If the order is created and the process crashes before the record is marked complete, a retry may create a second order.</li><li>The fix is to write the business change and the idempotency record in the <strong>same transaction</strong>.</li><li>Then either both are committed or neither is, so state cannot diverge.</li><li>When the business write lives in another system, use an outbox, a two-phase approach, or make the downstream call idempotent too.</li><li>Recovery jobs should reconcile records stuck in <code>IN_PROGRESS</code> against the actual business state.</li><li>A crash between commit and response is fine: the next retry reads the completed record and returns it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Same effect, not always the same response</h2>
+<ul><li>Idempotency is about system state, so a repeated request may legitimately return a different status code.</li><li>Deleting a resource returns <code>200 OK</code> the first time and <code>404 Not Found</code> the second, while the state stays deleted.</li><li>The state is identical, so the operation was idempotent even though the responses differ.</li><li>APIs with explicit idempotency keys usually return the <strong>original response</strong> because it simplifies client retry logic.</li><li>Returning the stored response also preserves the created resource identifier, which matters for create operations.</li><li>Do not conflate “same response” with “same effect”: only the latter is required for correctness.</li><li>Be explicit in API documentation about which behaviour clients should expect.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Request</th><th>Response</th><th>Resource state</th></tr></thead><tbody><tr><td>DELETE /users/123 (first)</td><td>200 OK</td><td>Deleted</td></tr>
+<tr><td>DELETE /users/123 (second)</td><td>404 Not Found</td><td>Still deleted</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Idempotency keys</strong> make retries safe but add a store, a lookup, and a reservation step to every write.</li><li><strong>Storing full responses</strong> makes retries seamless but consumes storage and can leak data if retention is careless.</li><li><strong>Storing only the result reference</strong> saves space but forces the client to re-read state it may not have permission to see.</li><li><strong>Long retention</strong> protects late retries but grows storage and slows lookups on the key index.</li><li><strong>Short retention</strong> keeps storage small but lets a sufficiently delayed retry duplicate the operation.</li><li><strong>Waiting for an in-progress request</strong> gives a clean answer but consumes a connection and needs a bounded timeout.</li><li><strong>Returning 409</strong> is honest and cheap but pushes retry logic onto the client.</li><li><strong>Redis-based records</strong> are fast but offer weaker durability than a transactional database.</li><li><strong>Rejecting mismatched hashes</strong> prevents silent corruption but can frustrate clients that mutate payloads between attempts.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What does idempotent actually mean?</summary><div class="answer"><p>Performing the operation multiple times has the same intended effect on the system as performing it once. The state converges to the same result, even if individual responses differ.</p></div></details>
+<details><summary>2. Why is idempotency necessary if HTTP has retries built in?</summary><div class="answer"><p>Retries exist precisely because the client cannot know whether a failed request executed. Without idempotency, a retry of a create or a charge duplicates the side effect, so the safe retry depends on the operation being idempotent.</p></div></details>
+<details><summary>3. Which HTTP methods are idempotent and why?</summary><div class="answer"><p>GET, HEAD, PUT, and DELETE are defined as idempotent, and GET and HEAD are also safe. PUT describes a target state and DELETE removes a specific resource, so repeating them converges. POST creates or triggers something and is not idempotent by default.</p></div></details>
+<details><summary>4. How does an idempotency key work?</summary><div class="answer"><p>The client generates a unique key for one logical operation and sends it with every attempt. The server stores the key with the request hash, status, and result, and returns the stored result instead of executing again when the key repeats.</p></div></details>
+<details><summary>5. What happens if the client generates a new key on every retry?</summary><div class="answer"><p>Every attempt looks like a brand-new operation, so the server executes each one and the duplicate side effect reappears. The key must be created before the first attempt and reused for the whole logical operation.</p></div></details>
+<details><summary>6. Why store a request hash with the key?</summary><div class="answer"><p>To detect a key reused with different parameters, such as a ₹1,000 charge followed by a ₹2,000 charge. If the hash differs, the server rejects the request instead of silently returning an unrelated result.</p></div></details>
+<details><summary>7. Why is check-then-insert unsafe for idempotency keys?</summary><div class="answer"><p>Two concurrent requests can both see the key absent and both proceed, recreating the duplication. The check and the reservation must be one atomic operation, typically an insert guarded by a unique constraint.</p></div></details>
+<details><summary>8. What should happen when a retry arrives while the original is still running?</summary><div class="answer"><p>The server must not start a second execution. It can return 202 Accepted, wait briefly for the original to finish and return its result, or return 409 Conflict. Expiring stale in-progress records keeps a crash from blocking the key forever.</p></div></details>
+<details><summary>9. Where should idempotency records be stored?</summary><div class="answer"><p>Somewhere durable enough for the side effect being protected. A transactional database with a unique constraint is the safe default; a fast cache is acceptable only when losing the record cannot cause a duplicate charge or order.</p></div></details>
+<details><summary>10. How do you keep the business write and the idempotency record consistent?</summary><div class="answer"><p>Write them in the same transaction so either both commit or neither does. When the side effect lives in another service, use an outbox or make the downstream operation idempotent as well, and reconcile records left in progress.</p></div></details>
+<details><summary>11. Can an idempotent operation return different responses?</summary><div class="answer"><p>Yes. A second DELETE may return 404 while the resource stays deleted, so the effect is identical and the response is not. APIs with explicit keys often return the original response anyway to make client retries simpler.</p></div></details>
+<details><summary>12. How long should idempotency records be kept?</summary><div class="answer"><p>At least as long as clients are expected to retry the operation. Internal operations may need minutes or hours, while payment APIs typically keep records much longer because late retries are realistic and expensive.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Generating a fresh idempotency key on every retry, which silently defeats the whole mechanism.</li><li>Doing a read-then-write check without atomic reservation, so concurrent retries both execute.</li><li>Storing idempotency records in a cache that can lose data while protecting a financial side effect.</li><li>Ignoring the request payload, so the same key with different parameters returns an unrelated result.</li><li>Leaving records in progress forever after a crash, permanently blocking that key.</li><li>Assuming identical responses are required, when only the resulting state has to match.</li><li>Confusing safety with idempotency: a safe method never changes state, an idempotent one may.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="api-styles.html"><span>← Previous</span><strong>API Architectural Styles</strong></a><a class="next" href="rest-api-design.html"><span>Next →</span><strong>REST Fundamentals</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/idempotency">AlgoMaster — Idempotency</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

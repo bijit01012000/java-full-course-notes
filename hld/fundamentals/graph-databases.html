@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graph Databases — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 51 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Graph Databases</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/graph-databases">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem graph databases solve</a>
+<a href="#s2">What a graph database is</a>
+<a href="#s3">Index-free adjacency</a>
+<a href="#s4">Modeling: property graphs and RDF</a>
+<a href="#s5">Querying</a>
+<a href="#s6">Why traversals stay fast, and where they do not</a>
+<a href="#s7">Indexes and constraints</a>
+<a href="#s8">Traversal algorithms</a>
+<a href="#s9">Scaling a graph</a>
+<a href="#s10">Transactions and consistency</a>
+<a href="#s11">Where graph databases fit</a>
+<a href="#s12">When not to use one</a>
+<a href="#s13">Operational realities</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A graph database stores relationships as first-class edges that point directly at their endpoints, so a multi-hop traversal follows pointers instead of performing one index join per hop — which is exactly where relational queries degrade as depth grows.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Node (vertex)</dt><dd>An entity in the graph, such as a person, account, or product.</dd></div><div class="term"><dt>Edge (relationship)</dt><dd>A first-class connection between two nodes, with its own type, direction, and properties.</dd></div><div class="term"><dt>Property</dt><dd>A key-value attribute attached to a node or an edge, such as a name or a since-date.</dd></div><div class="term"><dt>Label</dt><dd>A tag that classifies a node or edge so queries can match a subset, such as Person or PURCHASED.</dd></div><div class="term"><dt>Property graph</dt><dd>A model where nodes and edges both carry labels and properties.</dd></div><div class="term"><dt>RDF triple</dt><dd>A subject-predicate-object statement, the alternative graph model used for interchange and ontologies.</dd></div><div class="term"><dt>Index-free adjacency</dt><dd>The design where each node holds direct references to its adjacent edges, so traversal does not consult a global index.</dd></div><div class="term"><dt>Traversal</dt><dd>Walking from a starting node along edges, hop by hop, to collect or filter a subgraph.</dd></div><div class="term"><dt>Variable-length path</dt><dd>A pattern that matches an unknown number of hops, such as one to three degrees of separation.</dd></div><div class="term"><dt>Supernode</dt><dd>A node with an enormous number of edges, which makes any traversal through it expensive.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem graph databases solve</h2>
+<p class="lede">Many questions are about connections rather than records: who is connected to whom, how far apart two entities are, and which accounts form a ring.</p>
+<ul><li>A relational database answers these with joins, and each additional hop adds another join.</li><li>At two or three hops the query is still manageable; at five or more it becomes a chain of joins whose intermediate result sets explode.</li><li>The database also does index lookups per hop, so cost grows with depth <em>and</em> with the size of intermediate sets.</li><li>Recursive queries exist, but they are awkward to write and still build large intermediate tables.</li><li>The relationships themselves are often the data — their type, direction, and properties carry meaning.</li><li>In a relational schema, a many-to-many relationship collapses into a junction table that hides direction and attributes.</li><li>Graph databases make the connections the primary structure instead of a derived join.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a graph database is</h2>
+<ul><li>Data is stored as <strong>nodes</strong> and <strong>edges</strong>, not tables and rows.</li><li>Nodes and edges can both carry <strong>properties</strong>, so an edge can record when a relationship started or how strong it is.</li><li>Edges have a <strong>type and a direction</strong>, such as <code>(alice)-[:FOLLOWS]->(bob)</code>.</li><li>Labels classify nodes and edges, which lets a query match only the relevant subset.</li><li>The graph is queried by <strong>pattern matching</strong>: describe the shape you want and let the engine find it.</li><li>Because edges are stored with their endpoints, a traversal follows pointers rather than recomputing joins.</li><li>The model suits connected data; it is a poor fit for bulk tabular reporting.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Index-free adjacency</h2>
+<ul><li>Each node stores direct references to its incident edges, and each edge stores references to its two endpoints.</li><li>Traversing one hop therefore means following a pointer, with no global index lookup.</li><li>Cost scales with the size of the <strong>touched subgraph</strong>, not with the total number of nodes in the database.</li><li>This is what keeps deep traversals practical: hop ten costs about as much as hop two.</li><li>In a relational engine, each hop is an index probe plus a join, so latency grows with depth.</li><li>The trade-off is that edges are physical: moving or repartitioning data means moving relationship pointers too.</li><li>It also means writes touch several records, since the edge and both endpoints must be updated consistently.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Relational join per hop</th><th>Graph pointer per hop</th></tr></thead><tbody><tr><td>Work per hop</td><td>Index probe plus join</td><td>Follow an edge reference</td></tr>
+<tr><td>Cost driver</td><td>Intermediate result size</td><td>Subgraph touched</td></tr>
+<tr><td>Deep traversal</td><td>Degrades sharply</td><td>Stays roughly proportional</td></tr>
+<tr><td>Strength</td><td>Set-based queries and reports</td><td>Connected, path-oriented questions</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Modeling: property graphs and RDF</h2>
+<ul><li>The <strong>property graph</strong> model gives nodes and edges labels and arbitrary properties, which is the common application-facing choice.</li><li>The <strong>RDF</strong> model expresses everything as subject-predicate-object triples, which favors interchange and shared vocabularies.</li><li>RDF suits publishing and integrating data across organizations; property graphs suit application queries over one domain.</li><li>Directions matter: <code>FOLLOWS</code> is not symmetric, while a <code>FRIEND_OF</code> edge usually is.</li><li>Relationships can be reified — turned into nodes — when they need their own relationships, such as a transaction between two accounts.</li><li>Model entities as nodes and facts about a connection as edge properties, not as extra nodes, unless the fact itself connects to other things.</li><li>A common mistake is to model every attribute as a node, which turns a clean graph into a tangle of lookups.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Property graph</th><th>RDF triples</th></tr></thead><tbody><tr><td>Unit</td><td>Node or edge with properties</td><td>Subject-predicate-object statement</td></tr>
+<tr><td>Edge attributes</td><td>Directly on the edge</td><td>Requires reification</td></tr>
+<tr><td>Schema</td><td>Optional labels and constraints</td><td>Vocabularies and ontologies</td></tr>
+<tr><td>Typical use</td><td>Application domain queries</td><td>Data interchange and knowledge graphs</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Querying</h2>
+<ul><li>Queries describe a <strong>pattern</strong>: a start node, a sequence of edges, and the properties to match.</li><li>Cypher, Gremlin, SPARQL, and the emerging GQL standard cover the common graph query styles.</li><li>A <strong>variable-length path</strong> matches an unknown number of hops, which is how <em>friends of friends</em> is expressed in one clause.</li><li>Filters can apply to nodes, to edges, or to the path as a whole, such as a maximum depth.</li><li>Results are usually the matched nodes, the edges, or aggregates such as a shortest-path length.</li><li>The engine chooses a traversal order, and a bad starting point can turn a fast query into a scan.</li><li>Unlike SQL, the query is naturally recursive, which is why path questions are far shorter to express.</li></ul>
+
+
+<pre class="code"><code>MATCH (a:Person {name: &#x27;Alice&#x27;})-[:FOLLOWS*1..3]-&gt;(b:Person)
+RETURN b.name, count(*) AS reach</code></pre>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Why traversals stay fast, and where they do not</h2>
+<ul><li>A traversal begins at a small number of start nodes found through an index.</li><li>From there it follows edge references, expanding one hop at a time and keeping only the frontier.</li><li>Cost is roughly proportional to the number of nodes and edges actually visited.</li><li>It degrades when the frontier explodes — high-degree nodes, dense regions, or unbounded depth.</li><li>A <strong>supernode</strong> with an enormous number of edges is the classic failure: every traversal through it touches everything.</li><li>Dense graphs also blow up combinatorially, because paths multiply faster than nodes.</li><li>So the practical limits are degree and depth, not total data size.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Indexes and constraints</h2>
+<ul><li>Even with pointer-based traversal, you need an <strong>entry point</strong>, so indexes exist on node properties.</li><li>A lookup like <em>the person with this email</em> uses a property index to find the start node.</li><li>Uniqueness constraints on a property prevent duplicate entities, which matters when data arrives from several sources.</li><li>Edge properties can also be indexed when they are used to filter during a traversal.</li><li>An index lookup followed by a short traversal is the normal fast path.</li><li>A query that must scan all nodes of a label, or traverse from thousands of starting points, loses the advantage.</li><li>So indexes decide where a traversal starts; adjacency decides how cheaply it continues.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Traversal algorithms</h2>
+<ul><li><strong>Breadth-first search</strong> finds the closest matches first, which suits shortest-path and recommendation queries.</li><li><strong>Depth-first search</strong> explores a branch fully, which suits path existence and cycle detection.</li><li><strong>Shortest path</strong>, with or without edge weights, answers distance and routing questions.</li><li><strong>PageRank</strong> and centrality measures rank nodes by influence in the graph.</li><li><strong>Community detection</strong> and connected components find clusters and isolated islands.</li><li>Algorithms can run inside the database for local queries, or in a batch framework for whole-graph computation.</li><li>Global analytics over a huge graph is usually a batch job that writes results back as properties, not an interactive query.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Scaling a graph</h2>
+<ul><li>Read scaling is straightforward: replicate the graph and serve traversals from replicas.</li><li>Write and storage scaling is hard, because edges connect arbitrary nodes and therefore cross partition boundaries.</li><li>If two connected nodes land on different machines, every traversal of that edge becomes a network call.</li><li>Partitioning strategies duplicate boundary nodes or cut edges, which adds coordination and can multiply storage.</li><li>Graph partitioning is a hard problem, and a bad partition makes cross-machine traffic dominate latency.</li><li>Supernodes concentrate load on whichever partition holds them, so they also become hotspots.</li><li>That is why many graph systems prefer a replicated, read-optimized deployment over aggressive sharding.</li><li>Some workloads avoid the problem entirely by keeping the graph in memory on one large machine.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Transactions and consistency</h2>
+<ul><li>Single-node graph databases typically offer ACID transactions over a traversal.</li><li>An update must keep the edge and both endpoints consistent, so a transaction may touch several records.</li><li>Distributed graph databases must trade some consistency or isolation to avoid coordinating every traversal.</li><li>For most query workloads, reads tolerate a slightly stale replica, while writes need the authoritative copy.</li><li>Causal consistency is often enough: a client should see its own writes and their effects in order.</li><li>Applications that mutate relationships heavily should plan for conflict and retry semantics.</li><li>The right guarantee depends on the question: fraud detection may tolerate lag, access control usually does not.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Where graph databases fit</h2>
+<ul><li><strong>Fraud and risk:</strong> finding rings of accounts that share devices, addresses, or payment instruments.</li><li><strong>Recommendations:</strong> friends-of-friends, co-purchase, and shared-interest paths.</li><li><strong>Knowledge graphs:</strong> entities and typed relationships assembled from many sources.</li><li><strong>Identity and access:</strong> users, groups, roles, and inherited permissions as a graph.</li><li><strong>Network and infrastructure:</strong> topology, dependency, and blast-radius analysis.</li><li><strong>Master data:</strong> resolving duplicate entities across systems by their connections.</li><li>The common thread is that the question is about the shape of connections, not about aggregating columns.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When not to use one</h2>
+<ul><li>If the question is one or two hops deep, a relational join or a recursive query is simpler and cheaper to operate.</li><li>If most queries are aggregations over records, a columnar or relational store is far better.</li><li>If the data is append-only events, a time-series or wide-column store fits the write pattern.</li><li>If the graph is enormous and analyzed in bulk rather than queried interactively, a batch graph framework is the right tool.</li><li>If the hierarchy is a simple tree, an adjacency list with a recursive CTE is enough.</li><li>A graph database adds a new system to operate, backup, and staff, so the traversal advantage must be real.</li><li>The test is whether depth and connection shape are central to the product, not whether the data can be drawn as a graph.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Operational realities</h2>
+<ul><li>Backup and restore must preserve edges and indexes together, or traversals break silently.</li><li>Memory sizing matters more than for row stores, because traversals benefit enormously from cached adjacency.</li><li>Monitoring should track traversal depth, frontier size, and the most-traversed supernodes.</li><li>Bulk import needs its own path, since loading edge by edge through the transaction API is slow.</li><li>Query reviews catch unbounded variable-length patterns before they reach production.</li><li>Schema constraints and naming conventions keep a graph from becoming an untyped tangle.</li><li>Graph projections — a purpose-built subgraph — are often better than letting every query roam the full graph.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Index-free adjacency</strong> makes deep traversals cheap but makes writes and repartitioning more expensive.</li><li><strong>First-class edges</strong> capture relationship semantics but add records that must stay consistent with both endpoints.</li><li><strong>Property graphs</strong> are ergonomic for applications but less standardized than RDF for interchange.</li><li><strong>Variable-length paths</strong> express deep questions concisely but are easy to write unboundedly and expensively.</li><li><strong>Replication</strong> scales read-heavy traversals but does not solve write scaling.</li><li><strong>Sharding</strong> increases capacity but turns cut edges into network hops and complicates traversal.</li><li><strong>In-memory graphs</strong> give the fastest traversals but cost the most per unit of data.</li><li><strong>Global graph algorithms</strong> answer important questions but run as batch jobs, not interactive queries.</li><li><strong>A dedicated graph store</strong> buys traversal performance but adds a system to operate and a second copy of data.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why do relational joins degrade on deep traversals?</summary><div class="answer"><p>Each hop requires an index lookup and a join, and each join produces an intermediate result set that the next hop must consume. As depth grows, those intermediate sets grow and the planner has more work to do. The database is also re-deriving relationships that a graph stores directly.</p></div></details>
+<details><summary>2. What is index-free adjacency?</summary><div class="answer"><p>Each node holds direct references to its incident edges, and each edge points at its endpoints. Traversing a hop is a pointer follow rather than an index probe, so cost depends on the subgraph touched instead of the total graph size. That is why deep traversals stay practical.</p></div></details>
+<details><summary>3. Property graph or RDF?</summary><div class="answer"><p>Property graphs attach labels and arbitrary properties to both nodes and edges, which suits application queries. RDF expresses everything as subject-predicate-object triples, which suits interchange, shared vocabularies, and knowledge graphs assembled from many sources. Edge attributes need reification in RDF.</p></div></details>
+<details><summary>4. What makes a supernode a problem?</summary><div class="answer"><p>A supernode has an enormous number of edges, so any traversal that reaches it must examine a huge frontier, and it concentrates load on one partition or cache line. Common examples are celebrity accounts, shared corporate entities, and popular products. Mitigations include excluding them from paths or precomputing their neighbors.</p></div></details>
+<details><summary>5. Do you still need indexes in a graph database?</summary><div class="answer"><p>Yes. Adjacency makes the traversal cheap, but something must find the starting node. Property indexes locate start nodes by email, id, or name, and uniqueness constraints prevent duplicate entities. An index lookup followed by a short traversal is the normal fast path.</p></div></details>
+<details><summary>6. How do you express friends-of-friends?</summary><div class="answer"><p>With a variable-length path pattern that allows one to three hops and a filter on the target, written in a single clause. The engine expands the frontier hop by hop and deduplicates results. The danger is leaving the depth unbounded on a dense graph.</p></div></details>
+<details><summary>7. Why is sharding a graph hard?</summary><div class="answer"><p>Edges connect arbitrary nodes, so a partition boundary cuts relationships. Traversing a cut edge becomes a remote call, and keeping the two sides consistent needs coordination. Strategies duplicate boundary nodes or accept expensive cross-partition hops, and both add cost.</p></div></details>
+<details><summary>8. How would you scale graph reads?</summary><div class="answer"><p>Replicate the graph and serve traversals from replicas, accepting some staleness. Keep the hot portion of the adjacency in memory, since traversal cost is dominated by cache misses. Project the graph per use case so queries touch a smaller subgraph.</p></div></details>
+<details><summary>9. When is a recursive SQL query good enough?</summary><div class="answer"><p>When traversal is shallow, the hierarchy is simple, and the graph is not the product's core. A recursive CTE over an adjacency list handles org charts, category trees, and a few hops well, with no new system to operate and full transactional consistency.</p></div></details>
+<details><summary>10. Graph database or batch graph processing?</summary><div class="answer"><p>Use a graph database for interactive, local questions — a few hops around known entities. Use batch processing for whole-graph computation such as global ranking or community detection, then write results back as properties. Trying to run global analytics interactively is the common misallocation.</p></div></details>
+<details><summary>11. What consistency issues arise with edges?</summary><div class="answer"><p>An edge and its two endpoints must stay consistent, so a write touches several records, and a distributed deployment cannot avoid coordinating them. Partial writes can leave a dangling edge. Transactions, or repair procedures, are needed to prevent a graph that lies about its own structure.</p></div></details>
+<details><summary>12. Give three strong graph use cases.</summary><div class="answer"><p>Fraud detection, where rings of accounts share devices and addresses; recommendations, where similarity flows along paths of shared interests; and identity or permission graphs, where access is inherited through nested groups. In each, the question is about connection shape rather than column aggregation.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Using a graph database for data that happens to be drawable as a graph but is queried as tables.</li><li>Writing variable-length paths without a depth bound and scanning a dense graph by accident.</li><li>Modeling every attribute as a node, producing a slow and unreadable tangle.</li><li>Ignoring supernodes until one celebrity account or shared tenant dominates traversal cost.</li><li>Assuming edge traversal is free across a sharded cluster, where cut edges become network hops.</li><li>Loading bulk data through the transactional write API instead of a bulk import path.</li><li>Choosing a graph store for a two-hop question that a single join already answers.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="time-series-databases.html"><span>← Previous</span><strong>Time Series Databases</strong></a><a class="next" href="vector-databases.html"><span>Next →</span><strong>Vector Databases</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/graph-databases">AlgoMaster — Graph Databases</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

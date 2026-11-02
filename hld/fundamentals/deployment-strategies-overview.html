@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deployment Strategies Overview — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 109 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Deployment Strategies Overview</h1>
+    <p class="dek">Deployment Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/deployment-strategies-overview">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why deployments are risky</a>
+<a href="#s2">The four questions every strategy answers</a>
+<a href="#s3">Recreate (big bang)</a>
+<a href="#s4">Rolling deployments</a>
+<a href="#s5">Rolling trade-offs: two live versions and slow rollback</a>
+<a href="#s6">Blue-green deployments</a>
+<a href="#s7">Blue-green trade-offs</a>
+<a href="#s8">Canary releases</a>
+<a href="#s9">What canary releases require</a>
+<a href="#s10">Shadow deployments (traffic mirroring)</a>
+<a href="#s11">Feature flags: separating deploy from release</a>
+<a href="#s12">Choosing a strategy</a>
+<a href="#s13">Combining strategies</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A deployment strategy is the plan for moving traffic from the old version to the new one, trading off <strong>downtime</strong>, <strong>blast radius</strong>, <strong>rollback speed</strong>, and <strong>extra infrastructure</strong>.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Deployment strategy</dt><dd>The procedure that shifts production traffic from the running version to a new version, including how servers are replaced and how failures are contained.</dd></div><div class="term"><dt>Blast radius</dt><dd>The share of users or requests that a defect can affect before the problem is detected and stopped.</dd></div><div class="term"><dt>Recreate deployment</dt><dd>Stop every instance of version 1, then start every instance of version 2, accepting a period of unavailability.</dd></div><div class="term"><dt>Rolling deployment</dt><dd>Replace instances in batches so that most of the fleet keeps serving traffic throughout the rollout.</dd></div><div class="term"><dt>Blue-green deployment</dt><dd>Run two identical environments and flip the router from the old one to the new one in seconds, keeping the old one as a rollback target.</dd></div><div class="term"><dt>Canary release</dt><dd>Send a small slice of production traffic to the new version, compare its metrics against the old version, and widen the slice only if it looks healthy.</dd></div><div class="term"><dt>Shadow deployment</dt><dd>Mirror copies of live requests to the new version while discarding its responses, so users never see the new behavior.</dd></div><div class="term"><dt>Deploy vs release</dt><dd>Deploying puts code into production; releasing makes a feature visible to users. Feature flags let the two happen at different times.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why deployments are risky</h2>
+<p class="lede">Software releases are one of the most common causes of production incidents, because a deployment is the moment untested assumptions meet real traffic.</p>
+<ul><li>Staging can never fully replicate production: different data volume, different dependency versions, different traffic shapes.</li><li>A bug that never appeared in tests can surface within seconds once real requests arrive.</li><li>The system is not frozen during a deploy: connections are open, requests are in flight, caches hold old values, and background jobs are mid-execution.</li><li>Version 1 and version 2 may disagree about API shapes, database columns, cached payloads, or queue message formats.</li><li>The goal is not only to ship version 2, but to ship it with a bounded and reversible failure mode.</li><li>Health checks that only prove a process is running do not prove it can serve real requests.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The four questions every strategy answers</h2>
+<ul><li><strong>Downtime:</strong> will users get errors or a maintenance page while the new version rolls out?</li><li><strong>Exposure:</strong> how many users see version 2 at the same moment, and therefore how large is the blast radius of a bad release?</li><li><strong>Rollback speed:</strong> how long until traffic is back on the last known good version, and does rollback itself cause downtime?</li><li><strong>Extra infrastructure:</strong> how much duplicate capacity must exist during the deployment window?</li><li>Every strategy is strong on some of these and weak on others; there is no dominant choice.</li><li>Cost is the fifth, implicit question: paying for a second fleet permanently is different from paying for it for twenty minutes.</li></ul>
+
+
+<div class="note">Answer these four questions for your service before comparing strategies; the answer usually eliminates most of the options.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Recreate (big bang)</h2>
+<p class="lede">Recreate is the simplest strategy: stop all instances of version 1, then start all instances of version 2.</p>
+<ul><li>Implementation is trivial and the mental model is clear, which makes it attractive for small teams.</li><li>Only one version ever runs, so no backward-compatibility work is needed across API, schema, or cache formats.</li><li>Between shutdown and readiness the service is fully unavailable, so any user request in that window fails.</li><li>A defect in version 2 hits every user immediately, because exposure is total.</li><li>Rollback is another full restart in reverse, so it costs a second outage rather than saving one.</li><li>It remains reasonable for internal tools, batch jobs, scheduled maintenance windows, and stateful systems where two versions cannot safely coexist.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Rolling deployments</h2>
+<p class="lede">A rolling deployment updates the fleet in batches instead of replacing it wholesale.</p>
+<ul><li>Remove a small batch of instances from the load balancer, upgrade them, wait for health checks to pass, then return them to rotation.</li><li>Repeat batch by batch until every instance runs version 2.</li><li>Capacity is preserved if the remaining instances can absorb the traffic of the batch being upgraded.</li><li>Kubernetes uses rolling updates by default for Deployments and exposes two knobs: <code>maxUnavailable</code> and <code>maxSurge</code>.</li><li><strong>maxUnavailable</strong> caps how many instances may be down at once, protecting capacity.</li><li><strong>maxSurge</strong> allows extra instances to be created temporarily, speeding the rollout at the cost of transient capacity.</li><li>Setting one to a non-zero value while the other is zero gives a strictly safer or strictly faster rollout.</li></ul>
+
+<div class="flow"><span class="flow-step">Drain a batch from the load balancer</span><span class="flow-arrow">→</span><span class="flow-step">Upgrade those instances</span><span class="flow-arrow">→</span><span class="flow-step">Pass readiness health checks</span><span class="flow-arrow">→</span><span class="flow-step">Return them to rotation</span><span class="flow-arrow">→</span><span class="flow-step">Repeat for the next batch</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Rolling trade-offs: two live versions and slow rollback</h2>
+<ul><li>Mid-rollout, some servers run version 1 and others run version 2, so both must satisfy the same requests.</li><li>A single user can hit version 2 on one request and version 1 on the next, which is visible when responses or UI differ.</li><li>Both versions must tolerate the same database schema, cache entries, and queue message formats.</li><li>Rollback repeats the batch process in reverse, so it is as slow as the rollout and the bug keeps affecting users meanwhile.</li><li>Health checks that are too shallow let broken instances return to rotation; checks that are too aggressive stall the rollout.</li><li>Autoscaling can add instances with the new version mid-rollout, silently changing the mix of versions.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Setting</th><th>Effect</th><th>Risk</th></tr></thead><tbody><tr><td>Large batch</td><td>Fast rollout</td><td>Big capacity dip and wide exposure</td></tr>
+<tr><td>Small batch</td><td>Safe, gradual rollout</td><td>Slow rollout and longer mixed-version window</td></tr>
+<tr><td>maxSurge high</td><td>No capacity loss</td><td>Extra cost and more instances to clean up</td></tr>
+<tr><td>maxUnavailable high</td><td>No extra cost</td><td>Reduced capacity during the rollout</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Blue-green deployments</h2>
+<p class="lede">Blue-green keeps two full environments: blue runs version 1 and serves production traffic, green runs version 2 and waits.</p>
+<ul><li>Green receives no real user traffic initially, so it can be warmed, migrated, and smoke-tested in isolation.</li><li>The switch is a router or load balancer change, so it completes in seconds rather than minutes.</li><li>Blue stays running after the switch, which makes rollback a second router change back to a known good environment.</li><li>Because traffic moves all at once, every user starts using version 2 at the same instant.</li><li>The old environment must be kept in a deployable, healthy state; if it is scaled down or reconfigured, rollback is no longer instant.</li><li>Both environments usually share one database, so data compatibility decides whether rollback is truly possible.</li></ul>
+
+<div class="flow"><span class="flow-step">Deploy version 2 to green</span><span class="flow-arrow">→</span><span class="flow-step">Warm caches and run smoke tests</span><span class="flow-arrow">→</span><span class="flow-step">Flip the router to green</span><span class="flow-arrow">→</span><span class="flow-step">Observe</span><span class="flow-arrow">→</span><span class="flow-step">Reuse blue as the next green (or flip back)</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Blue-green trade-offs</h2>
+<ul><li><strong>Cost:</strong> two complete production environments must run during the deployment, doubling compute and often doubling idle capacity.</li><li><strong>Database coupling:</strong> if version 2 applies a schema change that version 1 cannot read, switching back to blue does not restore service.</li><li><strong>All-at-once exposure:</strong> a defect that only appears under real traffic affects the whole user base before anyone can react.</li><li>Shared state such as sessions, caches, search indexes, and object storage must be compatible with both versions.</li><li>Configuration, secrets, and third-party integrations must exist symmetrically in both environments or the switch fails.</li><li>Green needs realistic warm-up: an unwarmed cache makes the first seconds after the switch look like an outage.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Canary releases</h2>
+<p class="lede">A canary release deploys version 2 alongside version 1 and sends it a small share of production traffic before committing.</p>
+<ul><li>Start with a small slice of traffic and compare error rate, latency, saturation, and business metrics against version 1.</li><li>If the canary looks healthy, widen the slice in stages until it carries all traffic.</li><li>If any stage looks unhealthy, send traffic back to version 1 while most users never saw the new code.</li><li>The technique converts a single risky switch into a sequence of small, observable bets.</li><li>Old and new versions run side by side for the whole ramp, so backward compatibility is still required.</li><li>Rollback is fast but incomplete: users already served by the canary keep their state on the new version.</li></ul>
+
+<div class="flow"><span class="flow-step">Route a small slice to version 2</span><span class="flow-arrow">→</span><span class="flow-step">Compare metrics per version</span><span class="flow-arrow">→</span><span class="flow-step">Widen the slice</span><span class="flow-arrow">→</span><span class="flow-step">Repeat while healthy</span><span class="flow-arrow">→</span><span class="flow-step">Promote to 100% or revert</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>What canary releases require</h2>
+<ul><li><strong>Per-version metrics:</strong> dashboards and alerts must be split by version, or the canary is invisible in aggregate numbers.</li><li><strong>Enough traffic:</strong> a service with a handful of requests per minute cannot reach statistical confidence from a small slice.</li><li><strong>Sticky routing:</strong> keep each user on one version, typically by hashing a stable identifier, so behavior does not flip mid-session.</li><li><strong>Automation:</strong> a controller compares canary and baseline metrics at each step and decides to promote or abort.</li><li><strong>Defined success criteria:</strong> decide the acceptable delta for error rate, latency percentiles, and business conversion before the rollout starts.</li><li>Non-user traffic such as cron jobs, webhooks, and queue consumers also needs a version split, or it silently bypasses the canary.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Shadow deployments (traffic mirroring)</h2>
+<ul><li>Version 1 serves every user; a copy of each request is also sent to version 2.</li><li>Version 2 processes the copy but its responses are discarded, so user experience is unchanged.</li><li>This exposes the new version to real production traffic shapes without any user risk.</li><li>Latency, error rate, and even response bodies can be diffed between versions before any traffic is switched.</li><li>It suits rewrites of performance-sensitive paths such as search, ranking, or recommendations.</li><li>The main hazard is <strong>side effects</strong>: a mirrored request that charges a card, sends an email, or places an order would execute twice.</li></ul>
+
+
+<div class="note">Mirror only read paths, or replace outbound writes with stubs and point writes at isolated test storage.</div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Feature flags: separating deploy from release</h2>
+<ul><li>The new code ships to production with its feature disabled behind a flag.</li><li>Users keep the old behavior until the flag is turned on, even though the new code is already running.</li><li>Enablement can be staged: internal users, then a small percentage of customers, then everyone.</li><li>Turning a flag off is a configuration change, not a deployment, so it takes effect without a rebuild or rollout.</li><li>This separates <strong>deploy</strong> (code in production) from <strong>release</strong> (feature visible to users).</li><li>Flags compose with any deployment strategy: ship with rolling, then ramp exposure with the flag.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Choosing a strategy</h2>
+<ul><li>Start with the downtime budget: if a maintenance window is acceptable, recreate is sufficient.</li><li>Weigh the cost of a failed release: an internal dashboard tolerates a rolling deploy with good health checks.</li><li>For critical paths such as checkout or payments, prefer canary for bounded exposure or blue-green for instant rollback.</li><li>Check monitoring quality first: canary is only as good as the per-version metrics behind it.</li><li>Check database compatibility: every strategy except recreate runs mixed versions against one schema at some point.</li><li>Consider effort: recreate and rolling need almost no new infrastructure, blue-green needs a duplicate environment, canary needs traffic splitting and analysis.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Situation</th><th>Reasonable strategy</th></tr></thead><tbody><tr><td>Internal tool, batch job, or acceptable maintenance window</td><td>Recreate</td></tr>
+<tr><td>Stateless service with several instances</td><td>Rolling</td></tr>
+<tr><td>Critical API where rollback speed matters most</td><td>Blue-green</td></tr>
+<tr><td>Critical service with good per-version metrics and enough traffic</td><td>Canary</td></tr>
+<tr><td>Rewrite to test on real traffic with side effects isolated</td><td>Shadow</td></tr>
+<tr><td>Risky feature to enable gradually</td><td>Any strategy plus a feature flag</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Combining strategies</h2>
+<ul><li>Real teams layer techniques rather than picking exactly one.</li><li>Rolling ships the code without a second full fleet; canary ramps traffic with metric gates; flags control individual features.</li><li>Each layer catches a different class of failure: staging catches obvious bugs, canary catches production-only behavior, flags catch product-level risk.</li><li>Backward-compatible APIs, schema changes, and message formats are the shared prerequisite for every multi-version strategy.</li><li>Reliable readiness checks and per-version observability are what make any of these strategies safe rather than merely available.</li></ul>
+
+<div class="flow"><span class="flow-step">Test in staging</span><span class="flow-arrow">→</span><span class="flow-step">Roll out code in batches</span><span class="flow-arrow">→</span><span class="flow-step">Ramp traffic with a canary</span><span class="flow-arrow">→</span><span class="flow-step">Release features behind flags</span><span class="flow-arrow">→</span><span class="flow-step">Watch metrics and revert the smallest step that failed</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Recreate</strong> is the simplest to build and needs no compatibility work, but it costs downtime and exposes every user to a bad release.</li><li><strong>Rolling</strong> avoids downtime and extra infrastructure, but runs two versions side by side and makes rollback as slow as the rollout.</li><li><strong>Blue-green</strong> gives near-instant rollback and a clean cutover, at the price of a duplicate environment and all-at-once exposure.</li><li><strong>Canary</strong> bounds the blast radius and validates with real traffic, but requires traffic volume, per-version metrics, and traffic-splitting machinery.</li><li><strong>Shadow</strong> tests under real traffic with zero user impact, but discards responses and requires careful side-effect isolation.</li><li><strong>Feature flags</strong> decouple release from deploy and make shutdown instant, but add configuration surface, stale-flag debt, and a new dependency at request time.</li><li><strong>Automation</strong> makes rollouts repeatable and fast, but an automated controller with bad health signals can promote a broken version confidently.</li><li><strong>Fast rollback</strong> shrinks outage duration but encourages riskier shipping if teams stop investing in pre-production testing.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a deployment strategy, and why does it matter?</summary><div class="answer"><p>It is the plan for moving production traffic from the old version to the new one: which servers are replaced, in what order, and how traffic is shifted. It matters because releases are a leading cause of incidents, and the strategy decides how much of the user base is exposed and how quickly you can recover.</p></div></details>
+<details><summary>2. Why is a staging environment not enough?</summary><div class="answer"><p>Staging cannot reproduce production's real traffic volume, real data distribution, dependency versions, and live in-flight state. Bugs that depend on scale, data shape, or concurrent load only appear once real requests arrive, which is why production-side containment strategies exist.</p></div></details>
+<details><summary>3. Explain recreate and when you would still use it.</summary><div class="answer"><p>Recreate stops all version 1 instances and then starts version 2, accepting downtime. It is appropriate for internal tools, batch jobs, planned maintenance windows, and stateful systems where two versions cannot safely share storage. The benefit is that only one version ever runs, so compatibility work disappears.</p></div></details>
+<details><summary>4. How does a rolling deployment work?</summary><div class="answer"><p>Instances are upgraded in batches: a batch is drained from the load balancer, upgraded, health-checked, and returned to rotation before the next batch starts. Capacity is preserved as long as the remaining instances can carry the traffic of the batch being upgraded. <code>maxUnavailable</code> and <code>maxSurge</code> control the safety and speed of that process.</p></div></details>
+<details><summary>5. What is the biggest risk in a rolling deployment?</summary><div class="answer"><p>Two versions serving traffic simultaneously. A user can hit version 2 and then version 1, and both versions share the same database, caches, and queues, so every contract between them must remain compatible. The second risk is slow rollback, since reverting means rolling the fleet again.</p></div></details>
+<details><summary>6. What do maxUnavailable and maxSurge control?</summary><div class="answer"><p><code>maxUnavailable</code> bounds how many instances may be unavailable at once, protecting serving capacity. <code>maxSurge</code> allows temporary extra instances so the rollout can proceed without reducing capacity. Together they trade rollout speed against cost and capacity headroom.</p></div></details>
+<details><summary>7. How does blue-green achieve fast rollback?</summary><div class="answer"><p>Two identical environments exist, with the old version still running in the idle one. Traffic cutover is a router change measured in seconds, and reverting is the same change in reverse. This only works if the old environment is kept healthy and the shared database remains readable by both versions.</p></div></details>
+<details><summary>8. Why can blue-green rollback still fail?</summary><div class="answer"><p>Because both environments usually share one database. If version 2 applied a destructive or incompatible schema change, routing traffic back to version 1 does not help — the old code now reads a schema it cannot handle. Rollback is only as reliable as the data layer's backward compatibility.</p></div></details>
+<details><summary>9. What makes a canary release trustworthy?</summary><div class="answer"><p>Per-version metrics, enough traffic for the sample to be meaningful, stable user-to-version routing, and predefined thresholds for error rate, latency, and business metrics. Without these, a canary produces noise rather than a decision, and promotion becomes a guess.</p></div></details>
+<details><summary>10. Why is sticky routing important for canaries?</summary><div class="answer"><p>If a user alternates between versions on consecutive requests, they can see inconsistent UI or API behavior mid-session, which pollutes both the user experience and the metrics. Hashing a stable identifier such as user ID keeps each session on one version while still splitting the population.</p></div></details>
+<details><summary>11. What is the main danger of shadow deployments?</summary><div class="answer"><p>Duplicated side effects. A mirrored request that writes to the database, charges a payment, or sends an email executes twice if the shadow version performs real writes. Shadow traffic is therefore safe mainly for read-only paths, or with outbound writes stubbed and writes redirected to isolated storage.</p></div></details>
+<details><summary>12. How do feature flags relate to deployment strategies?</summary><div class="answer"><p>They are orthogonal. A deployment strategy controls how code is distributed across servers; a feature flag controls whether users can reach the feature. You can ship with a rolling deploy and then ramp the feature on with a flag, which makes disabling a problem a configuration change instead of a redeploy.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming a passing health check means the new version can serve real requests, when it only proves the process started.</li><li>Running mixed versions without making APIs, schemas, cache values, and queue messages backward compatible.</li><li>Choosing canary for a low-traffic service where the sample size can never support a decision.</li><li>Switching blue-green traffic without warming the green environment, then treating the cold-cache spike as a code defect.</li><li>Letting the old blue environment drift or scale down, so rollback is no longer a fast router flip.</li><li>Mirroring write traffic in a shadow deployment and doubling payments, emails, or orders.</li><li>Treating a deployment strategy as a substitute for monitoring; every strategy depends on per-version signals to be safe.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="streaming-engines.html"><span>← Previous</span><strong>Streaming Engines</strong></a><a class="next" href="ci-cd-pipelines.html"><span>Next →</span><strong>CI/CD Pipelines</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/deployment-strategies-overview">AlgoMaster — Deployment Strategies Overview</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Long Polling — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 26 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Long Polling</h1>
+    <p class="dek">Communication Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>10</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/long-polling">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with regular polling</a>
+<a href="#s2">What long polling is</a>
+<a href="#s3">The three phases of one request</a>
+<a href="#s4">Choosing the hold timeout</a>
+<a href="#s5">Server-side architecture</a>
+<a href="#s6">Scaling across multiple servers</a>
+<a href="#s7">Avoiding missed events with cursors</a>
+<a href="#s8">Aligning timeouts across the path</a>
+<a href="#s9">Failure and reconnection</a>
+<a href="#s10">When long polling is the right tool</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Long polling keeps a normal HTTP request open on the server until an event arrives or a timeout fires, giving near-real-time delivery without leaving the request-response model.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Short polling</dt><dd>The client sends an HTTP request on a fixed interval and the server answers immediately, usually with an empty response.</dd></div><div class="term"><dt>Long polling</dt><dd>The client sends an HTTP request and the server <em>defers</em> the response until new data exists or a hold timeout expires.</dd></div><div class="term"><dt>Hold timeout</dt><dd>The maximum time the server keeps a request pending before returning an empty response so the client can reconnect.</dd></div><div class="term"><dt>Cursor</dt><dd>A monotonically increasing event ID or sequence number the client sends so the server can replay everything it missed.</dd></div><div class="term"><dt>Waiter</dt><dd>The server-side registration that ties a pending request to a user or topic until an event or timeout completes it.</dd></div><div class="term"><dt>Reconnect storm</dt><dd>A mass failure causing many clients to retry at once and overload the system while it is still recovering.</dd></div><div class="term"><dt>Exponential backoff with jitter</dt><dd>Delays that double after each consecutive failure and are randomized so retries spread out instead of clustering.</dd></div><div class="term"><dt>Idle timeout</dt><dd>An infrastructure limit (proxy, load balancer, CDN) that closes connections believed to be inactive.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with regular polling</h2>
+<p class="lede">Start from a notification system: the client wants to learn about a new notification soon after it is created. The naive design asks the server every few seconds whether anything new exists.</p>
+<ul><li>Regular polling, also called <strong>short polling</strong>, repeats an identical request on a fixed interval and gets an immediate answer, often empty.</li><li>Most requests can be useless: at 100,000 clients polling every 5 seconds you already run about <strong>20,000 requests per second</strong> even when nothing happened.</li><li>There is always residual delay: polling every 10 seconds means an event can sit unseen for almost 10 seconds.</li><li>The interval forces a single knob to trade <strong>latency</strong> against <strong>request volume</strong>, and you cannot turn both down at once.</li><li>The server also does constant work while idle, which makes capacity planning driven by poll frequency rather than by real load.</li></ul>
+
+
+<div class="note">The core tension is not the polling itself; it is that the interval is a guess about when events arrive.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What long polling is</h2>
+<ul><li>The client still sends an ordinary HTTP GET, usually carrying its cursor such as <code>?after=43</code>.</li><li>If newer events already exist, the server answers <strong>immediately</strong> — no waiting.</li><li>If nothing is newer, the server does not answer yet; it keeps the request pending until an event arrives or the timeout fires.</li><li>On response, the client processes the payload, advances its cursor, and opens the <strong>next</strong> request right away.</li><li>Long polling is therefore a <em>chain of normal requests</em>, not one permanent connection; each link may idle before returning.</li><li>Because it is plain HTTP, existing auth, TLS, proxies, and caching semantics still apply.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The three phases of one request</h2>
+<ul><li><strong>Check existing data:</strong> read reliable storage for events newer than the client's cursor before considering waiting.</li><li><strong>Wait for new data:</strong> park the request and resume it on an event from an event bus, queue, database notification, or in-process signal.</li><li><strong>Respond and reconnect:</strong> return the events, or an empty response on timeout, then let the client update its cursor and re-issue.</li><li>The wait must be event-driven, not a spin loop that polls storage over and over inside the handler.</li><li>Registration and deregistration of waiters must be cleaned up when the client disconnects mid-wait.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends GET with cursor</span><span class="flow-arrow">→</span><span class="flow-step">Server authenticates and reads events after cursor</span><span class="flow-arrow">→</span><span class="flow-step">Events found -> respond immediately</span><span class="flow-arrow">→</span><span class="flow-step">No events -> register waiter and suspend request</span><span class="flow-arrow">→</span><span class="flow-step">Event arrives or timeout fires -> respond</span><span class="flow-arrow">→</span><span class="flow-step">Client advances cursor and reconnects</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Choosing the hold timeout</h2>
+<p class="lede">A server should never hold a request forever: proxies, load balancers, servers, and client libraries all impose limits. So the hold is a fixed, bounded period.</p>
+<ul><li>A hold in the range of <strong>20–60 seconds</strong> is a common starting point, but the right value depends on the infrastructure in the path.</li><li><strong>Too short</strong> and clients reconnect constantly, which recreates the empty-request problem long polling was meant to remove.</li><li><strong>Too long</strong> and you risk infrastructure cuts, and dead connections stay undetected longer because a dead connection looks like a quiet one.</li><li>The hold timeout should be slightly shorter than every intermediary timeout so the server ends requests cleanly on its own terms.</li><li>The client-side request timeout should be longer than the server hold, otherwise the client cancels healthy requests before they can answer.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Server-side architecture</h2>
+<ul><li>10,000 long-polling clients can mean close to <strong>10,000 open requests</strong> parked inside the application at once.</li><li>Thread-per-request servers park one dedicated thread per waiting request, wasting memory and exhausting thread pools under load.</li><li>Async, event-driven servers keep a waiting request off the OS thread; Node.js, Go goroutines, async Python, reactive JVM or virtual threads all fit.</li><li>Even then each pending request costs memory, a socket, a file descriptor, and connection-management overhead.</li><li>Long polling replaces many empty requests with many <em>open</em> requests — cheaper, not free.</li><li>Track open-waiter counts and per-connection memory as first-class capacity metrics alongside CPU.</li></ul>
+<h3>Handler responsibilities</h3>
+<ul><li>Authenticate and authorize before parking the request.</li><li>Read events after the cursor from storage, not from memory that may be lost.</li><li>Register the waiter keyed by user or topic when nothing is available.</li><li>Complete the waiter when an event for that key arrives or the timeout fires.</li><li>Remove the waiter on client disconnect so it cannot leak into the next event broadcast.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Scaling across multiple servers</h2>
+<p class="lede">With several application servers behind a load balancer, the pending request for a user lives on exactly one of them. A backend service that produces a new event has no idea which one.</p>
+<ul><li>This is a <strong>distributed routing problem</strong>, not a capacity problem; more servers make it worse if routing is unsolved.</li><li>The standard fix is shared messaging infrastructure: backend services publish to a broker such as Redis Pub/Sub or Kafka.</li><li>Every application server subscribes, and only the server holding that user's pending request answers it.</li><li>Producers stay unaware of HTTP delivery and connection placement, so app servers can be added without changing producers.</li><li>The <strong>event store</strong> is the source of truth for correctness; the <strong>broker</strong> is only a low-latency wake-up signal.</li><li>Pub/sub messages can be missed by a server that was not subscribed at that instant, so the next request must still recover from storage.</li></ul>
+
+<div class="flow"><span class="flow-step">Backend service publishes event to broker</span><span class="flow-arrow">→</span><span class="flow-step">All long-poll servers receive the event</span><span class="flow-arrow">→</span><span class="flow-step">Server holding the waiter for that user responds</span><span class="flow-arrow">→</span><span class="flow-step">Client reconnects with the new cursor</span><span class="flow-arrow">→</span><span class="flow-step">Storage replays anything the broker dropped</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Avoiding missed events with cursors</h2>
+<ul><li>The client is never continuously connected: there is always a small window between receiving a response and sending the next request.</li><li>An event that lands in that window is lost if the server only ever delivers to currently open requests.</li><li>Every event gets a sequence number, event ID, or timestamp; the client sends the last one it processed and asks for everything after it.</li><li>Because the server checks storage <em>before</em> waiting, events created during reconnection are still returned.</li><li>The same cursor doubles as crash recovery: reconnect anywhere and resume from the last known event ID.</li><li>Prefer a monotonic event ID over a timestamp — timestamps collide, can move backwards across machines, and create ambiguous edges.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Aligning timeouts across the path</h2>
+<ul><li>A client expecting a 30-second hold behind a 20-second idle timeout sees failures while the application is perfectly healthy.</li><li>Every hop matters: reverse proxies, API gateways, CDNs, TLS terminators, and the client's own HTTP library.</li><li>The usual rule is <code>server hold &lt; proxy idle timeout &lt; client timeout</code>, with a comfortable margin at each step.</li><li>Intermediaries that buffer responses can hold the reply even after the server writes it, which silently adds latency.</li><li>Document the timeout budget in one place so a proxy config change cannot quietly break real-time delivery.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Failure if misconfigured</th></tr></thead><tbody><tr><td>Load balancer idle timeout</td><td>Connection cut mid-hold; client sees an error instead of an empty timeout</td></tr>
+<tr><td>Reverse proxy / gateway</td><td>Early close or buffered response delays events</td></tr>
+<tr><td>Client request timeout</td><td>Healthy requests cancelled before the server answers</td></tr>
+<tr><td>Server hold timeout</td><td>Too short causes reconnect churn; too long risks infrastructure cuts</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Failure and reconnection</h2>
+<ul><li>Because transports are ordinary HTTP requests, a failed request is usually handled by simply retrying.</li><li>A controlled retry policy is mandatory: a cluster-wide failure can send hundreds of thousands of clients back at once.</li><li>Use <strong>exponential backoff</strong> with a cap, and <strong>jitter</strong> so clients that failed together do not retry together.</li><li>An empty timeout response is <em>not</em> a failure — reconnect immediately instead of backing off.</li><li>Important state such as the client's position belongs in reliable storage so recovery works on any server, not just the one that failed.</li><li>A complete client handles four outcomes: data, empty timeout, error with backoff, and cancellation on shutdown.</li></ul>
+<h3>Reference client policy</h3>
+<ul><li>Client timeout of roughly 35 seconds for a 30-second server hold.</li><li>Backoff starting near 1 second and doubling per consecutive failure up to a cap, often around 30 seconds.</li><li>Backoff resets after any successful response, including an empty timeout response.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>When long polling is the right tool</h2>
+<ul><li>It fits when you need near-real-time updates but want to stay inside the standard HTTP request-response model.</li><li>Strong fits: notifications, job status updates, and asynchronous results such as a rendered report or video.</li><li>It gives lower latency and fewer wasted requests than short polling without a persistent streaming protocol.</li><li>It is a poor fit for a continuous high-rate feed, where one open connection carrying many events (SSE) is cheaper.</li><li>It is a poor fit when the client also needs to push frequently — that is a WebSocket-shaped problem.</li><li>It is a poor fit for very large numbers of idle clients on thread-per-request infrastructure.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Short polling</th><th>Long polling</th></tr></thead><tbody><tr><td>Request pattern</td><td>One request every N seconds</td><td>One pending request kept open</td></tr>
+<tr><td>Empty responses</td><td>Common</td><td>Possible on timeout, less frequent</td></tr>
+<tr><td>Update delay</td><td>Up to the polling interval</td><td>Usually soon after data exists</td></tr>
+<tr><td>Idle server work</td><td>Constant</td><td>Mostly tied to active clients and events</td></tr>
+<tr><td>Complexity</td><td>Low</td><td>Moderate: waiters, cursors, timeouts</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Lower latency</strong> than fixed-interval polling, at the cost of holding connections open instead of answering instantly.</li><li><strong>Standard HTTP semantics</strong> (auth, proxies, retries) are preserved, but each update still needs a full request/response round trip.</li><li><strong>Fewer wasted requests</strong> when events are rare, but the same number of reconnects when events are frequent.</li><li><strong>Async servers</strong> handle many waiters without a thread each, but every waiter still costs a socket, a file descriptor, and memory.</li><li><strong>Adding app servers</strong> improves capacity, but requires a shared broker to route events to the server holding the waiter.</li><li><strong>A long hold timeout</strong> reduces reconnect churn but lengthens failure detection and risks infrastructure cuts.</li><li><strong>A broker for wake-ups</strong> reduces delivery latency, but correctness still depends on the durable event store behind it.</li><li><strong>Backoff with jitter</strong> protects the system during recovery, but slows down users who genuinely want to reconnect.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does long polling solve?</summary><div class="answer"><p>Short polling forces a trade-off between update latency and wasted empty requests. Long polling breaks that link: the server parks the request and answers only when data exists or a timeout fires, so updates arrive soon after they happen without polling on a fixed interval.</p></div></details>
+<details><summary>2. Walk through the lifecycle of one long polling request.</summary><div class="answer"><p>The client sends a GET with its cursor. The server reads storage for newer events; if any exist it answers immediately. Otherwise it registers a waiter and suspends the request. An event or the hold timeout completes the request, and the client updates its cursor and immediately opens the next one.</p></div></details>
+<details><summary>3. How do you pick the hold timeout?</summary><div class="answer"><p>Set it long enough that clients are not reconnecting constantly and short enough to stay below every intermediary idle timeout. Roughly 20–60 seconds is a common range. The server should also finish before any proxy cuts the connection so it can return a clean empty response.</p></div></details>
+<details><summary>4. Why does long polling need a cursor?</summary><div class="answer"><p>The client is disconnected between responses, so an event created in that gap would be invisible to a server that only delivers to open requests. A cursor lets the server check storage for everything after the last processed event, which also makes recovery on a different server possible.</p></div></details>
+<details><summary>5. Why is an event ID better than a timestamp as the cursor?</summary><div class="answer"><p>Timestamps collide at the same granularity, can move backwards across machines with clock skew, and create ambiguous boundary cases when several events share a millisecond. A monotonically increasing sequence number gives a total order and a clean 'give me everything after X'.</p></div></details>
+<details><summary>6. How does the server scale beyond one machine?</summary><div class="answer"><p>Multiple app servers sit behind a load balancer, and a shared broker such as Redis Pub/Sub or Kafka fans each event out to all of them. Only the server holding that user's waiter responds. The durable event store remains the source of truth, because broker messages can be missed.</p></div></details>
+<details><summary>7. What breaks first on a thread-per-request server?</summary><div class="answer"><p>Each parked request consumes a thread even while doing nothing, so memory and thread limits are reached long before CPU. Async or event-loop servers with non-blocking handlers avoid this by keeping waiters off OS threads.</p></div></details>
+<details><summary>8. How do you prevent a reconnect storm?</summary><div class="answer"><p>Clients should retry with exponential backoff and randomized jitter, capped at some ceiling, and reset the backoff after success. Empty timeout responses are normal and should trigger an immediate reconnect rather than a backoff.</p></div></details>
+<details><summary>9. A client behind a load balancer sees failures although app logs look healthy. What do you check?</summary><div class="answer"><p>Compare the server hold timeout with the idle timeouts of the load balancer, reverse proxy, CDN, and client library. If an intermediary timeout is shorter than the hold, the connection is cut mid-wait and appears as a failure even though the application behaved correctly.</p></div></details>
+<details><summary>10. When should you choose SSE or WebSockets instead?</summary><div class="answer"><p>If updates are frequent, one long-lived connection carrying many events (SSE) is far cheaper than a reconnect per update. If the client also needs to push messages frequently, use WebSockets. Long polling wins when you want near-real-time delivery with minimal protocol change.</p></div></details>
+<details><summary>11. What state must not live only on one app server?</summary><div class="answer"><p>The client's position in the event stream. Storing it in durable storage keyed by cursor lets the client resume on any server after a failure, instead of being pinned to the instance that happened to hold the previous request.</p></div></details>
+<details><summary>12. Is long polling cheaper than short polling?</summary><div class="answer"><p>Usually yes in request volume, since idle clients generate one pending request instead of repeated empty ones. But it shifts cost to open connections, sockets, and memory per waiter, so capacity planning changes shape rather than disappearing.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Implementing the wait as a loop that re-queries storage instead of suspending the request until an event arrives.</li><li>Holding requests longer than a proxy or load balancer idle timeout, then blaming the application for the failures.</li><li>Setting the client request timeout shorter than the server hold timeout, so healthy requests are cancelled.</li><li>Delivering events only to currently open requests without checking durable storage for the gap between requests.</li><li>Using timestamps as cursors and hitting collisions or clock skew.</li><li>Retrying instantly on failure and triggering a reconnect storm during recovery.</li><li>Assuming the broker is the source of truth for event delivery.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="jwt.html"><span>← Previous</span><strong>JWT</strong></a><a class="next" href="server-sent-events.html"><span>Next →</span><strong>Server-Sent Events (SSE)</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/long-polling">AlgoMaster — Long Polling</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

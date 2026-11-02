@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heartbeats — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 82 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Heartbeats</h1>
+    <p class="dek">Distributed System Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/heartbeats">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What a heartbeat is</a>
+<a href="#s2">How a check works</a>
+<a href="#s3">Push versus pull</a>
+<a href="#s4">Interval, timeout, and failure threshold</a>
+<a href="#s5">The detection trade-off</a>
+<a href="#s6">Why a healthy node can miss heartbeats</a>
+<a href="#s7">The suspect state and rejoin</a>
+<a href="#s8">Heartbeats at scale</a>
+<a href="#s9">What a heartbeat can carry</a>
+<a href="#s10">Sending heartbeats is not the same as doing work</a>
+<a href="#s11">False positives, leases, and fencing</a>
+<a href="#s12">Practical guidelines and decision rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A heartbeat is a small periodic message that says <em>I am still running</em>; the engineering is in choosing an interval and timeout that catch real failures without turning a brief hiccup into a failover.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Heartbeat</dt><dd>A small message sent at regular intervals by a node to signal that its process is still alive.</dd></div><div class="term"><dt>Heartbeat interval</dt><dd>How often a node emits a heartbeat, for example once per second.</dd></div><div class="term"><dt>Timeout</dt><dd>How long a receiver waits without hearing from a node before treating it as failed.</dd></div><div class="term"><dt>Failure threshold</dt><dd>The same idea expressed as a count: how many consecutive missed heartbeats trigger action.</dd></div><div class="term"><dt>Push model</dt><dd>Nodes send heartbeats to a monitor or their peers on their own schedule.</dd></div><div class="term"><dt>Pull model</dt><dd>The monitor actively probes each node, typically by calling a health endpoint.</dd></div><div class="term"><dt>False positive</dt><dd>A healthy node declared failed because its heartbeat was delayed, dropped, or its process was paused.</dd></div><div class="term"><dt>Suspect state</dt><dd>An intermediate verdict between healthy and failed that stops new work but postpones expensive recovery.</dd></div><div class="term"><dt>Jitter</dt><dd>Random variation added to heartbeat timing so thousands of nodes do not fire in the same instant.</dd></div><div class="term"><dt>Fencing token</dt><dd>A monotonically increasing value attached to a leadership lease so a stale node's writes can be rejected.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What a heartbeat is</h2>
+<p class="lede">A node cannot observe another node's process directly. It can only observe whether messages are arriving. A heartbeat turns liveness into a message-arrival question.</p>
+<ul><li>A heartbeat is a <strong>small message sent on a fixed schedule</strong> that says the sender is still running.</li><li>The receiver stores a per-node timestamp: the last time it heard from that node.</li><li>While heartbeats keep arriving, the node stays in the healthy set and continues to receive work.</li><li>When the gap since the last heartbeat exceeds a threshold, the receiver starts treating the node as failed.</li><li>The only question a heartbeat answers is <em>have I heard from this node recently enough to keep trusting it?</em></li><li>Heartbeats drive concrete actions: stop routing requests, reassign tasks, remove a replica, or page an operator.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>How a check works</h2>
+<p class="lede">A monitor keeps one row per node and compares <code>now - last_heartbeat</code> against its timeout on every evaluation tick.</p>
+<ul><li>Each worker sends a heartbeat every interval; the monitor only records the arrival time.</li><li>The monitor evaluates all rows periodically rather than reacting to each message, which bounds its own work.</li><li>A row whose age exceeds the timeout is marked failed and handed to the recovery path.</li><li>The decision is a <strong>local judgement based on local information</strong> — the monitor cannot see the node, only its silence.</li><li>Recovery is a separate policy: stop sending work first, then reassign, then decide whether to replace the node.</li><li>Evaluation granularity matters: checking every few seconds adds that much delay on top of the timeout.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Worker</th><th>Last heartbeat</th><th>Timeout 3 s exceeded?</th><th>Verdict</th></tr></thead><tbody><tr><td>Worker 1</td><td>0.5 s ago</td><td>No</td><td>Healthy</td></tr>
+<tr><td>Worker 2</td><td>800 ms ago</td><td>No</td><td>Healthy</td></tr>
+<tr><td>Worker 3</td><td>5 s ago</td><td>Yes</td><td>Failed</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Push versus pull</h2>
+<ul><li>In the <strong>push model</strong> each node emits heartbeats and the monitor only listens.</li><li>Push needs no registry of node addresses and lets nodes start reporting without being asked.</li><li>Push concentrates risk in the receiver: an overloaded or unreachable monitor makes healthy nodes look dead.</li><li>In the <strong>pull model</strong> the monitor probes each node's health endpoint on its own schedule.</li><li>Pull gives the monitor control over timing and lets it apply consistent checks, which is why load balancers use it.</li><li>Pull requires knowing every address and costs one outbound request per node per round, which hurts in very large clusters.</li><li>Real systems mix both: nodes push metrics and status, the platform pulls readiness for routing decisions.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Push</th><th>Pull</th></tr></thead><tbody><tr><td>Who initiates</td><td>Node sends</td><td>Monitor probes</td></tr>
+<tr><td>Monitor needs addresses</td><td>No</td><td>Yes</td></tr>
+<tr><td>Timing control</td><td>Sender</td><td>Monitor</td></tr>
+<tr><td>Typical use</td><td>Workers reporting to a coordinator</td><td>Load balancer health checks</td></tr>
+<tr><td>Weak point</td><td>Receiver becomes a bottleneck or single point of failure</td><td>Monitor must reach every node</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Interval, timeout, and failure threshold</h2>
+<ul><li>The <strong>interval</strong> sets detection resolution: no failure is noticed faster than one interval plus the timeout.</li><li>The <strong>timeout</strong> should be several times the interval so one dropped packet or a short scheduling delay is harmless.</li><li>A common shape is a 1 s interval with a 5 s timeout, giving roughly five chances before a verdict.</li><li>Many systems express the timeout as a <strong>failure threshold</strong>: act after N consecutive missed heartbeats.</li><li>Count-based thresholds tolerate variable intervals; time-based thresholds tolerate variable processing delay.</li><li>Detection latency is roughly <code>timeout + evaluation period</code>, so both settings belong in your failure budget.</li><li>Tune from measured network jitter and pause times, not from intuition.</li></ul>
+
+
+<div class="note">Timeout is a policy statement about how much evidence you require, not a measurement of the network.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The detection trade-off</h2>
+<p class="lede">Every heartbeat configuration trades detection speed against false alarms. There is no universally correct value; the cost of each wrong answer decides.</p>
+<ul><li>A <strong>short timeout</strong> detects crashes quickly but converts slow GC, CPU starvation, or a congested link into a failure verdict.</li><li>A <strong>long timeout</strong> tolerates noise but keeps sending work to a dead node and delays recovery.</li><li>A <strong>short interval</strong> improves resolution but multiplies traffic and wakeups; with thousands of nodes, small messages add up.</li><li>A <strong>long interval</strong> reduces overhead but blurs the line between a pause and a crash.</li><li>The asymmetry matters: a false positive can trigger a failover that is far more damaging than a late detection.</li><li>Match the timeout to the action — removing a node from a load balancer is cheap and reversible, promoting a primary is not.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Setting</th><th>Shorter</th><th>Longer</th></tr></thead><tbody><tr><td>Timeout</td><td>Faster detection, more false positives</td><td>Fewer false positives, slower detection</td></tr>
+<tr><td>Interval</td><td>Faster detection, more traffic and CPU</td><td>Less overhead, coarser detection</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Why a healthy node can miss heartbeats</h2>
+<ul><li>The <strong>network</strong> can drop, delay, or reorder the heartbeat message; the sender has no proof it arrived.</li><li>The node may be <strong>CPU-starved</strong>, so its heartbeat thread is scheduled late even though it is alive.</li><li>A long <strong>garbage collection pause</strong> freezes the whole process, including the thread that sends heartbeats.</li><li>A <strong>virtual machine or container</strong> can be paused by its host for migration, CPU throttling, or noisy-neighbour effects.</li><li>A blocked thread pool or deadlock can stall application work while a background timer keeps firing.</li><li>From the receiver's side these are indistinguishable from a crash, which is why heartbeats produce suspicion, not certainty.</li><li>This is the core limitation: a missing heartbeat says <em>I have not heard from you</em>, never <em>you are dead</em>.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The suspect state and rejoin</h2>
+<p class="lede">A staged verdict converts one binary decision into two cheaper ones: stop trusting the node now, declare it dead later.</p>
+<ul><li>After a few missed heartbeats the node becomes <strong>suspect</strong>: stop assigning new work but do not start expensive recovery.</li><li>If a heartbeat arrives before the longer deadline, the node returns to healthy with minimal disruption.</li><li>If silence continues past the outer timeout, the node is declared failed and recovery begins.</li><li>This absorbs temporary network blips and avoids unnecessary failovers that cost more than the outage.</li><li>When a failed node starts reporting again, do not trust it immediately: move it to a <strong>recovering</strong> state.</li><li>Recovery checks include catching up on missed data, replaying a log, warming caches, and passing a readiness probe.</li><li>Only after those checks should the node receive full traffic again.</li></ul>
+
+<div class="flow"><span class="flow-step">Healthy: heartbeats arriving</span><span class="flow-arrow">→</span><span class="flow-step">Suspect: threshold missed, stop new work</span><span class="flow-arrow">→</span><span class="flow-step">Failed: outer deadline passed, start recovery</span><span class="flow-arrow">→</span><span class="flow-step">Recovering: node returns, run catch-up checks</span><span class="flow-arrow">→</span><span class="flow-step">Healthy: restore full traffic</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Heartbeats at scale</h2>
+<ul><li>A <strong>central monitor</strong> is the simplest design but processes every heartbeat and becomes a single point of failure.</li><li><strong>All-to-all</strong> heartbeats remove the central node, but each node contacts every other node, so message count grows quadratically.</li><li>With <em>n</em> nodes, all-to-all produces on the order of <code>n * (n - 1)</code> messages per round, which stops being viable as the cluster grows.</li><li><strong>Gossip</strong> keeps the message count linear: each node contacts a few random peers per round and merges what it learns.</li><li>Gossip spreads liveness information over several rounds, so different nodes briefly disagree about who is alive.</li><li>Central monitors are fine for hundreds of nodes or for one coordinator managing workers; gossip wins for large peer-to-peer clusters.</li><li>Whichever you pick, isolate the failure-detection path from application load so a busy cluster does not lose its own health signal.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Messages per round</th><th>Main weakness</th></tr></thead><tbody><tr><td>Central monitor</td><td>One per node</td><td>Single point of failure, hot receiver</td></tr>
+<tr><td>All-to-all</td><td>Quadratic in node count</td><td>Unscalable traffic</td></tr>
+<tr><td>Gossip</td><td>A few per node</td><td>Delayed, eventually consistent detection</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>What a heartbeat can carry</h2>
+<ul><li>Since the message is already being sent, it can carry <strong>load and capacity data</strong> at no extra round trip.</li><li>A worker can report CPU, memory, queue depth, or in-flight tasks so a scheduler assigns work to less busy nodes.</li><li>A storage node can report free disk and replica lag so placement decisions stay informed.</li><li>A <strong>sequence number</strong> that increases with each message lets the receiver detect gaps, duplicates, and reordering.</li><li>A piggybacked clock or term value helps the receiver discard outdated reports from a previously failed incarnation.</li><li>Keep the payload small: per-node fields multiply by node count and frequency.</li><li>Do not let rich payloads make the heartbeat path heavy — a large or slow heartbeat is itself a liveness risk.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Sending heartbeats is not the same as doing work</h2>
+<ul><li>A separate background thread can keep sending heartbeats while the main processing thread is stuck in a loop or blocked on a dependency.</li><li>The node then looks perfectly healthy while it serves no requests — the most dangerous failure because it attracts traffic.</li><li>The fix is to make the health signal reflect <strong>progress</strong>, not just the scheduler: last successful request, last poll, queue drain.</li><li>Kafka consumers demonstrate the distinction: heartbeats show group membership, but a consumer that stops polling is removed from the group anyway.</li><li>Kubernetes separates <strong>liveness</strong> (restart this container) from <strong>readiness</strong> (send it traffic) precisely because they prompt different actions.</li><li>A readiness failure should remove traffic and be cheap to reverse; a liveness failure should restart, which is disruptive.</li><li>Design the check so a healthy answer requires evidence of useful work, not merely a running event loop.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Check</th><th>Question it answers</th><th>Action when it fails</th></tr></thead><tbody><tr><td>Heartbeat</td><td>Is the node still sending messages?</td><td>Suspect the node</td></tr>
+<tr><td>Liveness probe</td><td>Is this process wedged beyond recovery?</td><td>Restart the container</td></tr>
+<tr><td>Readiness probe</td><td>Can it accept traffic right now?</td><td>Remove it from rotation</td></tr>
+<tr><td>Progress check</td><td>Is it actually completing work?</td><td>Deprioritise or drain it</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>False positives, leases, and fencing</h2>
+<p class="lede">Because a suspect node may still be alive and reachable by some clients, recovery must assume the old node can still act.</p>
+<ul><li>A node marked failed can come back; assume it will and make the system safe for that case.</li><li>If replicas stop hearing from a primary during a partition and promote a new one, the old primary may still accept writes — this is <strong>split-brain</strong>.</li><li>Missed heartbeats should only <em>start</em> the process; promotion needs agreement from a <strong>majority</strong>, not one observer's suspicion.</li><li>A <strong>lease</strong> gives leadership a deadline: a node may act only while its lease is valid, so a paused node cannot act indefinitely.</li><li>A <strong>fencing token</strong> that increases with each leadership grant lets the storage layer reject writes from an old leader.</li><li>Make removal idempotent and observable: record why a node was removed so operators can tell a real crash from a false alarm.</li><li>Prefer reversible actions first (drain traffic) and irreversible ones (data deletion, primary promotion) only with quorum-backed evidence.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Practical guidelines and decision rules</h2>
+<ul><li>Set the timeout to several times the interval, and base it on measured jitter and pause times.</li><li>Add <strong>jitter</strong> to intervals so thousands of nodes do not synchronise into a heartbeat storm.</li><li>Choose the timeout from the cost of a wrong decision: cheap and reversible actions can react fast, irreversible ones must wait longer.</li><li>Use a suspect state to separate cheap suspicion from expensive recovery.</li><li>Send the heartbeat on a path that stays healthy under load, and never let it depend on the work it is supposed to report on.</li><li>At scale, prefer gossip or a sharded monitor over one receiver for the whole fleet.</li><li>Always pair failure detection with quorum, leases, or fencing before granting exclusive authority.</li><li>Track detection latency and false-positive rate as product metrics; tune from data rather than defaults.</li></ul>
+
+<div class="flow"><span class="flow-step">Pick interval from jitter and required resolution</span><span class="flow-arrow">→</span><span class="flow-step">Set timeout as a multiple of the interval</span><span class="flow-arrow">→</span><span class="flow-step">Add jitter to spread the load</span><span class="flow-arrow">→</span><span class="flow-step">Define suspect and failed thresholds</span><span class="flow-arrow">→</span><span class="flow-step">Bind each verdict to a reversible action</span><span class="flow-arrow">→</span><span class="flow-step">Guard leadership changes with quorum and fencing</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Short timeouts</strong> cut detection latency but convert GC pauses and packet loss into failovers.</li><li><strong>Long timeouts</strong> suppress false positives but keep traffic flowing to dead nodes for longer.</li><li><strong>Frequent heartbeats</strong> improve resolution but add network and CPU cost that scales with fleet size.</li><li><strong>Push</strong> avoids a node registry but makes the receiver a bottleneck and a single point of failure.</li><li><strong>Pull</strong> gives the monitor control and consistent checks but costs one request per node per round.</li><li><strong>Gossip</strong> scales linearly in messages but delivers an eventually consistent, slightly stale view of liveness.</li><li><strong>Suspect states</strong> reduce unnecessary failovers at the cost of slower recovery and more state to reason about.</li><li><strong>Rich heartbeat payloads</strong> enable better scheduling but enlarge the message every node sends every interval.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a heartbeat and what does it actually prove?</summary><div class="answer"><p>A small message sent on a schedule to show the sender is still running. It proves only that a message arrived recently, not that the node is healthy or able to do work.</p></div></details>
+<details><summary>2. How do you choose the heartbeat interval and timeout?</summary><div class="answer"><p>Start from measured network jitter and process pause times, then set the timeout to several times the interval so a single miss is harmless. Refine both against the cost of a false positive versus the cost of late detection.</p></div></details>
+<details><summary>3. Push or pull: which would you pick?</summary><div class="answer"><p>Push when many workers report to a coordinator and you do not want to maintain an address list. Pull when the component doing the checking must control timing and apply a uniform probe, as load balancers do. Large systems often use push for metrics and pull for routing readiness.</p></div></details>
+<details><summary>4. Why can a healthy node be marked failed?</summary><div class="answer"><p>Packet loss, CPU starvation, a long garbage collection pause, host-level VM pauses, or a wedged thread pool can all delay heartbeats. The receiver cannot distinguish these from a crash, so it can only suspect.</p></div></details>
+<details><summary>5. What is a suspect state and why add it?</summary><div class="answer"><p>An intermediate verdict after a few missed heartbeats: stop assigning new work but delay expensive recovery. If a heartbeat arrives, the node simply returns to healthy. It absorbs transient blips without an unnecessary failover.</p></div></details>
+<details><summary>6. How do heartbeats scale to thousands of nodes?</summary><div class="answer"><p>All-to-all grows quadratically and a central monitor becomes a hot single point of failure. Gossip keeps messages linear by having each node exchange a small table with a few random peers, at the cost of delayed and temporarily inconsistent views.</p></div></details>
+<details><summary>7. What can a heartbeat message carry besides liveness?</summary><div class="answer"><p>Load metrics, queue depth, free disk, capacity hints, and a sequence number for gap detection. Keep the payload small because every extra field is multiplied by node count and frequency.</p></div></details>
+<details><summary>8. Why is sending heartbeats not the same as being healthy?</summary><div class="answer"><p>A background thread can keep sending while the request-handling path is blocked or looping. Such a node looks alive and keeps attracting traffic while completing nothing, so health checks should test real progress such as last successful request or last poll.</p></div></details>
+<details><summary>9. What is the difference between liveness and readiness?</summary><div class="answer"><p>Liveness asks whether the container should be restarted because it is wedged. Readiness asks whether it should receive traffic right now. They lead to different actions, so conflating them causes either restart loops or traffic to broken instances.</p></div></details>
+<details><summary>10. How do you prevent split-brain after a missed heartbeat?</summary><div class="answer"><p>Treat the missing heartbeat only as a trigger. Require a majority of nodes to agree before promoting a new leader, and use leases plus fencing tokens so the old leader's writes are rejected by the storage layer.</p></div></details>
+<details><summary>11. Why add jitter to heartbeat intervals?</summary><div class="answer"><p>If every node starts at the same time and uses the same interval, their heartbeats arrive in synchronised bursts. Randomising the interval spreads the load so the monitor sees a smooth stream instead of spikes.</p></div></details>
+<details><summary>12. What should happen when a failed node comes back?</summary><div class="answer"><p>Do not restore traffic immediately. Move it to a recovering state, let it catch up on missed data or replay the log, verify it with readiness checks, then return it to the healthy set.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating a missed heartbeat as proof of death rather than evidence of silence.</li><li>Setting the timeout close to the interval, so one dropped packet triggers a failover.</li><li>Promoting a primary on a single observer's suspicion instead of a majority decision.</li><li>Letting heartbeats run on the same thread as the work they are supposed to report on.</li><li>Assuming a healthy heartbeat means the node can serve requests.</li><li>Sending heartbeats from every node on the same schedule with no jitter.</li><li>Forgetting that a suspected node may still be alive and able to write.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="service-mesh.html"><span>← Previous</span><strong>Service Mesh</strong></a><a class="next" href="raft-algorithm.html"><span>Next →</span><strong>Raft Algorithm</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/heartbeats">AlgoMaster — Heartbeats</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

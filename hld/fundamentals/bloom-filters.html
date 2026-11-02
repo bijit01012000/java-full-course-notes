@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bloom Filters — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 93 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Bloom Filters</h1>
+    <p class="dek">Data Structures for Scale · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/bloom-filters">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: expensive negative lookups</a>
+<a href="#s2">What a Bloom filter is</a>
+<a href="#s3">How it works</a>
+<a href="#s4">False positives: safe versus risky</a>
+<a href="#s5">Why there are no false negatives</a>
+<a href="#s6">Sizing: false positive rate and hash count</a>
+<a href="#s7">Hashing in practice</a>
+<a href="#s8">What it saves in memory</a>
+<a href="#s9">Deletion and counting filters</a>
+<a href="#s10">Fixed capacity and scalable filters</a>
+<a href="#s11">Bloom filters inside databases</a>
+<a href="#s12">Bloom filters in caching</a>
+<a href="#s13">Combining filters and knowing when not to use one</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A Bloom filter answers "definitely not here" or "maybe here" from a few bits per item, letting a system skip expensive lookups — and it is safe precisely because a false positive only costs extra work.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Bloom filter</dt><dd>A bit array plus several hash functions that tests set membership with no false negatives and a tunable rate of false positives.</dd></div><div class="term"><dt>Bit array</dt><dd>The <code>m</code> bits that hold the entire state; every bit starts at 0 and only ever moves to 1.</dd></div><div class="term"><dt>Hash function count (k)</dt><dd>How many positions each item sets or checks; too few or too many both raise the false positive rate.</dd></div><div class="term"><dt>False positive</dt><dd>The filter says "might be present" for an item that was never added, because other items happened to set the same bits.</dd></div><div class="term"><dt>False negative</dt><dd>The filter says "definitely not present" for an item that was added; impossible in a standard Bloom filter.</dd></div><div class="term"><dt>Bits per item</dt><dd>The memory budget per stored key; it sets the false positive rate far more than any other parameter.</dd></div><div class="term"><dt>Counting Bloom filter</dt><dd>A variant that stores a small counter per position so items can be removed without clearing bits other items rely on.</dd></div><div class="term"><dt>Scalable Bloom filter</dt><dd>A chain of filters that grows by adding a new, larger filter when the current one reaches capacity.</dd></div><div class="term"><dt>Double hashing</dt><dd>Deriving all <code>k</code> positions from two base hashes instead of computing <code>k</code> independent hashes.</dd></div><div class="term"><dt>Cache penetration</dt><dd>Repeated requests for keys that do not exist, which miss the cache and hit the database every time.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: expensive negative lookups</h2>
+<p class="lede">A sign-up page with a very large user base must tell a visitor whether a username is taken, ideally as they type.</p>
+<ul><li>Querying the database on every keystroke generates an enormous number of reads.</li><li>Holding every username in an in-memory hash set costs tens of gigabytes once the set is large, plus hash-table overhead.</li><li>Most attempted usernames are actually available, so most of that work confirms an absence and returns nothing.</li><li>The expensive case is the <strong>miss</strong>: proving that something is not there usually means touching storage.</li><li>If a cheap structure could prove absence, the database would only see the minority of cases that need confirmation.</li><li>The same shape appears in databases looking for absent keys and caches looking for absent objects.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a Bloom filter is</h2>
+<ul><li>It is a space-efficient structure that answers "is this item in the set?" for a set it never stores.</li><li>It supports exactly two operations: <strong>add</strong> an item and <strong>check</strong> an item.</li><li>A check returns one of two answers: <em>definitely not in the set</em>, or <em>might be in the set</em>.</li><li>It keeps no keys, only a compact bit array, which is why it can be orders of magnitude smaller than a hash set.</li><li>The trade is precision: it can be wrong in one direction but never in the other.</li><li>It shines when a definite "no" lets the caller skip expensive work.</li><li>It is not a cache and not a store: you cannot retrieve the items or enumerate them.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>How it works</h2>
+<ul><li>Allocate a bit array of <code>m</code> bits, all zero, and choose <code>k</code> hash functions.</li><li>Each hash function maps an item to a position in the array, deterministically: the same item always yields the same positions.</li><li><strong>Add:</strong> hash the item with all <code>k</code> functions and set those bits to 1, leaving already-set bits untouched.</li><li><strong>Check:</strong> hash the item the same way; if <em>any</em> bit is 0, the item was definitely never added.</li><li>If <em>all</em> bits are 1, the item might have been added — or other items may have set those bits.</li><li>Two items can share positions, which is exactly why deletion is unsafe and why false positives exist.</li><li>With a toy array of ten bits and three hashes, adding <code>alice</code> sets 1, 4, 7 and adding <code>dave</code> sets 2, 5, 7; checking <code>bob</code> at 0, 4, 8 hits a zero and is rejected immediately.</li><li>The mechanism is entirely local to memory: no disk, no network, no coordination.</li></ul>
+
+<div class="flow"><span class="flow-step">Hash item with k functions</span><span class="flow-arrow">→</span><span class="flow-step">Add: set all k bits to 1</span><span class="flow-arrow">→</span><span class="flow-step">Check: read all k bits</span><span class="flow-arrow">→</span><span class="flow-step">Any zero: definitely absent</span><span class="flow-arrow">→</span><span class="flow-step">All ones: possibly present, verify</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>False positives: safe versus risky</h2>
+<ul><li>A false positive happens when every probed bit was set by <em>other</em> items, so an absent key looks present.</li><li>It is safe when the only consequence is extra work, such as one unnecessary database read.</li><li>It is dangerous when the answer itself drives a decision, such as granting access or marking a payment as processed.</li><li>Safe pattern: treat "might be" as <em>go check</em>, never as <em>yes</em>.</li><li>Risky pattern: treat "might be" as a final answer, which silently converts an approximation into a wrong decision.</li><li>The design rule is simple: a Bloom filter may only <strong>skip work</strong>, never <strong>authorize an action</strong>.</li><li>This asymmetry is what makes the structure usable in production despite being approximate.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Filter says</th><th>Means</th><th>Action</th></tr></thead><tbody><tr><td>Definitely not</td><td>The item was never added</td><td>Skip the expensive lookup</td></tr>
+<tr><td>Might be</td><td>Added, or a false positive</td><td>Run the exact check</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Why there are no false negatives</h2>
+<ul><li>Adding an item sets all of its bits to 1.</li><li>In a standard Bloom filter, bits only change from 0 to 1 and never back.</li><li>So an added item's bits are still 1 at every later check, no matter what else was inserted.</li><li>That guarantee is what lets the caller trust a "definitely not" answer and skip the lookup.</li><li>It also explains why clearing bits for deletion is forbidden: it can create a false negative for a different item.</li><li>The guarantee depends on using the <strong>same hash functions</strong> and the same array forever.</li><li>It also depends on the filter being current with the underlying data set; a stale filter can mislead in the other direction.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Sizing: false positive rate and hash count</h2>
+<ul><li>The false positive rate depends on three things: array size <code>m</code>, item count <code>n</code>, and hash count <code>k</code>.</li><li>More items means more bits set, so a filter that is too small fills up and starts answering "might be" to everything.</li><li>The practical unit is <strong>bits per item</strong>: roughly 10 bits per item with a good <code>k</code> gives about a 1% rate.</li><li>Every additional ~5 bits per item cuts the false positive rate by roughly a factor of ten.</li><li>Too few hash functions means each item sets few bits, so accidental matches are common.</li><li>Too many hash functions fills the array faster, which also raises the rate — there is an optimum.</li><li>The standard sizing formulas are <code>m = -n ln(p) / (ln 2)^2</code> and <code>k = (m/n) ln 2</code> for target rate <code>p</code>.</li><li>Libraries take expected items and target rate and compute both, so hand-tuning is rarely necessary.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Target rate</th><th>Bits per item</th><th>Hash functions</th></tr></thead><tbody><tr><td>10%</td><td>~4.8</td><td>~3</td></tr>
+<tr><td>1%</td><td>~9.6</td><td>~7</td></tr>
+<tr><td>0.1%</td><td>~14.4</td><td>~10</td></tr>
+<tr><td>0.01%</td><td>~19.2</td><td>~13</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Hashing in practice</h2>
+<ul><li>Hash functions must be fast and spread values evenly; cryptographic strength is unnecessary.</li><li>MurmurHash and similar non-cryptographic hashes are the usual choice.</li><li>Hashes must be <strong>stable</strong> across processes and restarts if the filter is serialized or shared between services.</li><li>A language's built-in hash may be randomized per process, which silently breaks a persisted filter.</li><li>You do not need <code>k</code> independent functions: compute two base hashes and derive the rest as <code>h1 + i*h2</code>, called double hashing.</li><li>Double hashing keeps construction cheap while preserving the distribution properties that sizing assumes.</li><li>Changing the hash functions invalidates an existing filter, so they are part of its schema.</li></ul>
+
+
+<div class="note">A teaching implementation typically uses a small FNV-1a hash and double hashing; production should use a maintained library with serialization support and explicit sizing controls.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>What it saves in memory</h2>
+<ul><li>A hash set holding a billion short keys needs tens of gigabytes before counting table overhead.</li><li>A Bloom filter at a 1% rate needs roughly 10 bits per item, so the same billion keys fit in a bit over a gigabyte.</li><li>The filter's size does not depend on item length: a long URL costs the same bits as a short username.</li><li>That compactness allows a copy of the filter on every application server, so checks become local memory reads.</li><li>Only the small fraction of lookups that are false positives reach the database.</li><li>The savings come with a hard constraint: the filter must be sized for the final item count, not today's.</li><li>Replication is trivial because the filter is small; recomputation is not, because it needs the full data set.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Deletion and counting filters</h2>
+<ul><li>A standard Bloom filter cannot remove an item: clearing its bits also clears bits shared with other items.</li><li>Doing so creates a <strong>false negative</strong> for those other items, which breaks the one guarantee the structure offers.</li><li>A <strong>counting Bloom filter</strong> stores a small counter per position instead of a bit.</li><li>Add increments the counters; remove decrements them; a position counts as set while its counter is above zero.</li><li>Counters are typically a few bits wide, which makes the filter several times larger than the bit version.</li><li>Removal must only be applied to items that were actually added, or counters drift and false negatives appear.</li><li>Cuckoo filters are the other common answer: they store short fingerprints and delete by removing a fingerprint instead of decrementing shared state.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Fixed capacity and scalable filters</h2>
+<ul><li>Size is fixed at construction, because the array size and hash count are baked into the structure.</li><li>If the set grows well beyond the planned count, the array saturates and the false positive rate spikes.</li><li>You cannot simply enlarge it: the original items are gone, so there is nothing to rehash.</li><li>Option one: rebuild from the source data with a bigger array, which is correct but expensive and periodically stale.</li><li>Option two: use a <strong>scalable</strong> filter, where a full filter is followed by a new, larger one for new items.</li><li>A lookup then checks every filter in the chain, so latency grows slowly with the number of sub-filters.</li><li>Sizing well up front is cheaper than relying on many sub-filters, so estimate growth before deploying.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Bloom filters inside databases</h2>
+<ul><li>Storage engines such as Cassandra, HBase, and RocksDB keep data in many immutable files on disk.</li><li>A lookup could match any file, and checking each one costs a disk read that often finds nothing.</li><li>Each file carries a Bloom filter of its keys, kept in memory, and the engine consults it before reading the file.</li><li>A "definitely not" answer skips the file entirely, replacing a random read with a memory check.</li><li>The benefit is largest for <strong>absent</strong> keys, which would otherwise force a read of every file.</li><li>Cassandra exposes the target rate per table through <code>bloom_filter_fp_chance</code>, where a lower rate costs more memory.</li><li>Filters are rebuilt when a file is written, so they always match the file's contents.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Bloom filters in caching</h2>
+<ul><li><strong>One-hit wonders:</strong> a CDN observed that many requested objects are requested only once, so caching them evicts more popular objects.</li><li>The filter records recently seen objects; the first request adds the object without caching it, and a later request caches it.</li><li>False positives only cause a few one-time objects to be cached, which is harmless.</li><li><strong>Cache penetration:</strong> repeated requests for nonexistent keys miss the cache and hit the database every time.</li><li>A filter of all valid keys rejects requests for keys that certainly do not exist, protecting the database.</li><li>The filter must be updated whenever a new valid key is created, or real items get rejected.</li><li>Both uses rely on the same property: a cheap negative answer protects an expensive tier.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Combining filters and knowing when not to use one</h2>
+<ul><li>Two filters with the <strong>same size and hash functions</strong> can be merged with a bitwise OR.</li><li>The result equals a filter built from the union of both item sets, with no need to reprocess the data.</li><li>That makes filters easy to ship between nodes: a compact summary instead of the keys themselves.</li><li>Do not use one when you need a definite yes, such as an allow-list decision, without an exact check.</li><li>Do not use one when you need to list, retrieve, or iterate the set; it stores nothing.</li><li>Do not use one when deletions are frequent, unless you accept a counting or cuckoo variant.</li><li>Do not use one when the whole set already fits comfortably in memory — a hash set is exact and simpler.</li><li>Match the structure to the question: Bloom for membership, HyperLogLog for distinct counts, Count-Min Sketch for frequencies.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Structure</th><th>Answers</th><th>False positives</th><th>Stores items</th></tr></thead><tbody><tr><td>Hash set</td><td>Is it present?</td><td>No</td><td>Yes</td></tr>
+<tr><td>Bloom filter</td><td>Probably present?</td><td>Yes</td><td>No</td></tr>
+<tr><td>Counting Bloom</td><td>Probably present, deletable?</td><td>Yes</td><td>No</td></tr>
+<tr><td>Cuckoo filter</td><td>Probably present, deletable?</td><td>Yes</td><td>Fingerprints</td></tr>
+<tr><td>HyperLogLog</td><td>How many distinct?</td><td>N/A</td><td>No</td></tr>
+<tr><td>Count-Min Sketch</td><td>How often?</td><td>Overestimates</td><td>No</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Bits instead of keys</strong> saves orders of magnitude of memory but makes the answer probabilistic.</li><li><strong>More bits per item</strong> lowers false positives but increases memory linearly.</li><li><strong>More hash functions</strong> help up to the optimum, then saturate the array and hurt.</li><li><strong>No deletion</strong> keeps the no-false-negative guarantee but forces rebuilds or a heavier variant.</li><li><strong>Counting Bloom filters</strong> allow deletion but cost several times the memory of a bit array.</li><li><strong>Scalable filters</strong> handle growth but add a chain of checks to every lookup.</li><li><strong>Replicating the filter everywhere</strong> makes checks local but demands a rebuild strategy on every node.</li><li><strong>A very low false positive rate</strong> reduces wasted lookups but can cost more memory than the lookups save.</li><li><strong>Skipping work on a negative answer</strong> is safe, but any decision made on a positive answer is not.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Explain a Bloom filter in one paragraph.</summary><div class="answer"><p>It is a bit array with several hash functions. Adding an item sets the bits its hashes point to; checking an item reads those bits. Any zero proves the item was never added, while all ones only mean it might have been. It never stores the keys, so it is tiny, and it never returns a false negative.</p></div></details>
+<details><summary>2. Why can a Bloom filter never have false negatives?</summary><div class="answer"><p>Adding an item sets all of its bits to 1, and bits never return to 0 in a standard filter. So an added item's positions remain set regardless of later insertions. A false negative can only appear if bits are cleared, which is exactly why deletion is unsupported.</p></div></details>
+<details><summary>3. When is a false positive acceptable?</summary><div class="answer"><p>When it only causes extra work, such as one more database read or one unnecessary cache fill. It is unacceptable when the answer itself drives a decision, like granting access or confirming a payment. The rule is that a "might be" answer must always be verified.</p></div></details>
+<details><summary>4. How do you size a Bloom filter?</summary><div class="answer"><p>Decide the expected item count and the target false positive rate, then use the standard formulas to compute the bit array size and hash count — about 10 bits per item and 7 hashes for roughly 1%. Libraries do this for you. Size for the eventual set, not the current one.</p></div></details>
+<details><summary>5. What happens if you use too many hash functions?</summary><div class="answer"><p>Each item sets more bits, so the array saturates faster and unrelated items find all their positions already set. Beyond the optimum, the false positive rate rises even though more work is done per operation. The optimum follows from the bits-per-item ratio.</p></div></details>
+<details><summary>6. Why is deletion unsafe, and what are the alternatives?</summary><div class="answer"><p>Clearing an item's bits also clears bits shared with other items, producing false negatives for keys that are still present. Alternatives are periodic rebuilds, a counting Bloom filter with per-position counters, or a cuckoo filter that deletes a fingerprint rather than shared bits.</p></div></details>
+<details><summary>7. What happens when a filter exceeds its planned capacity?</summary><div class="answer"><p>The array fills with ones and nearly every check returns "might be", so the filter stops saving work. It cannot be resized in place because the original keys are gone. Rebuild it from source, or use a scalable filter that appends a new larger filter and checks the chain.</p></div></details>
+<details><summary>8. How do databases use Bloom filters?</summary><div class="answer"><p>An LSM-style engine has many immutable files, and a key might be in any of them. Each file keeps a Bloom filter in memory, so the engine skips files that certainly do not contain the key. Absent-key lookups stop costing a disk read per file.</p></div></details>
+<details><summary>9. How does a Bloom filter prevent cache penetration?</summary><div class="answer"><p>Maintain a filter of all valid keys. A request for a key the filter rejects never reaches the cache or database, so repeated requests for nonexistent keys cannot hammer the backend. The filter must be updated as new valid keys are created.</p></div></details>
+<details><summary>10. Can two Bloom filters be merged?</summary><div class="answer"><p>Yes, if they use the same array size and hash functions: a bitwise OR yields exactly the filter you would get from the union of both item sets. That lets nodes exchange compact summaries instead of raw keys. Filters built with different parameters cannot be merged.</p></div></details>
+<details><summary>11. Bloom filter or hash set?</summary><div class="answer"><p>Use a hash set when the data fits in memory and you need exact answers, enumeration, or deletion. Use a Bloom filter when the set is far too large to store, most lookups are misses, and an exact check is available for the "might be" case.</p></div></details>
+<details><summary>12. Why must hashes be stable across processes?</summary><div class="answer"><p>If a filter is serialized to disk or shared between services, the same key must map to the same bit positions everywhere. A randomized per-process hash produces different positions, so the filter silently reports wrong answers. That is why implementations require an explicit stable hash such as MurmurHash.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating a "might be present" answer as a definite yes in an authorization or payment path.</li><li>Sizing for today's item count and letting the filter saturate in production.</li><li>Trying to delete by clearing bits, which creates false negatives for other keys.</li><li>Using a language's randomized built-in hash for a persisted or shared filter.</li><li>Assuming more hash functions always means fewer false positives.</li><li>Merging filters that were built with different sizes or hash functions.</li><li>Forgetting to update the filter when new valid keys are created, so real keys get rejected.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="s2-h3.html"><span>← Previous</span><strong>S2 and H3</strong></a><a class="next" href="cuckoo-filter.html"><span>Next →</span><strong>Cuckoo Filter</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/bloom-filters">AlgoMaster — Bloom Filters</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

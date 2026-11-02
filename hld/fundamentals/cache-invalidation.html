@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cache Invalidation — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 38 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Cache Invalidation</h1>
+    <p class="dek">Caching · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/cache-invalidation">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why invalidation is necessary</a>
+<a href="#s2">Source of truth and bounded staleness</a>
+<a href="#s3">The three things you can do with a stale entry</a>
+<a href="#s4">TTL expiry</a>
+<a href="#s5">Delete on write (cache-aside invalidation)</a>
+<a href="#s6">Update on write and write-through</a>
+<a href="#s7">The races that break naive invalidation</a>
+<a href="#s8">Versioning and generation keys</a>
+<a href="#s9">Event-driven invalidation</a>
+<a href="#s10">Invalidating across multiple cache layers</a>
+<a href="#s11">Stampedes and thundering herds</a>
+<a href="#s12">Choosing an approach</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Cache invalidation is how a cached copy is expired, deleted, or refreshed when the source of truth changes — the hard part is doing it without races, misses, or stampedes.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Source of truth</dt><dd>The authoritative store such as a database or object store; a cached value is only ever a copy of it.</dd></div><div class="term"><dt>Stale data</dt><dd>A cached value that no longer matches the source of truth after an update.</dd></div><div class="term"><dt>Bounded staleness</dt><dd>An explicit limit on how old a cached value may be, chosen to be acceptable for that feature.</dd></div><div class="term"><dt>TTL</dt><dd>A time-to-live after which a cached entry expires automatically, regardless of writes.</dd></div><div class="term"><dt>Invalidation</dt><dd>Removing or refreshing a cached entry when the underlying data changes.</dd></div><div class="term"><dt>Cache-aside</dt><dd>The application reads the cache, loads from the source on a miss, then writes the value into the cache.</dd></div><div class="term"><dt>Versioned key</dt><dd>Embedding a version or generation number in the cache key so old entries are simply never read again.</dd></div><div class="term"><dt>Cache stampede</dt><dd>Many concurrent readers missing on the same key and all hitting the source of truth at once.</dd></div><div class="term"><dt>Negative caching</dt><dd>Caching the absence of a value so repeated misses for missing data do not hit the source.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why invalidation is necessary</h2>
+<p class="lede">Caching keeps frequently accessed data in a faster layer. The problem is that the original data can change while the cached copy does not, and a cached value is only a copy.</p>
+<ul><li>Product 123 is cached at $100; the database later says $90 and the cache still says $100.</li><li>Any read served from the cache now returns the wrong price to users.</li><li>The system holds <strong>multiple copies</strong> of the same fact, and copies diverge whenever a write happens.</li><li>Invalidation exists to ensure a cached copy does not stay stale forever.</li><li>It is a consistency mechanism, not a performance optimization; its failures are correctness bugs.</li><li>Most production bugs attributed to 'the cache' are actually missing or incomplete invalidation.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Source of truth and bounded staleness</h2>
+<ul><li>Designate one store as authoritative: the database, object store, or owning service.</li><li>The cache never decides truth; on disagreement the source wins.</li><li><strong>Perfect freshness</strong> is rarely the goal for every value, and pursuing it defeats the point of caching.</li><li><strong>Bounded staleness</strong> sets an explicit maximum age and states why that age is acceptable for the feature.</li><li>A price display, an inventory count, and an avatar URL can tolerate very different freshness windows.</li><li>Writing the tolerated staleness down per data type turns a vague argument into a testable requirement.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Data</th><th>Typical tolerance</th><th>Reason</th></tr></thead><tbody><tr><td>Static asset or image</td><td>Hours or longer</td><td>Content is immutable or versioned</td></tr>
+<tr><td>Product catalog description</td><td>Minutes</td><td>Occasional edits, low harm</td></tr>
+<tr><td>Price or inventory</td><td>Seconds or none</td><td>Wrong values cause direct business harm</td></tr>
+<tr><td>User permissions</td><td>Effectively none</td><td>Stale permissions are a security issue</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The three things you can do with a stale entry</h2>
+<ul><li><strong>Expire it:</strong> let a TTL remove it after a fixed time, so the next read reloads.</li><li><strong>Delete it:</strong> remove the entry on write so the next read misses and repopulates.</li><li><strong>Update it:</strong> write the new value into the cache at the same time as the source.</li><li>Each has different failure behavior: expiry tolerates staleness, delete risks a miss storm, update risks writing the wrong value.</li><li>Most production systems <strong>combine</strong> them, for example delete on write with a TTL as a safety net.</li><li>The combination matters more than any single technique.</li></ul>
+
+<div class="flow"><span class="flow-step">Write happens at the source</span><span class="flow-arrow">→</span><span class="flow-step">Choose: expire, delete, or update the cached copy</span><span class="flow-arrow">→</span><span class="flow-step">Next read either hits fresh data or misses and reloads</span><span class="flow-arrow">→</span><span class="flow-step">TTL guarantees an upper bound if the explicit step fails</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>TTL expiry</h2>
+<ul><li>A TTL is the simplest mechanism: no coordination and no write-path changes.</li><li>It guarantees staleness is bounded by the TTL, which is often enough.</li><li>Every expiry also creates a future miss, so a short TTL raises source load.</li><li>Synchronized TTLs across many keys can expire together and produce a periodic load spike.</li><li>Randomize TTLs slightly (jitter) so expirations spread out.</li><li>A TTL is a <em>safety net</em>, not a substitute for handling writes that must be visible immediately.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Delete on write (cache-aside invalidation)</h2>
+<ul><li>The common pattern: write the database, then delete the cache key.</li><li>The next read misses and reloads the current value, so the cache converges to the source.</li><li>Deleting is safer than updating because an update can write a value computed from stale state.</li><li>The delete can fail — the process dies, the network drops, the cache is briefly unavailable — so a TTL is still required.</li><li>Ordering matters: delete <strong>after</strong> the database commit, not before.</li><li>If the delete fails, the key stays stale until TTL or an explicit repair.</li></ul>
+
+<div class="flow"><span class="flow-step">Application updates the database</span><span class="flow-arrow">→</span><span class="flow-step">Transaction commits</span><span class="flow-arrow">→</span><span class="flow-step">Application deletes the cache key</span><span class="flow-arrow">→</span><span class="flow-step">Delete fails -> stale until TTL or repair job</span><span class="flow-arrow">→</span><span class="flow-step">Next read repopulates from the source</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Update on write and write-through</h2>
+<ul><li>Updating the cache on write keeps it warm and avoids a miss after each write.</li><li>The risk is writing a value derived from stale read state, especially under concurrent writers.</li><li>If two writers interleave, the slower one can overwrite the newer cached value.</li><li>Write-through writes the cache and the source in the same logical operation, adding write latency.</li><li>Write-behind writes the cache first and persists later, which is fast but can lose acknowledged writes on failure.</li><li>Updating is reasonable when writes are serialized per key or when the update is a pure assignment of the new value.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Latency</th><th>Main risk</th></tr></thead><tbody><tr><td>Delete on write</td><td>Low write cost, extra read miss</td><td>Failed delete leaves staleness</td></tr>
+<tr><td>Update on write</td><td>Low read cost</td><td>Concurrent writers write out of order</td></tr>
+<tr><td>Write-through</td><td>Higher write latency</td><td>Partial write across two stores</td></tr>
+<tr><td>Write-behind</td><td>Lowest write latency</td><td>Acknowledged writes lost on crash</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The races that break naive invalidation</h2>
+<ul><li><strong>Stale repopulation:</strong> reader misses, loads old value from the source, and writes it to cache after a writer already deleted the key.</li><li><strong>Delete-before-commit:</strong> the cache is cleared, a reader reloads the pre-commit value, and the commit then makes it stale.</li><li><strong>Delayed double delete:</strong> delete, commit, wait briefly, delete again to catch a concurrent repopulation — a mitigation, not a proof.</li><li><strong>Update with stale computation:</strong> a writer computes the new cached value from data it read before another writer committed.</li><li>Every one of these produces a permanently stale entry that only a TTL will eventually repair.</li><li>The general defense is to shorten the exposure window and always keep an expiry bound.</li></ul>
+
+
+<div class="note">Stale repopulation is the classic cache-aside race. It is rare per key and inevitable across a large key space.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Versioning and generation keys</h2>
+<ul><li>Put a version or generation number in the cache key, such as <code>product:123:v7</code>.</li><li>An invalidation increments the version, so old entries are simply never read again and expire naturally.</li><li>Readers never race with writers because the key identity changes instead of the value.</li><li>The version pointer becomes a small, hot piece of state that must itself be consistent.</li><li>This pattern is the basis of versioned asset URLs and cache-busting for static content.</li><li>It trades storage (old entries linger until eviction) for correctness and simplicity.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Event-driven invalidation</h2>
+<ul><li>Instead of every writer remembering to clear the cache, publish a change event and let a subscriber invalidate.</li><li>Change data capture from the database log keeps invalidation close to the actual commit, including changes made outside the application.</li><li>A shared invalidation channel matters when many services write the same data.</li><li>Events can be lost or delayed, so idempotent invalidation plus a TTL is still required.</li><li>Invalidation events must include the key or enough data to derive it, and ideally a version to ignore out-of-order delivery.</li><li>This decouples services but adds a dependency on the messaging path.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Invalidating across multiple cache layers</h2>
+<ul><li>Requests may pass a browser cache, a CDN, a reverse proxy, an application cache, and a distributed cache.</li><li>Each layer holds its own copy and must have its own expiry or purge mechanism.</li><li>Purging the origin cache does not touch a CDN edge or a browser's local copy.</li><li>Use versioned URLs or explicit purge APIs for shared edge layers; short TTLs for browser layers.</li><li>Forgetting one layer looks like random staleness that cannot be reproduced in a single environment.</li><li>Document the invalidation story per layer, not just for the cache closest to the database.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Typical control</th></tr></thead><tbody><tr><td>Browser</td><td>Short TTL or versioned URL</td></tr>
+<tr><td>CDN edge</td><td>TTL plus explicit purge</td></tr>
+<tr><td>Reverse proxy</td><td>TTL or purge hook</td></tr>
+<tr><td>Application / distributed cache</td><td>Delete on write, TTL, version key</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Stampedes and thundering herds</h2>
+<ul><li>Deleting a hot key means the next reads all miss simultaneously.</li><li>Without coordination, every miss queries the source of truth at once.</li><li>Mitigations: a per-key lock so only one loader refreshes, request coalescing, or serving stale data briefly while refreshing.</li><li>Keeping a slightly stale value during refresh (stale-while-revalidate) protects availability at the cost of freshness.</li><li>Warming keys after a purge reduces the empty window for known-hot data.</li><li>Jittered TTLs prevent many keys expiring in the same second.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Choosing an approach</h2>
+<ul><li>Start with delete-on-write plus a TTL: simple, and the TTL caps any failure window.</li><li>Add versioned keys when correctness under concurrency matters more than storage.</li><li>Use event-driven invalidation when many writers or services touch the same data.</li><li>Use update-on-write only when writes are naturally serialized or the new value is a complete assignment.</li><li>Tighten the TTL for data where bounded staleness must be small; lengthen it for immutable data.</li><li>Whatever you choose, monitor hit ratio, miss latency, and stale-read reports to validate it.</li></ul>
+
+<div class="flow"><span class="flow-step">Classify the data and its staleness tolerance</span><span class="flow-arrow">→</span><span class="flow-step">Choose delete, update, or expire</span><span class="flow-arrow">→</span><span class="flow-step">Add a TTL as the bound on failure</span><span class="flow-arrow">→</span><span class="flow-step">Add versioning or events if concurrency demands it</span><span class="flow-arrow">→</span><span class="flow-step">Measure hit ratio and source load</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Short TTLs</strong> bound staleness tightly but raise miss rates and source load.</li><li><strong>Long TTLs</strong> protect the source but leave stale data visible for longer after a missed invalidation.</li><li><strong>Delete on write</strong> avoids writing wrong values, but creates a miss immediately after every write.</li><li><strong>Update on write</strong> keeps reads fast, but risks out-of-order writes from concurrent writers.</li><li><strong>Versioned keys</strong> make invalidation race-free, but leave old entries occupying memory until eviction.</li><li><strong>Event-driven invalidation</strong> centralizes logic and covers multiple writers, but adds a messaging dependency and new failure modes.</li><li><strong>Stale-while-revalidate</strong> protects availability during refresh, at the cost of explicitly serving older data.</li><li><strong>A per-key lock</strong> prevents stampedes, but serializes refresh and can become a bottleneck on hot keys.</li><li><strong>Purging every cache layer</strong> gives immediate correctness, but adds operational surface per layer.</li><li><strong>No TTL at all</strong> saves on misses, but turns any missed invalidation into permanent corruption.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why does cache invalidation exist?</summary><div class="answer"><p>A cached value is a copy, and the source of truth can change without the copy changing. Invalidation removes or refreshes the copy so users do not keep receiving outdated results. It is fundamentally a consistency problem, not a performance one.</p></div></details>
+<details><summary>2. What are the three basic options once data changes?</summary><div class="answer"><p>Expire the entry with a TTL, delete it so the next read reloads, or update it with the new value. Most systems combine them, typically deleting on write and keeping a TTL as a safety net in case the delete fails.</p></div></details>
+<details><summary>3. What is bounded staleness?</summary><div class="answer"><p>An explicit maximum age a cached value may reach, chosen so the feature still behaves acceptably. Instead of demanding perfect freshness everywhere, you state the tolerance per data type and design the TTL and invalidation to meet it.</p></div></details>
+<details><summary>4. Why delete instead of update on write?</summary><div class="answer"><p>An update writes a value that may have been computed from stale state, and concurrent writers can apply values out of order. Deleting defers the value computation to the next read, where it comes fresh from the source. The cost is a cache miss after each write.</p></div></details>
+<details><summary>5. Describe the classic cache-aside race.</summary><div class="answer"><p>A reader misses, reads the old value from the database, and is delayed. A writer commits a new value and deletes the key. The reader then writes its old value into the cache, which stays stale. Only a TTL bounds how long the incorrect value survives.</p></div></details>
+<details><summary>6. How do versioned keys prevent that race?</summary><div class="answer"><p>Invalidation changes the key's version, for example from <code>product:123:v7</code> to <code>v8</code>. A late reader writing to the old key does not affect reads, because nobody reads that key anymore. Correctness comes from changing identity instead of racing on the value.</p></div></details>
+<details><summary>7. Why is a TTL still needed if you invalidate explicitly?</summary><div class="answer"><p>Explicit invalidation can fail: the process can crash, the network can drop, or the cache can be briefly unavailable. A TTL ensures the worst case is bounded staleness rather than permanent staleness, which is what makes the design safe.</p></div></details>
+<details><summary>8. What is a cache stampede and how do you prevent it?</summary><div class="answer"><p>It is many concurrent misses on the same key all querying the source of truth at once. Prevent it with a per-key refresh lock, request coalescing, staggered TTLs, key warming, or serving slightly stale data while one request refreshes.</p></div></details>
+<details><summary>9. Your CDN still serves old content after you cleared the origin cache. Why?</summary><div class="answer"><p>Each layer holds an independent copy. Clearing the application cache does not purge CDN edges or browsers. Use versioned URLs or an explicit purge for edge layers, and short TTLs for browser caches.</p></div></details>
+<details><summary>10. When is event-driven invalidation worth it?</summary><div class="answer"><p>When several services or code paths write the same data and each would otherwise need to remember to invalidate. Publishing change events or using change data capture centralizes the logic and catches writes the application does not control, at the cost of a messaging dependency.</p></div></details>
+<details><summary>11. How would you pick a TTL for a product price?</summary><div class="answer"><p>Start from the business tolerance: a wrong price is harmful, so the window should be short, and the write path should delete the key explicitly. Then measure source load at that TTL and decide whether the freshness requirement or the capacity constraint has to move.</p></div></details>
+<details><summary>12. How do you know invalidation is working in production?</summary><div class="answer"><p>Track hit ratio, source load, and age of cached entries, and capture reports of stale values as bugs with the key and timestamp. A sudden hit-ratio drop or rising source load often means invalidation is firing too aggressively or failing repeatedly.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Adding a cache without any invalidation plan and relying on eviction to fix staleness.</li><li>Deleting the cache key before the database commit, so a reader repopulates the pre-commit value.</li><li>Deleting once and assuming it worked, with no TTL as a fallback when the delete fails.</li><li>Updating the cache from stale read state and overwriting a newer value.</li><li>Caching permissions or balances with a long TTL and treating staleness as a performance topic.</li><li>Invalidating a hot key with no stampede protection and knocking over the database.</li><li>Forgetting that a purge has to reach every cache layer, not just the origin.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="cache-eviction-policies.html"><span>← Previous</span><strong>Cache Eviction Policies</strong></a><a class="next" href="content-delivery-network-cdn.html"><span>Next →</span><strong>Content Delivery Network (CDN)</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/cache-invalidation">AlgoMaster — Cache Invalidation</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

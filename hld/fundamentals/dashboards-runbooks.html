@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboards &amp; Runbooks — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 124 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Dashboards &amp; Runbooks</h1>
+    <p class="dek">Observability · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/dashboards-runbooks">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The 3 a.m. problem</a>
+<a href="#s2">What a dashboard is for</a>
+<a href="#s3">Layering dashboards</a>
+<a href="#s4">Design rules that survive an incident</a>
+<a href="#s5">Panels that actively mislead</a>
+<a href="#s6">Wiring alerts, dashboards, and drill-downs together</a>
+<a href="#s7">Runbooks: purpose and anatomy</a>
+<a href="#s8">Writing steps that work under stress</a>
+<a href="#s9">Alert routing, ownership, and escalation</a>
+<a href="#s10">The incident response loop</a>
+<a href="#s11">Keeping documentation alive</a>
+<a href="#s12">Anti-patterns and failure modes</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A dashboard should answer <em>what is broken</em> in seconds and a runbook should answer <em>what do I do now</em> — together they turn a twenty-minute hunt into a two-minute fix.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Dashboard</dt><dd>A curated set of charts and numbers designed to answer specific operational questions about a system, not a dump of every available metric.</dd></div><div class="term"><dt>Runbook</dt><dd>A written procedure that tells an on-call engineer how to diagnose, mitigate, and escalate a specific alert or failure mode.</dd></div><div class="term"><dt>Golden signals</dt><dd>Latency, traffic, errors, and saturation — the default top-level indicators of a service's health.</dd></div><div class="term"><dt>SLO</dt><dd>A service level objective: a target for a measurable reliability property, such as the fraction of requests served within a latency threshold.</dd></div><div class="term"><dt>Error budget</dt><dd>The amount of unreliability an SLO permits; burn rate tells you how fast it is being consumed.</dd></div><div class="term"><dt>Drill-down</dt><dd>A link from an aggregate view to a more detailed one, such as a panel to a trace, a log query, or a per-instance breakdown.</dd></div><div class="term"><dt>Escalation</dt><dd>The rule for moving an incident to another person or team when the first responder cannot resolve it within a defined time.</dd></div><div class="term"><dt>Playbook</dt><dd>A broader set of runbooks and decision guidance for a class of incidents, such as a dependency outage or a bad deploy.</dd></div><div class="term"><dt>Mitigation</dt><dd>Any action that reduces user impact — rollback, failover, feature flag off, traffic shed — even if it does not fix the root cause.</dd></div><div class="term"><dt>Postmortem</dt><dd>A blameless review after an incident that records the timeline, impact, contributing causes, and follow-up actions.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The 3 a.m. problem</h2>
+<p class="lede">An alert says the payment service error rate is high. The dashboard has sixty panels, several look odd, and there are no notes on what to check first. The engineer who built the service is asleep in another time zone.</p>
+<ul><li>Without guidance, the responder starts guessing, and every guess costs minutes of user impact.</li><li>Dashboards are built during calm periods by people who know the system; they are read during incidents by people who do not.</li><li>The fix often takes two minutes — a rollback — while finding it takes twenty.</li><li>The gap between detection and mitigation is what dashboards and runbooks are designed to shrink.</li><li>Dashboards answer <em>what is wrong and where</em>; runbooks answer <em>what to do about it</em>.</li><li>Both are operational documents: they must be tested under realistic conditions, not just written once.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a dashboard is for</h2>
+<ul><li>A dashboard exists to answer a small set of questions fast, not to display every metric the system emits.</li><li>Each panel should have a decision behind it: if this line is high, do X; if flat, do nothing.</li><li>The primary audience is someone under time pressure who did not build the system.</li><li>A good dashboard makes the abnormal obvious within seconds, before reading any labels.</li><li>It should also show <em>when</em> things changed — deploy markers, config changes, traffic shifts — because timing narrows causes.</li><li>Dashboards are not reports: long-term trend analysis belongs in separate, purpose-built views.</li></ul>
+
+
+<div class="note">If you cannot state the question a panel answers, the panel is decoration and will be skipped during the incident.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Layering dashboards</h2>
+<ul><li><strong>Fleet overview:</strong> one row of key services with health, error rate, and latency; the entry point during a broad incident.</li><li><strong>Service dashboard:</strong> golden signals for one service, broken down by endpoint, status, and instance.</li><li><strong>Dependency and resource view:</strong> databases, queues, caches, and pools that the service relies on.</li><li><strong>Debug view:</strong> high-cardinality or per-instance detail used after the problem is localized, often closer to logs and traces.</li><li>Each layer should link down to the next, so the responder never has to search for the right dashboard mid-incident.</li><li>Layering prevents the classic mistake of putting every possible panel on one page.</li><li>Separate dashboards per audience — executives want SLOs, responders want saturation and error breakdowns.</li></ul>
+
+<div class="flow"><span class="flow-step">Alert names the service and symptom</span><span class="flow-arrow">→</span><span class="flow-step">Fleet overview confirms scope: one service or many</span><span class="flow-arrow">→</span><span class="flow-step">Service dashboard locates the failing endpoint and instance</span><span class="flow-arrow">→</span><span class="flow-step">Dependency view checks the suspect downstream</span><span class="flow-arrow">→</span><span class="flow-step">Trace or log query confirms the mechanism</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Design rules that survive an incident</h2>
+<ul><li>Put the most important signals in the top-left, where attention lands first.</li><li>Keep units and scales consistent across panels; mixing milliseconds and seconds causes misreads under stress.</li><li>Show rates and percentiles, not cumulative counters — a raw monotonically increasing total has no useful shape.</li><li>Use thresholds or shaded bands tied to SLOs so <em>normal</em> versus <em>bad</em> is visible without mental arithmetic.</li><li>Prefer few large panels over many small ones; a wall of sparklines is unreadable at 3 a.m.</li><li>Annotate panels with the deploy or config change markers that explain step changes.</li><li>Title panels with the question or the consequence, not just the metric name.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Panels that actively mislead</h2>
+<ul><li>Averaging latency hides the tail; a healthy average can coexist with a broken p99.</li><li>Clipping the y-axis makes a doubling look flat, and auto-scaling axes make small noise look dramatic.</li><li>Plotting multiple series with different units on one chart creates false correlations.</li><li>Gaps in data rendered as zero make an outage look like a drop to healthy zero traffic.</li><li>Aggregating across instances hides one bad replica behind nine healthy ones.</li><li>Long time ranges compress spikes into invisible blips; use a window matched to the alert.</li><li>Percentiles computed from averaged sub-percentiles are mathematically wrong and quietly reassuring.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Wiring alerts, dashboards, and drill-downs together</h2>
+<ul><li>Every alert should link directly to the dashboard that shows the affected service at the relevant time range.</li><li>Every dashboard should link to the trace search and log query for the same service, with filters prefilled.</li><li>Carry the alert's time window into the dashboard URL, so the responder lands on the incident window, not <em>now</em>.</li><li>Include the runbook link in the alert payload, so guidance is one click away on a phone.</li><li>Prefilled drill-downs remove the guesswork that consumes the first minutes of an incident.</li><li>Test the links: a dead runbook URL is worse than none, because it burns trust and time.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Runbooks: purpose and anatomy</h2>
+<p class="lede">A runbook is a procedure for a specific, recognizable situation. It is written in advance so that nobody has to reason from first principles while users are affected.</p>
+<ul><li><strong>Trigger:</strong> which alert or symptom this runbook covers, and what it looks like.</li><li><strong>Impact:</strong> who is affected and how urgently, which decides whether to mitigate first or investigate first.</li><li><strong>Diagnosis:</strong> the few checks that separate the likely causes, in order.</li><li><strong>Mitigation:</strong> concrete actions with exact commands, flags, or console paths.</li><li><strong>Verification:</strong> how to confirm the fix worked, using the same metric the alert used.</li><li><strong>Escalation:</strong> who to contact, when, and what information to hand over.</li><li>A runbook should be short enough to follow on a phone at 3 a.m., with numbered steps rather than prose.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Writing steps that work under stress</h2>
+<ul><li>Use imperative numbered steps: <em>check</em>, <em>run</em>, <em>expect</em>, <em>if not, go to step N</em>.</li><li>Provide copy-pasteable commands with placeholders clearly marked, and say how to fill them.</li><li>State the expected output for each check, so the reader knows whether the result is normal.</li><li>Include decision points as explicit branches instead of relying on judgment.</li><li>Warn about actions that are irreversible or that lose diagnostic data, such as restarting before capturing heap dumps.</li><li>Note the blast radius of mitigations — failing over a region affects capacity elsewhere.</li><li>Keep a short <em>if nothing works</em> path that escalates rather than encouraging endless improvisation.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Section</th><th>Question it answers</th><th>Failure if missing</th></tr></thead><tbody><tr><td>Trigger</td><td>Is this the right runbook?</td><td>Responder follows the wrong procedure</td></tr>
+<tr><td>Impact</td><td>How urgent is this?</td><td>Investigation before mitigation, users suffer longer</td></tr>
+<tr><td>Diagnosis</td><td>What is the likely cause?</td><td>Random guessing and restarts</td></tr>
+<tr><td>Mitigation</td><td>What do I do now?</td><td>Incident stalls waiting for an expert</td></tr>
+<tr><td>Verification</td><td>Is it fixed?</td><td>Premature all-clear, or unnecessary escalation</td></tr>
+<tr><td>Escalation</td><td>Who else needs to know?</td><td>Silent incident and delayed response</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Alert routing, ownership, and escalation</h2>
+<ul><li>Every alert needs a named owning team; alerts with no owner become everyone's problem and nobody's task.</li><li>Route by service ownership rather than by infrastructure, so the responder knows the code.</li><li>Define escalation timers: if not acknowledged in N minutes, notify the secondary, then the team lead.</li><li>Separate pages (wake someone) from tickets (handle in business hours) and enforce the distinction.</li><li>Deduplicate and group related alerts so one root cause does not produce thirty pages.</li><li>Include the severity, the affected service, and the runbook link in the notification itself.</li><li>Review paging frequency per service; a noisy service is a reliability bug to fix, not a fact of life.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>The incident response loop</h2>
+<ul><li>Acknowledge, then assess impact before investigating — the question is how bad, then why.</li><li>Mitigate first when users are affected: rollback, failover, disable the feature, shed load.</li><li>Communicate status on a known channel at a predictable cadence, even when there is no new information.</li><li>Record timestamps as you go; reconstructing a timeline from memory a day later loses accuracy.</li><li>Assign roles for larger incidents: an incident commander, a communicator, and subject-matter responders.</li><li>Preserve evidence before destructive actions — logs, traces, heap dumps, and the exact failing request.</li><li>Close with a blameless postmortem that produces owned, dated follow-up actions.</li></ul>
+
+<div class="flow"><span class="flow-step">Alert fires and is acknowledged</span><span class="flow-arrow">→</span><span class="flow-step">Open the linked dashboard and confirm scope</span><span class="flow-arrow">→</span><span class="flow-step">Assess impact and decide mitigate versus investigate</span><span class="flow-arrow">→</span><span class="flow-step">Follow the runbook mitigation and verify</span><span class="flow-arrow">→</span><span class="flow-step">Communicate resolution</span><span class="flow-arrow">→</span><span class="flow-step">Write the postmortem and fix the detection gap</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Keeping documentation alive</h2>
+<ul><li>Treat dashboards and runbooks as code: stored in version control, reviewed like changes, with owners.</li><li>Update the runbook during the incident, not weeks later when details are gone.</li><li>Delete panels nobody looks at; unused dashboards create false confidence and slow navigation.</li><li>Rehearse: game days and on-call shadowing expose steps that only work for the author.</li><li>Track whether runbooks were used and whether they helped; a runbook that was bypassed needs revision or retirement.</li><li>After each incident, ask what the responder had to figure out that the documentation should have told them.</li><li>Link runbooks from alerts, dashboards, and service catalogs, so they can be found without searching.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Anti-patterns and failure modes</h2>
+<ul><li>The wall of graphs: dozens of panels with no hierarchy, so the responder reads noise instead of signal.</li><li>The dashboard-only team: monitoring exists but no procedure, so detection is fast and response is slow.</li><li>The stale runbook: commands reference hosts, dashboards, or tools that no longer exist.</li><li>The hero dependency: the only person who understands the system is also the only one who can fix it.</li><li>The alert without a link: a page that names a symptom but provides no path to the cause or the fix.</li><li>The untested mitigation: a failover procedure that has never been executed and fails under pressure.</li><li>The silent outage: nobody is paged because the alert watches a cause metric that stayed green while users failed.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Comprehensive dashboards</strong> contain every signal but slow responders down through sheer volume.</li><li><strong>Minimal dashboards</strong> are fast to read but may omit the detail needed for an unusual failure.</li><li><strong>Detailed runbooks</strong> reduce dependence on experts but go stale quickly and can encourage blind following.</li><li><strong>Short runbooks</strong> stay accurate but may lack the branches a real incident needs.</li><li><strong>Aggressive paging</strong> catches problems early but causes alert fatigue and ignored pages.</li><li><strong>High alert thresholds</strong> reduce noise but let user-visible degradation persist before anyone is woken.</li><li><strong>Automated remediation</strong> shortens mitigation but can amplify a fault if the automation misdiagnoses.</li><li><strong>Blameless postmortems</strong> surface honest causes but require organizational trust to be useful.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a dashboard actually for?</summary><div class="answer"><p>Answering a small set of operational questions quickly, usually during an incident. It should make the abnormal obvious and point to the next step, not display every metric available. A panel with no decision behind it is noise that slows the responder down.</p></div></details>
+<details><summary>2. How many panels should an on-call dashboard have?</summary><div class="answer"><p>Few enough that the important signals are visible without scrolling or interpretation — typically one screen organized by hierarchy: health summary on top, golden signals below, then dependency detail. Anything beyond that belongs on a linked, deeper dashboard. The limit is attention, not screen space.</p></div></details>
+<details><summary>3. What should the top row of a service dashboard show?</summary><div class="answer"><p>Latency percentiles, error rate, throughput, and saturation for the service as a whole, plus the SLO status or error-budget burn if one exists. Those four answer <em>is it broken</em> and <em>how badly</em>. Everything else is a drill-down.</p></div></details>
+<details><summary>4. What is a runbook, and what does it contain?</summary><div class="answer"><p>A written procedure for a specific alert or failure mode: trigger, impact, ordered diagnostic checks, mitigation actions with exact commands, verification, and escalation. It is written in advance so the responder does not have to reason from scratch under pressure. It should be short, numbered, and tested.</p></div></details>
+<details><summary>5. How do dashboards and runbooks fit together?</summary><div class="answer"><p>The alert names the symptom and links to the dashboard, which shows scope and narrows the suspect; the dashboard links to the runbook, which gives the mitigation steps; the runbook ends by verifying on the same metric that alerted. Each artifact hands off to the next without searching.</p></div></details>
+<details><summary>6. Why do dashboards mislead during incidents?</summary><div class="answer"><p>Common causes are averaged latency hiding the tail, auto-scaling axes exaggerating noise, gaps drawn as zero, and aggregation across instances hiding one bad replica. Another is a time range that does not match the alert window, so the responder sees a healthy chart for the wrong period.</p></div></details>
+<details><summary>7. Mitigate first or diagnose first?</summary><div class="answer"><p>If users are affected and a safe mitigation exists — rollback, failover, disable a feature — mitigate first and diagnose afterwards with the evidence preserved. Diagnose first only when the mitigation is risky, irreversible, or would destroy the data needed to prevent recurrence.</p></div></details>
+<details><summary>8. How do you decide alert severity and routing?</summary><div class="answer"><p>Base severity on user impact and urgency, not on which metric fired. Page only for conditions that need immediate human action, route to the owning team, and define escalation timers with a secondary and a lead. Everything else becomes a ticket or a dashboard signal.</p></div></details>
+<details><summary>9. How do you keep runbooks from going stale?</summary><div class="answer"><p>Store them in version control with owners, update them during the incident rather than after, and rehearse them in game days. Link them from alerts so broken links are noticed immediately. Retire procedures nobody uses instead of letting them rot.</p></div></details>
+<details><summary>10. What makes a runbook hard to follow at 3 a.m.?</summary><div class="answer"><p>Prose instead of numbered steps, missing expected outputs, unexplained commands, and branches that depend on expert judgment. The reader is sleepy, possibly on a phone, and under pressure. Explicit <em>run this, expect this, if not go here</em> structure is what makes it usable.</p></div></details>
+<details><summary>11. What is the role of a postmortem?</summary><div class="answer"><p>It reconstructs the timeline, quantifies impact, identifies contributing causes, and produces owned follow-up actions. Done blamelessly, it surfaces the process and detection gaps that allowed the incident. The measure of success is whether the same failure can recur.</p></div></details>
+<details><summary>12. How do you know your dashboards are good?</summary><div class="answer"><p>Watch someone who did not build them respond to a simulated alert. If they can determine scope and the next step within a minute or two, the dashboard works. If they scroll, squint, or ask which panel matters, it needs fewer panels and clearer hierarchy.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Building a dashboard with every available metric and calling it observability.</li><li>Alerting without linking a runbook, then expecting the responder to rediscover the procedure at 3 a.m.</li><li>Writing runbooks as narrative documentation rather than executable, numbered steps.</li><li>Letting graphs auto-scale or clip axes so the severity of a change is misjudged.</li><li>Paging on cause metrics like CPU while user-facing error rate is not alerted at all.</li><li>Leaving dashboards and runbooks unowned, so they silently rot after the author leaves the team.</li><li>Skipping postmortem follow-ups, guaranteeing the same incident has the same twenty-minute detection gap.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="alert-monitoring.html"><span>← Previous</span><strong>Alert &amp; Monitoring</strong></a><a class="next" href="ssl-tls.html"><span>Next →</span><strong>SSL/TLS</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/dashboards-runbooks">AlgoMaster — Dashboards &amp; Runbooks</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Count-Min Sketch — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 96 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Count-Min Sketch</h1>
+    <p class="dek">Data Structures for Scale · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/count-min-sketch">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: counting items in a stream</a>
+<a href="#s2">Why exact counting gets expensive</a>
+<a href="#s3">What a Count-Min Sketch is</a>
+<a href="#s4">Update</a>
+<a href="#s5">Query: take the minimum</a>
+<a href="#s6">Error and sizing</a>
+<a href="#s7">Reducing overestimation</a>
+<a href="#s8">Finding heavy hitters</a>
+<a href="#s9">Merging and distributed streams</a>
+<a href="#s10">Limits and failure modes</a>
+<a href="#s11">Where it is used</a>
+<a href="#s12">Decision rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A Count-Min Sketch estimates how often each item appeared in a stream using a fixed grid of counters and a minimum across rows, so memory stays constant while estimates never come in under the true count.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Count-Min Sketch</dt><dd>A fixed-size matrix of counters with one hash function per row that estimates item frequencies from a stream.</dd></div><div class="term"><dt>Width (w)</dt><dd>The number of counters per row; wider rows mean fewer collisions and better accuracy.</dd></div><div class="term"><dt>Depth (d)</dt><dd>The number of rows, and therefore the number of independent estimates combined by taking the minimum.</dd></div><div class="term"><dt>Point estimate</dt><dd>The minimum counter value across all rows for an item, used as its estimated frequency.</dd></div><div class="term"><dt>Overestimate guarantee</dt><dd>Estimates never fall below the true count, because every update only adds to the counters an item hashes to.</dd></div><div class="term"><dt>Heavy hitter</dt><dd>An item whose true frequency is a significant fraction of total traffic, identified from sketch estimates.</dd></div><div class="term"><dt>Conservative update</dt><dd>A variant that increments only the smallest counters in a row, which reduces collision inflation.</dd></div><div class="term"><dt>Mergeability</dt><dd>The property that two sketches with identical dimensions can be combined by adding counters cell by cell.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: counting items in a stream</h2>
+<p class="lede">A social platform wants a trending-hashtags feature. Every minute, millions of posts arrive, each carrying one or more hashtags.</p>
+<ul><li>Trending means comparing how often each hashtag appears, so the system needs per-item counts.</li><li>The straightforward structure is a hash map from hashtag to counter, incremented on every appearance.</li><li>That works while the vocabulary is small and the key space is bounded.</li><li>As the platform grows, unique hashtags multiply — many are typos, jokes, or one-off events.</li><li>Each distinct key still needs its own entry even if it was seen once and never again.</li><li>Memory grows with the number of distinct items, which is exactly the quantity that streaming systems cannot bound.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why exact counting gets expensive</h2>
+<ul><li>A hash map stores every distinct key plus a counter, so cost scales with distinct items rather than traffic.</li><li>The distribution is heavily skewed: most keys are rare and a few are extremely common.</li><li>Memory is therefore spent almost entirely on keys that will never trend.</li><li>Exact counts also resist sharding: merging per-shard maps means shipping every key.</li><li>But the product decision does not need exact counts — it needs to rank items by relative frequency.</li><li>Relaxing exactness buys a structure whose size depends on the desired accuracy, not on the data.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What a Count-Min Sketch is</h2>
+<ul><li>It is a two-dimensional array of counters with <code>d</code> rows and <code>w</code> columns.</li><li>Each row has its own hash function that maps an item to one column in that row.</li><li>Memory is fixed when the sketch is created, regardless of how many distinct items stream through.</li><li>Every update touches exactly one counter per row, so cost is <code>d</code> increments.</li><li>Every query reads exactly one counter per row and takes the minimum.</li><li>The structure never stores keys, so it cannot list what it has seen or return exact counts.</li><li>It is a frequency estimator, the counterpart to a Bloom filter's membership test.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Update</h2>
+<ul><li>Hash the item once per row to find that row's column.</li><li>Increment each of those <code>d</code> counters by one.</li><li>All counters start at zero, so the sketch is empty and immediately usable.</li><li>The update never reads the item's previous count, which is what keeps it cheap and streaming-friendly.</li><li>Collisions are expected: two items can share a column in some rows and inflate each other's counters.</li><li>Because increments only ever add, an item's counters never decrease, which is the source of the one-sided error.</li><li>Some variants allow negative updates so that counts can be decremented, but that breaks the one-sided guarantee.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Query: take the minimum</h2>
+<ul><li>Hash the item into every row and read the <code>d</code> counters.</li><li>Return the <strong>smallest</strong> of them as the estimated count.</li><li>Every counter an item hashes to was incremented at least once per real occurrence, so each is at least the true count.</li><li>Collisions only add extra increments, so counters can be too high but never too low.</li><li>Taking the minimum picks the least polluted of the <code>d</code> observations.</li><li>The estimate is therefore an upper bound on the truth, with error that shrinks as rows are added.</li><li>An item never seen can still return a nonzero estimate, which is a false positive in count form.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Operation</th><th>Cost</th><th>Result</th></tr></thead><tbody><tr><td>Update</td><td><code>d</code> increments</td><td>Counters raised</td></tr>
+<tr><td>Query</td><td><code>d</code> reads plus a minimum</td><td>Estimated count, never below truth</td></tr>
+<tr><td>Merge</td><td>Add all cells</td><td>Union of two streams</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Error and sizing</h2>
+<ul><li>Error comes from collisions: other items sharing a column add to the counter.</li><li>Widening rows reduces collisions; adding rows reduces the chance that every row is polluted for a given item.</li><li>The standard sizing rules are <code>w ≈ e / &epsilon;</code> and <code>d ≈ ln(1/&delta;)</code> for error <code>&epsilon;</code> with probability <code>1 - &delta;</code>.</li><li>In words: width controls the size of the error relative to total stream volume, depth controls how often the guarantee fails.</li><li>The error bound is relative to the <strong>total count</strong>, so a high-volume stream needs a proportionally wider sketch for the same absolute error.</li><li>A common practical setup uses a modest number of rows, because each extra row multiplies memory by the same factor.</li><li>Always state the guarantee you sized for; "approximate counts" without an error bound is not a design.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Reducing overestimation</h2>
+<ul><li><strong>Conservative update:</strong> increment only the counters that are currently at the row minimum, leaving already-high counters alone.</li><li>This reduces the inflation caused by collisions and improves accuracy at no extra memory cost.</li><li>It adds a read-before-write step, which matters for high-throughput ingestion.</li><li><strong>Count sketch</strong> is a related structure that estimates the median of signed counters instead of the minimum.</li><li>Sketch variants can also track the maximum or the sum, depending on the question.</li><li>The choice depends on whether overestimation or underestimation is safer for the application.</li><li>For ranking heavy hitters, a small overestimate rarely changes the top of the list.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Finding heavy hitters</h2>
+<ul><li>A heavy hitter is an item whose frequency exceeds a threshold, often expressed as a fraction of total volume.</li><li>A sketch alone cannot enumerate candidates, because it never stores keys.</li><li>Pair it with a bounded candidate set: a small heap or map of the current top items.</li><li>On each update, query the sketch for the item's estimate and compare it with the weakest candidate.</li><li>Estimates are upper bounds, so an item can be promoted early but should not be dropped based on a single noisy reading.</li><li>This is the classic space-saving pattern: exact counts for a few candidates, approximate counts for everything else.</li><li>Thresholds should be derived from the query — "top k" or "more than a fraction of traffic" — not from an arbitrary number.</li></ul>
+
+<div class="flow"><span class="flow-step">Stream item arrives</span><span class="flow-arrow">→</span><span class="flow-step">Increment sketch counters</span><span class="flow-arrow">→</span><span class="flow-step">Estimate the item's count</span><span class="flow-arrow">→</span><span class="flow-step">Compare with weakest candidate</span><span class="flow-arrow">→</span><span class="flow-step">Promote or ignore the candidate</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Merging and distributed streams</h2>
+<ul><li>Two sketches with the same width, depth, and hash functions can be merged by adding counters cell by cell.</li><li>The result estimates the union of both streams, including items seen on both sides.</li><li>This makes the sketch natural for per-shard or per-region aggregation.</li><li>Only the counter matrix crosses the network, never the keys.</li><li>Merging is associative, so aggregation order does not matter.</li><li>Sketches built with different dimensions or hash seeds cannot be merged, so parameters must be fixed in advance.</li><li>The same property supports rollups: minute sketches merge into hourly and daily views.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Limits and failure modes</h2>
+<ul><li>Estimates can be far too high for rare items, because a popular item sharing a column dominates the counter.</li><li>There is no way to enumerate items or recover the exact set of keys.</li><li>Decrements break the never-underestimate guarantee, so sliding windows need a different treatment.</li><li>Very heavy skew concentrates collisions on popular cells, which raises error for everyone hashing there.</li><li>Fixed sizing means accuracy degrades if traffic grows far beyond the design point.</li><li>Counters must be sized for the maximum count; overflow silently wraps or saturates.</li><li>The structure answers frequency, not identity, so it must be paired with something that stores candidates.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Where it is used</h2>
+<ul><li>Trending topics and most-viewed content, where ranking matters more than exact counts.</li><li>Rate limiting and abuse detection, where approximate request counts per key are sufficient.</li><li>Network monitoring for heavy flows and potential denial-of-service sources.</li><li>Telemetry: counting error types, endpoints, or user agents across a firehose.</li><li>Query planners and optimizers that need quick row-count estimates for join ordering.</li><li>Any pipeline that needs per-key frequency with a fixed memory budget and can tolerate overestimation.</li><li>Pair it with a candidate set for top-k, and with exact counts for the items that matter most.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Structure</th><th>Question</th><th>Error direction</th><th>Stores keys</th></tr></thead><tbody><tr><td>Hash map</td><td>Exact count</td><td>None</td><td>Yes</td></tr>
+<tr><td>Count-Min Sketch</td><td>Approximate count</td><td>Overestimate only</td><td>No</td></tr>
+<tr><td>Bloom filter</td><td>Membership</td><td>False positives</td><td>No</td></tr>
+<tr><td>HyperLogLog</td><td>Distinct count</td><td>Small relative error</td><td>No</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Decision rules</h2>
+<ul><li>Use a sketch when the key space is unbounded and exact counts would not fit in memory.</li><li>Use exact counters when the key set is small, when counts drive billing, or when you must list items.</li><li>Size for peak traffic because the error bound is relative to total volume.</li><li>Pick conservative update when ingestion can afford the extra read and accuracy matters.</li><li>Keep the hash seed and dimensions fixed, or merges and comparisons silently become invalid.</li><li>Combine with a candidate structure whenever the product asks "which items" rather than "how many".</li><li>Monitor saturation and error on a sample of known keys; a sketch drifts silently otherwise.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Fixed memory</strong> bounds cost regardless of distinct keys but makes accuracy depend on total volume.</li><li><strong>Wider rows</strong> reduce collision error but increase memory linearly.</li><li><strong>More rows</strong> make the guarantee more reliable but multiply update and query cost.</li><li><strong>Conservative update</strong> improves accuracy but adds a read-modify-write to every increment.</li><li><strong>Minimum across rows</strong> never underestimates but can badly overestimate rare items.</li><li><strong>Mergeability</strong> makes distributed aggregation cheap but requires identical parameters everywhere.</li><li><strong>Allowing decrements</strong> enables sliding windows but destroys the one-sided error guarantee.</li><li><strong>Pairing with a candidate set</strong> answers top-k but reintroduces state proportional to the number of candidates.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does a Count-Min Sketch solve?</summary><div class="answer"><p>It estimates how often each item appears in a stream using a fixed amount of memory, independent of how many distinct items arrive. A hash map would need an entry per distinct key, which is unbounded. The sketch trades exactness for a bounded, one-sided error.</p></div></details>
+<details><summary>2. How is the structure organized?</summary><div class="answer"><p>It is a matrix of <code>d</code> rows and <code>w</code> columns of counters, with one hash function per row. An update increments one counter in each row. A query reads one counter per row and returns the minimum.</p></div></details>
+<details><summary>3. Why take the minimum instead of an average?</summary><div class="answer"><p>Every counter an item hashes to is at least its true count, because updates only add. Collisions only inflate counters further. The minimum is therefore the least contaminated reading and remains an upper bound, whereas an average could be pushed far above by one very hot colliding item.</p></div></details>
+<details><summary>4. Can the estimate ever be too low?</summary><div class="answer"><p>No, in the standard additive model. Each occurrence increments all of the item's counters, and nothing decrements them, so every counter is at least the true count. Introducing decrements breaks that guarantee and makes underestimation possible.</p></div></details>
+<details><summary>5. How do you size a sketch?</summary><div class="answer"><p>Width controls error magnitude and depth controls failure probability: roughly <code>w ≈ e/&epsilon;</code> and <code>d ≈ ln(1/&delta;)</code>. Because the error is relative to total stream volume, size against peak traffic. Round up in both dimensions rather than assuming the formula's exact precision.</p></div></details>
+<details><summary>6. Why is a sketch bad for rare items?</summary><div class="answer"><p>A rare item's counters may be dominated by a popular item that collides with it in every row. The minimum is then far above its true count. This is tolerable for ranking hot items but misleading if you query individual low-frequency keys.</p></div></details>
+<details><summary>7. How do you find the top-k items with a sketch?</summary><div class="answer"><p>Keep a small candidate set, such as a heap of the current top items, and update it using sketch estimates. The sketch provides approximate counts for everything, while the candidate set stores the identities the sketch cannot. Exact counts for the few candidates finish the job.</p></div></details>
+<details><summary>8. What is conservative update?</summary><div class="answer"><p>Instead of incrementing every row counter, it increments only those currently at the row minimum. Counters already inflated by collisions stay put, so the overestimate grows more slowly. It costs an extra read per update and does not change memory usage.</p></div></details>
+<details><summary>9. Can sketches from different servers be combined?</summary><div class="answer"><p>Yes, if they share width, depth, and hash functions: add the matrices cell by cell and the result estimates the combined stream. This is why sketches fit sharded ingestion and time-bucket rollups. Mismatched parameters produce meaningless numbers.</p></div></details>
+<details><summary>10. Count-Min Sketch or hash map?</summary><div class="answer"><p>Use a sketch when the key space is unbounded, memory is capped, and approximate frequency is enough. Use a hash map when counts must be exact, when you must enumerate keys, or when the distinct key count is genuinely small.</p></div></details>
+<details><summary>11. How does it differ from a Bloom filter?</summary><div class="answer"><p>A Bloom filter answers membership with possible false positives and no false negatives. A Count-Min Sketch answers frequency and always overestimates. Both are fixed-size summaries that never store their input, but they answer different questions and pair with different downstream logic.</p></div></details>
+<details><summary>12. What happens if traffic grows well beyond the design point?</summary><div class="answer"><p>Counters grow and collisions inflate estimates, so error increases and the promised bound no longer holds. Popular items blur together and rare items look artificially frequent. The fix is to resize from the start for peak volume or to shard the sketch by key range.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Reporting sketch output as exact counts, especially for rare or newly seen keys.</li><li>Sizing for average traffic when the error bound is relative to total volume.</li><li>Trying to enumerate items from the sketch, which stores no keys.</li><li>Merging sketches with different dimensions or hash seeds.</li><li>Introducing decrements and still claiming the never-underestimate guarantee.</li><li>Ignoring counter width, so a long-running sketch overflows and silently wraps.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="skip-lists.html"><span>← Previous</span><strong>Skip Lists</strong></a><a class="next" href="hyperloglog.html"><span>Next →</span><strong>HyperLogLog</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/count-min-sketch">AlgoMaster — Count-Min Sketch</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

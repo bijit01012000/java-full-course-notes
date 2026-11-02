@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Full-Text Search Engines — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 48 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Full-Text Search Engines</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/full-text-search-engines">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem full-text search solves</a>
+<a href="#s2">What a search engine is</a>
+<a href="#s3">The inverted index</a>
+<a href="#s4">Text analysis</a>
+<a href="#s5">Querying</a>
+<a href="#s6">Ranking and relevance</a>
+<a href="#s7">Beyond matching: typo tolerance, suggestions, highlighting</a>
+<a href="#s8">Index maintenance and near-real-time behavior</a>
+<a href="#s9">Scaling search</a>
+<a href="#s10">Search alongside the primary database</a>
+<a href="#s11">Operating and tuning relevance</a>
+<a href="#s12">Alternatives and when a dedicated engine is overkill</a>
+<a href="#s13">When to use a dedicated search engine</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A full-text search engine replaces row scans with an <strong>inverted index</strong> from words to documents, so it can match, rank, and filter free text — at the cost of a second data store that must be kept in sync with the source of truth.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Inverted index</dt><dd>A mapping from each term to the list of documents that contain it, which is the reverse of scanning documents for words.</dd></div><div class="term"><dt>Analyzer</dt><dd>The pipeline that turns raw text into indexed terms: tokenization, normalization, stop-word removal, and stemming.</dd></div><div class="term"><dt>Token</dt><dd>One unit produced by the analyzer, usually a normalized word, which becomes a key in the index.</dd></div><div class="term"><dt>Stemming</dt><dd>Reducing words to a common root so that <em>running</em> and <em>runs</em> match the same term.</dd></div><div class="term"><dt>Postings list</dt><dd>The document ids and positions stored for one term, making phrase and proximity queries possible.</dd></div><div class="term"><dt>BM25</dt><dd>A ranking function that scores documents by term frequency, rarity across the corpus, and length normalization.</dd></div><div class="term"><dt>Fuzzy matching</dt><dd>Matching terms within an edit distance so small typos still find results, at the cost of more candidate terms.</dd></div><div class="term"><dt>Segment</dt><dd>An immutable index chunk written by a refresh; searches span all segments and merges remove deleted entries later.</dd></div><div class="term"><dt>Refresh</dt><dd>The step that makes recently indexed documents searchable, which is why search visibility is near-real-time rather than immediate.</dd></div><div class="term"><dt>Faceting</dt><dd>Counting documents per value of a field so a result page can show filters with counts instead of bare matches.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem full-text search solves</h2>
+<p class="lede">A product table with millions of rows must answer <em>find red running shoes</em>. The obvious approach — a pattern match on the description column — has several problems at once.</p>
+<ul><li>A leading-wildcard pattern cannot use a normal index, so the database reads every row.</li><li>Pattern matching is literal: it misses <em>run</em> versus <em>running</em>, plurals, synonyms, and misspellings.</li><li>It produces a set, not an ordering; the best match is indistinguishable from the weakest.</li><li>Users expect the most relevant results first, plus filters, highlighting, and suggestions.</li><li>Ranking by hand in SQL means computing term counts and weights in application code for every query.</li><li>So the problem is not only <em>find rows containing a word</em> but <em>find, rank, and summarize text quickly</em>.</li><li>That is a different access pattern from key lookup, which is why a dedicated engine exists.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a search engine is</h2>
+<ul><li>A search engine is a store built around text: it analyzes documents into terms and records where each term appears.</li><li>Its primary structure is an <strong>inverted index</strong>, mapping terms to the documents containing them.</li><li>It returns <strong>ranked</strong> results, not just matches, so relevance is part of the query result.</li><li>It typically runs beside the primary database rather than replacing it: the database stays the source of truth.</li><li>It adds language-aware behavior: stemming, synonyms, phrase queries, typo tolerance, highlighting, and faceting.</li><li>Documents are usually semi-structured records with fields, so a title match can outrank a description match.</li><li>The engine is a derived view: everything in it can be rebuilt from the primary data.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The inverted index</h2>
+<ul><li>A forward index answers <em>which terms are in document 42</em>; an inverted index answers <em>which documents contain term X</em>.</li><li>The term dictionary is sorted and mapped to a <strong>postings list</strong> of document ids.</li><li>Postings often store term frequency and token positions, which enable phrase and proximity queries.</li><li>A query intersects postings lists instead of scanning documents, so cost follows the number of matches, not the corpus size.</li><li>The dictionary is kept sorted and often compressed with prefix sharing, which makes prefix lookups cheap.</li><li>Postings for very common words are long, which is why stop words and thresholds exist.</li><li>Building the index is a one-time full pass; keeping it current is the ongoing work.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Term</th><th>Postings (document : positions)</th></tr></thead><tbody><tr><td>running</td><td>1 : [3], 7 : [12], 19 : [2, 40]</td></tr>
+<tr><td>shoe</td><td>1 : [4], 19 : [3]</td></tr>
+<tr><td>red</td><td>19 : [1]</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Text analysis</h2>
+<ul><li><strong>Tokenization</strong> splits text into words, and the rules matter for hyphens, punctuation, and non-Latin scripts.</li><li><strong>Normalization</strong> lowercases and folds accents so <em>Running</em> and <em>running</em> become one term.</li><li><strong>Stop-word removal</strong> drops extremely common words that add noise and huge postings lists.</li><li><strong>Stemming</strong> or lemmatization reduces words to a root so inflections match each other.</li><li>A <strong>synonym</strong> filter indexes or expands equivalent terms, such as <em>sneaker</em> and <em>trainer</em>.</li><li>N-grams index character or word sequences, which helps partial words and languages without spaces.</li><li>The query must be analyzed by the <strong>same analyzer</strong> as the field, or a term that exists will not match.</li></ul>
+
+<div class="flow"><span class="flow-step">Raw text</span><span class="flow-arrow">→</span><span class="flow-step">Tokenize</span><span class="flow-arrow">→</span><span class="flow-step">Lowercase and normalize</span><span class="flow-arrow">→</span><span class="flow-step">Remove stop words</span><span class="flow-arrow">→</span><span class="flow-step">Stem or lemmatize</span><span class="flow-arrow">→</span><span class="flow-step">Write terms to the index</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Querying</h2>
+<ul><li>A <strong>term query</strong> matches one analyzed term; a <strong>phrase query</strong> requires the terms in order using stored positions.</li><li><strong>Boolean</strong> combinations — must, should, must-not — express AND, OR, and NOT semantics.</li><li><strong>Prefix and wildcard</strong> queries walk the sorted dictionary, which is efficient for prefixes and expensive for leading wildcards.</li><li><strong>Field-scoped</strong> queries let a title match weigh more than a body match.</li><li>Filters on structured fields — price, category, date — run alongside text matching but should not affect the score.</li><li>Query parsing turns user input into this tree, and a bad parse is a common cause of empty results.</li><li>Ranges and geo queries reuse the same index machinery, which is why search engines also serve some non-text filtering.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Ranking and relevance</h2>
+<ul><li>Classic scoring weights a term higher when it appears often in a document but rarely in the corpus.</li><li><strong>BM25</strong> refines that with saturation — the tenth occurrence adds less than the second — and length normalization.</li><li>Short documents are favored for the same term count, because the term is a larger share of the content.</li><li>Field boosts let titles and tags outrank long descriptions.</li><li>Business signals such as recency, popularity, or stock availability are applied as additional boosts.</li><li>Scores are comparable within one query, not across queries, so a raw score is a poor user-facing number.</li><li>Relevance is tuned against examples: gather queries with known good results, then measure whether changes improve them.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Beyond matching: typo tolerance, suggestions, highlighting</h2>
+<ul><li><strong>Fuzzy matching</strong> finds terms within a small edit distance, which absorbs typos at the price of more candidate terms.</li><li><strong>Autocomplete</strong> uses prefix queries over a compact structure, often on a dedicated suggestions field.</li><li><strong>Did you mean</strong> suggestions come from term frequencies and near-miss corrections.</li><li><strong>Highlighting</strong> needs stored positions so the engine can mark the matched fragments in the returned text.</li><li><strong>Faceting</strong> computes counts per filter value so the UI can show how many results each option would return.</li><li>These features are why search is a product surface, not just a query API.</li><li>Each one adds index structures or query-time work, so enable the ones that users actually need.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Index maintenance and near-real-time behavior</h2>
+<ul><li>New documents are buffered and written as immutable <strong>segments</strong> rather than editing the index in place.</li><li>A <strong>refresh</strong> makes buffered documents searchable; until then a write is durable but invisible to queries.</li><li>Searches span all segments and merge results, so many small segments make queries slower.</li><li>A background <strong>merge</strong> combines segments and physically removes deleted documents.</li><li>Deletes are usually tombstones until the merge reclaims them, so disk usage lags behind logical deletions.</li><li>A bulk reindex rebuilds everything with a new mapping, which is the standard way to change analyzers.</li><li>Near-real-time visibility is the key expectation to set: <em>searchable within seconds</em>, not instant.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Scaling search</h2>
+<ul><li>An index is split into <strong>shards</strong>, each holding a subset of documents.</li><li>A query goes to every shard, each returns its top results, and the coordinating node merges them into one ranked list.</li><li>More shards increase parallelism but also per-query overhead and merge cost.</li><li>Replicas increase query throughput and availability, at the cost of storage and write amplification.</li><li><strong>Deep pagination</strong> is expensive because each shard must return enough results to merge accurately; cursor-based paging is preferred.</li><li>Routing queries by a tenant or key to a single shard avoids scatter-gather when the access pattern allows it.</li><li>Capacity planning is dominated by index size and query rate, not by row count alone.</li></ul>
+
+<div class="flow"><span class="flow-step">Query reaches coordinator</span><span class="flow-arrow">→</span><span class="flow-step">Fan out to all shards</span><span class="flow-arrow">→</span><span class="flow-step">Each shard scores its local matches</span><span class="flow-arrow">→</span><span class="flow-step">Coordinator merges top results</span><span class="flow-arrow">→</span><span class="flow-step">Return ranked page</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Search alongside the primary database</h2>
+<ul><li>The primary database remains the <strong>source of truth</strong>; the search index is derived and disposable.</li><li>Writing to both places directly creates a dual-write problem: one write can succeed and the other fail, leaving them inconsistent.</li><li>A safer pattern publishes changes to a log or queue and lets an indexer consume them, so failures retry.</li><li>A transactional outbox stores the change in the same database transaction, then ships it asynchronously to the indexer.</li><li>Change data capture reads the database log and streams changes without application coordination.</li><li>Because indexing lags, users can search a document that was just deleted or miss one just created.</li><li>The standard fix for write-then-read flows is to read the record from the source of truth by id once search returns its ids.</li><li>Always keep a full reindex path: it is the recovery plan for a corrupted or schema-changed index.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Operating and tuning relevance</h2>
+<ul><li>Monitor zero-result queries: they reveal analyzer mismatches, missing synonyms, and vocabulary users expect.</li><li>Track click-through and conversion per query to see whether the top results are useful, not merely present.</li><li>Keep a small judgment set of queries with expected results, and rerun it after any analyzer or boost change.</li><li>Analyzer changes require a reindex, so plan for a second index and an alias switch rather than an in-place edit.</li><li>Query-time boosts are cheap to iterate; mapping and analyzer changes are not.</li><li>Excessive fuzzy matching produces noisy results; tightening edit distance often improves perceived quality.</li><li>Search quality is measured by users, so changes ship as experiments, not as pure refactors.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Alternatives and when a dedicated engine is overkill</h2>
+<ul><li>Many relational databases provide a built-in full-text index that is adequate for modest volumes and simple matching.</li><li>Trigram or pattern indexes can accelerate substring matching when ranking and language features are unnecessary.</li><li>Search inside the primary database avoids a second store, its sync lag, and its operational cost.</li><li><strong>Vector</strong> search handles semantic similarity, and <strong>hybrid</strong> search combines it with keyword matching.</li><li>A dedicated engine earns its place when ranking quality, language analysis, faceting, or query volume exceeds what the primary can do.</li><li>Starting with the database's built-in capability and moving later is usually cheaper than operating an unused cluster.</li><li>Either way, the index stays derived: the source of truth keeps its own copy.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Strength</th><th>Weakness</th></tr></thead><tbody><tr><td>LIKE or regex</td><td>No new infrastructure</td><td>Full scans, no ranking, no language handling</td></tr>
+<tr><td>Database full-text index</td><td>One store, transactional consistency</td><td>Simpler analysis and ranking than a dedicated engine</td></tr>
+<tr><td>Dedicated search engine</td><td>Ranking, analyzers, facets, scale</td><td>Second store, sync lag, operational cost</td></tr>
+<tr><td>Vector or hybrid search</td><td>Semantic matching, synonyms by meaning</td><td>Needs embeddings and a different index</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use a dedicated search engine</h2>
+<ul><li>Users type free text and expect the best matches first, not merely matching rows.</li><li>The corpus is large enough that scanning or naive indexing is too slow.</li><li>You need language handling: stemming, synonyms, typo tolerance, multi-language analysis.</li><li>You need facets, highlighting, suggestions, or per-field boosting as product features.</li><li>The index can tolerate a short visibility delay after a write.</li><li>You can operate a second system with its own backups, monitoring, and reindex procedure.</li><li>If those are not true, a database full-text index is usually the better engineering choice.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Inverted indexes</strong> make text matching fast but consume significant storage and must be updated on every document change.</li><li><strong>Aggressive analysis</strong> increases recall through stemming and synonyms but reduces precision and can match unintended terms.</li><li><strong>Fuzzy matching</strong> absorbs typos but multiplies candidate terms, raising latency and noise.</li><li><strong>More shards</strong> increase parallelism but add per-query fan-out and merge overhead.</li><li><strong>Replicas</strong> raise query throughput and availability but multiply storage and indexing work.</li><li><strong>Near-real-time refresh</strong> makes writes visible quickly but produces many small segments that slow queries until merged.</li><li><strong>A separate search index</strong> gives ranking and scale but introduces sync lag, dual-write failure modes, and a second system to operate.</li><li><strong>Relevance tuning</strong> improves perceived quality but is empirical, so it needs evaluation data and repeated experiments.</li><li><strong>Tombstone deletes</strong> keep writes cheap but let disk usage lag far behind logical document count.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why can't you just use LIKE '%term%'?</summary><div class="answer"><p>A leading wildcard prevents index use, so the database scans every row, and the cost grows with the corpus. It also matches literally, with no stemming, synonyms, typo tolerance, or relevance ranking, so results are a set rather than an ordered answer.</p></div></details>
+<details><summary>2. What is an inverted index?</summary><div class="answer"><p>A structure mapping each analyzed term to the documents that contain it, usually with positions and frequencies. Queries intersect those postings instead of reading documents, so cost scales with matches rather than with corpus size.</p></div></details>
+<details><summary>3. Walk through text analysis.</summary><div class="answer"><p>Text is tokenized into words, normalized to lowercase and accent-folded, stripped of stop words, and reduced to stems or lemmas; synonyms and n-grams may be added. The query runs through the same analyzer, because a term indexed as <em>run</em> will not match a query for <em>running</em> otherwise.</p></div></details>
+<details><summary>4. How does relevance ranking work?</summary><div class="answer"><p>Each matched term contributes based on how often it appears in the document and how rare it is in the corpus, with saturation so repetition adds diminishing weight, and length normalization so short documents are not penalized. BM25 is the standard formulation, and field boosts plus business signals adjust the order.</p></div></details>
+<details><summary>5. Why is search visibility delayed after a write?</summary><div class="answer"><p>New documents are buffered and become searchable only after a refresh writes a new immutable segment. That is what makes the engine near-real-time rather than transactional. Until the refresh, the write is durable but queries cannot see it.</p></div></details>
+<details><summary>6. What is the dual-write problem?</summary><div class="answer"><p>If the application writes to the database and the search index in sequence, one can succeed while the other fails, leaving the index wrong with no automatic repair. Consuming a change log or a transactional outbox makes indexing retryable and keeps the database as the single source of truth.</p></div></details>
+<details><summary>7. How does a query execute across shards?</summary><div class="answer"><p>The coordinating node sends the query to every shard, each shard scores its local matches and returns its top results, and the coordinator merges them into one ranked list. That is why deep pagination is expensive: every shard must return enough results for the merge to be correct.</p></div></details>
+<details><summary>8. How would you avoid a stale result after a user edits a record?</summary><div class="answer"><p>On the write path, update the source of truth first and index asynchronously. On the read path, treat search as an id finder: fetch the actual records from the source of truth by id before rendering. That makes a stale index affect ranking and discovery, not correctness.</p></div></details>
+<details><summary>9. Why do deletes not free disk immediately?</summary><div class="answer"><p>Deleted documents are marked in the index and skipped at query time, but the bytes remain until a segment merge rewrites that segment without them. So disk usage and segment count lag behind the number of live documents.</p></div></details>
+<details><summary>10. When is a database's built-in full-text search enough?</summary><div class="answer"><p>When the corpus is modest, matching is simple, ranking is not a product differentiator, and avoiding a second system matters more than search quality. It also keeps reads consistent with writes, since there is no indexing lag.</p></div></details>
+<details><summary>11. How do you change the analyzer safely?</summary><div class="answer"><p>Build a new index with the new analyzer, backfill it, compare results against a judgment set, then switch an alias to the new index. Editing the analyzer in place would require a full rebuild anyway, and doing it live risks inconsistent results during the transition.</p></div></details>
+<details><summary>12. Search engine or vector database?</summary><div class="answer"><p>Keyword search matches exact analyzed terms and ranks by term statistics, which is precise when users know the vocabulary. Vector search matches meaning through embeddings, which handles paraphrase and synonyms. Many systems combine both and merge the ranked lists, which is called hybrid search.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Indexing text with one analyzer and querying with another, so terms silently fail to match.</li><li>Treating the search index as the source of truth and losing data when a reindex is needed.</li><li>Writing to the database and the index separately without retry or reconciliation.</li><li>Using leading wildcards or heavy fuzzy matching on a large corpus and then wondering about latency.</li><li>Expecting a newly written document to appear in search immediately.</li><li>Adding shards to fix slow queries that are actually caused by too many small segments.</li><li>Tuning boosts by intuition instead of measuring against a fixed set of queries.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="key-value-stores.html"><span>← Previous</span><strong>Key-Value Stores</strong></a><a class="next" href="wide-column-databases.html"><span>Next →</span><strong>Wide Column Databases</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/full-text-search-engines">AlgoMaster — Full-Text Search Engines</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bulkhead Pattern — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 79 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Bulkhead Pattern</h1>
+    <p class="dek">Microservices Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/bulkhead-pattern">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with shared resources</a>
+<a href="#s2">Why one slow dependency spreads</a>
+<a href="#s3">What a bulkhead is</a>
+<a href="#s4">Levels of bulkheading</a>
+<a href="#s5">Thread pool isolation</a>
+<a href="#s6">Semaphore isolation and concurrency limits</a>
+<a href="#s7">Connection pool isolation</a>
+<a href="#s8">Process, host, and cell isolation</a>
+<a href="#s9">Sizing pools and queues</a>
+<a href="#s10">Combining with timeouts, retries, and circuit breakers</a>
+<a href="#s11">Rejection handling and graceful degradation</a>
+<a href="#s12">Observability and failure modes</a>
+<a href="#s13">Tradeoffs and when to apply it</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>The Bulkhead pattern divides finite resources into isolated pools so that one slow dependency or heavy workload cannot consume all capacity and take down unrelated features.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Bulkhead</dt><dd>A partition of a shared resource, such as threads, connections, or hosts, so failure in one partition cannot exhaust the others.</dd></div><div class="term"><dt>Resource pool</dt><dd>A fixed set of workers, threads, or connections that requests must acquire before doing work.</dd></div><div class="term"><dt>Thread pool isolation</dt><dd>Giving each dependency or workload its own thread pool so a stalled call blocks only that pool.</dd></div><div class="term"><dt>Semaphore isolation</dt><dd>Limiting concurrent calls with a counter instead of a dedicated pool, cheaper but still bounded.</dd></div><div class="term"><dt>Concurrency limit</dt><dd>The maximum number of in-flight requests allowed against a dependency at one time.</dd></div><div class="term"><dt>Bounded queue</dt><dd>A waiting line with a maximum length, so excess load is rejected instead of accumulating unboundedly.</dd></div><div class="term"><dt>Rejection</dt><dd>Refusing work immediately when a pool is full, which protects latency for work that can still be served.</dd></div><div class="term"><dt>Graceful degradation</dt><dd>Returning a reduced but useful response, such as a page without recommendations, when a dependency is unavailable.</dd></div><div class="term"><dt>Cell-based architecture</dt><dd>Partitioning the whole system into independent cells so a failure affects only the users in one cell.</dd></div><div class="term"><dt>Headroom</dt><dd>Capacity reserved above expected peak so a pool can absorb bursts without saturating.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with shared resources</h2>
+<p class="lede">A product service calls inventory, pricing, and reviews to build a product page, using one shared pool of request threads.</p>
+<ul><li>Any request can take any thread, so the pool is a single shared budget.</li><li>Normally calls are fast and the pool turns over quickly.</li><li>Then the review service slows from tens of milliseconds to many seconds.</li><li>Every product page request waits on reviews while holding a thread.</li><li>Soon all threads are occupied and no new request can start.</li><li>Stock checks and price lookups fail even though those dependencies are healthy.</li><li>A non-critical feature managed to consume capacity everything else needed.</li></ul>
+
+
+<div class="note">The slow dependency is only half the incident. The shared pool turned a local slowdown into a total outage.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why one slow dependency spreads</h2>
+<ul><li>Requests hold a resource while waiting, so latency becomes resource occupancy.</li><li>If arrival rate stays constant and service time grows, in-flight work grows without bound.</li><li>A shared queue hides the growth until the pool is full, then latency jumps sharply.</li><li>Retries add more work for a dependency that is already struggling.</li><li>The failure is not the dependency's error rate; it is the caller's capacity being consumed.</li><li>This is why timeouts alone are insufficient: many slow calls still exhaust the pool before timing out.</li><li>Isolation limits how much of the budget one path can take.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What a bulkhead is</h2>
+<ul><li>Named after the watertight compartments in a ship: flooding one compartment does not sink the vessel.</li><li>Applied to software, capacity is divided so one workload cannot use all of it.</li><li>Each partition has its own limit, queue, and failure behaviour.</li><li>A saturated partition rejects or degrades only its own traffic.</li><li>Other partitions keep serving with their reserved capacity.</li><li>The pattern converts a total outage into a partial, bounded degradation.</li><li>It is a containment mechanism, not a performance optimization.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Levels of bulkheading</h2>
+<ul><li>The same idea applies at several layers, and mature systems combine them.</li><li>Inside a process: separate thread pools or semaphores per dependency.</li><li>At the connection layer: separate pools per downstream host or tenant.</li><li>At the deployment layer: separate worker pools or instances per workload.</li><li>At the infrastructure layer: separate clusters, shards, or cells per customer group.</li><li>At the product layer: separate rate-limit buckets per tier or API key.</li><li>Choose the level that matches where the shared bottleneck actually is.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Level</th><th>Isolation unit</th><th>Stops</th></tr></thead><tbody><tr><td>Thread pool</td><td>Threads per dependency</td><td>One slow call blocking all request threads</td></tr>
+<tr><td>Semaphore</td><td>Concurrent calls per dependency</td><td>Unbounded in-flight requests</td></tr>
+<tr><td>Connection pool</td><td>Connections per backend or tenant</td><td>One backend draining the pool</td></tr>
+<tr><td>Process or worker pool</td><td>Processes per workload</td><td>A CPU-heavy job starving the API</td></tr>
+<tr><td>Host or cluster</td><td>Instances per service</td><td>A noisy service affecting neighbours</td></tr>
+<tr><td>Cell</td><td>Users per independent stack</td><td>A failure reaching the whole user base</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Thread pool isolation</h2>
+<ul><li>Give each downstream dependency a dedicated pool with a fixed size and queue.</li><li>A stalled reviews pool blocks only review-backed sections.</li><li>The inventory pool keeps serving checkout requests independently.</li><li>Threads are a real cost: many pools mean many threads and more context switching.</li><li>Isolation is only as good as the pool size; oversized pools recreate the shared-pool problem.</li><li>Blocking calls inside a pool must be bounded by timeouts, or threads leak slowly.</li><li>This is the classic implementation in resilience libraries for JVM services.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Semaphore isolation and concurrency limits</h2>
+<ul><li>A semaphore caps the number of concurrent calls without dedicating threads.</li><li>The calling thread acquires a permit, makes the call, and releases it.</li><li>Cheaper than thread pools and good for non-blocking or fast clients.</li><li>It cannot preempt a call that is already stuck, so timeouts remain essential.</li><li>Permits should be sized to what the dependency can handle and what latency budget allows.</li><li>Per-tenant semaphores prevent one large customer from consuming all capacity.</li><li>Mixing semaphores and blocking I/O needs care to avoid exhausting the event loop.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Connection pool isolation</h2>
+<ul><li>A shared database connection pool lets one slow query consume every connection.</li><li>Separate pools per backend, or per tenant, contain that damage.</li><li>Pool size must respect the server's own connection limit and the number of app instances.</li><li>Timeouts and statement timeouts stop a query from holding a connection indefinitely.</li><li>Read and write pools can be separated so analytics cannot starve checkout.</li><li>Health checks should not consume the same pool as user traffic.</li><li>Total connections across instances is the number that matters, not per-instance size.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Process, host, and cell isolation</h2>
+<ul><li>Run CPU-heavy work such as image processing in its own worker pool or deployment.</li><li>Move batch jobs off the request-serving hosts so they cannot starve latency-sensitive traffic.</li><li>Separate noisy services onto their own hosts or node pools.</li><li>Cell-based architecture partitions users into independent stacks with bounded blast radius.</li><li>Shuffle sharding assigns each tenant a random subset of workers, so no two large tenants share everything.</li><li>Isolation at this level costs money because reserved capacity sits idle.</li><li>It is justified when a single failure has outsized business impact.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Sizing pools and queues</h2>
+<ul><li>Size by the dependency's safe concurrency and your latency target, not by hope.</li><li>Little's Law relates concurrency, throughput, and latency: concurrency equals throughput times time in system.</li><li>A pool too small rejects useful work; too large lets a slow dependency absorb everything.</li><li>Bound queues, or waiting time grows without limit and callers time out anyway.</li><li>Reserve headroom for bursts and failover, since surviving instances take extra load.</li><li>Re-measure after traffic shifts; pool sizes are not permanent constants.</li><li>Document the arithmetic so the next engineer can change it safely.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Combining with timeouts, retries, and circuit breakers</h2>
+<ul><li>Timeouts bound how long one call holds a resource; without them isolation leaks.</li><li>Retries should be budgeted and jittered, ideally inside the same partition.</li><li>A circuit breaker stops calling a failing dependency and frees pool capacity faster.</li><li>Rate limiting at the edge protects the whole system before pools fill.</li><li>Fallbacks decide what to return when a partition rejects or opens.</li><li>These patterns are complementary: bulkheads contain, breakers stop, timeouts release.</li><li>Retrying outside the bulkhead defeats the limit by creating unbounded work.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Rejection handling and graceful degradation</h2>
+<ul><li>When a pool is full, fail fast instead of queueing forever.</li><li>Return a default, cached, or partial response where the product allows it.</li><li>Mark degraded sections in the UI rather than showing an empty page as if data were lost.</li><li>Distinguish retryable rejection from a permanent error in the API contract.</li><li>Drop low-priority traffic first, for example recommendations before checkout.</li><li>Log rejections with the pool name so saturation is visible in metrics.</li><li>Never let a fallback call the same saturated dependency.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Observability and failure modes</h2>
+<ul><li>Track pool size, active count, queue depth, wait time, and rejection rate per partition.</li><li>Alert on sustained saturation, not on a single rejected request.</li><li>A pool that is always full means the limit is too small or the dependency is too slow.</li><li>A pool that is never used means reserved capacity is being wasted.</li><li>Silent fallbacks hide incidents; surface degradation in dashboards.</li><li>Common bug: separate pools but one shared upstream connection or queue underneath.</li><li>Another: bulkheads configured at deploy time but never updated after traffic growth.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Tradeoffs and when to apply it</h2>
+<ul><li>Isolation reduces blast radius but lowers utilization because pools cannot share idle capacity.</li><li>More pools mean more configuration, more metrics, and more tuning.</li><li>Per-dependency pools multiply thread and connection counts.</li><li>Apply it to critical paths and known-erratic dependencies first.</li><li>Apply it where a heavy workload shares hosts with latency-sensitive traffic.</li><li>Skip it for low-traffic internal tools where the operational cost dominates.</li><li>The goal is bounded damage, not maximum efficiency.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Fault containment</strong> limits blast radius but reduces overall utilization of shared capacity.</li><li><strong>Dedicated thread pools</strong> stop one dependency blocking all requests but multiply thread count and tuning work.</li><li><strong>Semaphores</strong> are cheap and effective but cannot preempt a call that is already stuck.</li><li><strong>Small pools</strong> protect latency but reject work that the system might have handled.</li><li><strong>Large pools</strong> accept more work but recreate the shared-budget failure mode.</li><li><strong>Bounded queues</strong> keep latency predictable but turn bursts into visible rejections.</li><li><strong>Cell isolation</strong> bounds blast radius to a user subset but multiplies infrastructure and cost.</li><li><strong>Graceful degradation</strong> keeps the product usable but can hide dependency problems from users and teams.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does the Bulkhead pattern solve?</summary><div class="answer"><p>It stops one slow or failing dependency from consuming all shared capacity. By partitioning threads, connections, or hosts, a saturated partition affects only its own traffic while the rest of the system keeps serving.</p></div></details>
+<details><summary>2. Why do timeouts alone not prevent this failure?</summary><div class="answer"><p>Many concurrent slow calls still occupy every thread until they time out. If the arrival rate is high enough, the pool saturates before timeouts free anything, so unrelated requests queue and fail. Isolation caps how much capacity one path can hold.</p></div></details>
+<details><summary>3. What is the difference between thread pool and semaphore isolation?</summary><div class="answer"><p>Thread pool isolation gives each dependency dedicated threads, so a blocked call cannot occupy a request thread. Semaphore isolation just caps concurrent calls with permits on the calling thread; it is cheaper but does not free the caller while waiting.</p></div></details>
+<details><summary>4. How do you size a bulkhead?</summary><div class="answer"><p>Start from the dependency's safe concurrency and your latency target, using the relationship that concurrency equals throughput times time in system. Add headroom for bursts and failover, bound the queue, and re-measure as traffic changes.</p></div></details>
+<details><summary>5. What should happen when a pool is full?</summary><div class="answer"><p>Reject fast rather than queueing indefinitely, and apply the product's degradation policy: cached data, a partial page, or a clearly marked unavailable section. The important part is that rejection stays local and does not retry into the same saturated pool.</p></div></details>
+<details><summary>6. How do timeouts and circuit breakers fit in?</summary><div class="answer"><p>Timeouts release resources held by individual calls; circuit breakers stop calls to a failing dependency entirely. Bulkheads limit how much capacity can be consumed in the first place. Used together, they contain, release, and stop.</p></div></details>
+<details><summary>7. What is a connection pool bulkhead?</summary><div class="answer"><p>Splitting database or HTTP connections into separate pools per backend, tenant, or workload so one slow query or noisy tenant cannot drain every connection. It must respect the server's total connection limit across all instances.</p></div></details>
+<details><summary>8. What is cell-based architecture?</summary><div class="answer"><p>Partitioning users into independent stacks, each with its own compute and data, so a failure affects only the users in that cell. It is bulkheading at the infrastructure level, with the cost of duplicated capacity and more operational complexity.</p></div></details>
+<details><summary>9. How do you detect that bulkheads are misconfigured?</summary><div class="answer"><p>Watch pool saturation, queue wait time, and rejection rate. A pool that is always full is too small or its dependency is too slow; one that is never used is wasting reserved capacity. Also verify there is no hidden shared pool underneath.</p></div></details>
+<details><summary>10. Does bulkheading reduce throughput?</summary><div class="answer"><p>It can, because idle capacity in one pool cannot be used by another. That inefficiency buys predictable latency and containment. The trade is deliberate: you accept lower peak efficiency for bounded failure.</p></div></details>
+<details><summary>11. Where would you apply it first?</summary><div class="answer"><p>On critical request paths that call several dependencies, especially ones known to be slow or unreliable, and where one heavy workload shares hosts with latency-sensitive traffic. Low-traffic internal tools rarely justify the tuning cost.</p></div></details>
+<details><summary>12. What is a common implementation mistake?</summary><div class="answer"><p>Creating separate thread pools but sharing one queue, connection pool, or upstream client underneath, which restores the original coupling. Another is setting pool limits once and never revisiting them as traffic and instance counts change.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Adding isolation at one layer while a shared queue or connection pool underneath still couples everything.</li><li>Setting pool sizes so large that the bulkhead provides no containment.</li><li>Setting pool sizes so small that ordinary bursts are rejected.</li><li>Using unbounded queues, which convert saturation into unbounded latency instead of fast rejection.</li><li>Retrying rejected calls outside the partition, creating unbounded work against a struggling dependency.</li><li>Implementing fallbacks that call the same saturated dependency they are meant to protect against.</li><li>Never revisiting pool sizes after traffic growth or changes in instance count.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="circuit-breaker-pattern.html"><span>← Previous</span><strong>Circuit Breaker Pattern</strong></a><a class="next" href="strangler-fig-pattern.html"><span>Next →</span><strong>Strangler Fig Pattern</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/bulkhead-pattern">AlgoMaster — Bulkhead Pattern</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

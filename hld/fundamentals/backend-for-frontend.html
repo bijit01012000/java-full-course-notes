@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Backend for Frontend (BFF) — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 76 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Backend for Frontend (BFF)</h1>
+    <p class="dek">Microservices Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/backend-for-frontend">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">One API, many clients</a>
+<a href="#s2">Over-fetching</a>
+<a href="#s3">Under-fetching and chatty clients</a>
+<a href="#s4">One team, many release cycles</a>
+<a href="#s5">What a Backend for Frontend is</a>
+<a href="#s6">BFF versus API gateway</a>
+<a href="#s7">What a BFF should own</a>
+<a href="#s8">What a BFF must not own</a>
+<a href="#s9">How a request flows through a BFF</a>
+<a href="#s10">Ownership and team topology</a>
+<a href="#s11">Sharing code without merging the APIs</a>
+<a href="#s12">Failure modes</a>
+<a href="#s13">Alternatives and decision rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A Backend for Frontend gives each client type its own thin backend that aggregates and shapes service data for that experience, so mobile, web, and TV stop compromising inside one shared API.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Backend for Frontend</dt><dd>A backend layer dedicated to one client type, exposing an API designed for that client's screens and constraints.</dd></div><div class="term"><dt>Over-fetching</dt><dd>Returning more data than a client needs, so it downloads and parses fields it never displays.</dd></div><div class="term"><dt>Under-fetching</dt><dd>Returning too little for a screen, forcing the client to make several extra calls.</dd></div><div class="term"><dt>Aggregation</dt><dd>Calling multiple backend services for one client request and merging the results into a single response.</dd></div><div class="term"><dt>Client-specific API</dt><dd>An API contract shaped around one user experience rather than a general-purpose resource model.</dd></div><div class="term"><dt>Release cadence</dt><dd>How often a client can ship; app-store review and slow user upgrades make mobile and TV far slower than web.</dd></div><div class="term"><dt>Experience layer</dt><dd>The part of the backend that composes and shapes data for presentation, without owning domain rules.</dd></div><div class="term"><dt>Code sharing</dt><dd>Reusing aggregation or authentication libraries across BFFs while keeping each API contract independent.</dd></div><div class="term"><dt>Field selection</dt><dd>A GraphQL-style mechanism where the client declares exactly which fields it needs, reducing the need for separate BFFs.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>One API, many clients</h2>
+<p class="lede">A video streaming product runs a web app, an iOS app, an Android app, and a smart TV app over the same services.</p>
+<ul><li>Behind the clients sit user, catalog, recommendation, and watch-history services.</li><li>The simplest first move is one general-purpose API that every client calls.</li><li>That works while the clients are similar and the product is young.</li><li>Over time the clients diverge in screen size, network quality, and interaction model.</li><li>Each client starts asking the shared API to be something slightly different.</li><li>The shared API becomes a negotiation rather than a design.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>What it needs</th></tr></thead><tbody><tr><td>Web app</td><td>Large screen, usually fast connection</td><td>Rich pages with lots of detail</td></tr>
+<tr><td>Mobile app</td><td>Small screen, often slower network</td><td>Smaller responses and fewer requests</td></tr>
+<tr><td>TV app</td><td>Large screen, remote control</td><td>Large thumbnails, its own layout and navigation</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Over-fetching</h2>
+<ul><li>A movie details endpoint returns cast, reviews, and technical metadata because the web app uses all of it.</li><li>The mobile app may display only title, poster, and rating but still downloads everything.</li><li>On a constrained network that wastes bandwidth and increases time to render.</li><li>The client pays parsing and memory costs for data it discards.</li><li>Removing fields for mobile breaks the web app if there is only one response shape.</li><li>Adding a sparse-fields parameter pushes response shaping into every client.</li><li>Over-fetching is a symptom of one contract serving incompatible screens.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Under-fetching and chatty clients</h2>
+<ul><li>A mobile home screen needs data from user, recommendation, and watch-history services.</li><li>Without composition, the client calls each service separately.</li><li>Each call adds a round trip, and on mobile each round trip is expensive.</li><li>The client must handle partial failure and decide what to render when one call fails.</li><li>Parallel calls help but the screen still waits for the slowest dependency.</li><li>Retry and timeout logic gets duplicated per platform.</li><li>Under-fetching is the mirror problem: the API is too granular for the screen.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>One team, many release cycles</h2>
+<ul><li>Every client team depends on the same backend team to change the shared API.</li><li>Mobile asks for smaller responses; web asks for more fields; TV asks for a different layout.</li><li>Every change must be checked against all other clients before shipping.</li><li>A shared API must keep working for the oldest version of the slowest client.</li><li>Web can deploy many times a day while TV apps wait on platform review and slow device upgrades.</li><li>Backend releases get gated by the slowest consumer, so velocity drops for everyone.</li><li>The organizational bottleneck appears before the technical one.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Client</th><th>Typical release constraint</th></tr></thead><tbody><tr><td>Web app</td><td>Can deploy many times per day</td></tr>
+<tr><td>iOS app</td><td>App Store review, and users upgrade slowly</td></tr>
+<tr><td>Android app</td><td>Often faster than iOS, but still tied to app versions</td></tr>
+<tr><td>TV app</td><td>Platform review and very slow upgrade cycles on older devices</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>What a Backend for Frontend is</h2>
+<ul><li>One backend per client type: a web BFF, an iOS BFF, an Android BFF, a TV BFF.</li><li>Each BFF exposes an API designed for one experience, not a general resource model.</li><li>The services behind it stay shared and unchanged.</li><li>The BFF aggregates calls, trims payloads, and maps data into screen-ready shapes.</li><li>It absorbs client-specific concerns such as session handling and response caching.</li><li>Clients get fewer, purpose-built endpoints and no knowledge of internal topology.</li><li>The pattern is often summarized as <em>one experience, one backend</em>.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>BFF versus API gateway</h2>
+<ul><li>An API gateway is one entry point for all clients with shared cross-cutting policy.</li><li>A BFF is one entry point per client type with a client-shaped contract.</li><li>Gateways centralize auth, quotas, TLS, and routing; BFFs concentrate on composition and response shape.</li><li>A BFF often sits behind or alongside the gateway, which still terminates TLS and authenticates.</li><li>A single general gateway starts to behave like a BFF when it accumulates client-specific endpoints.</li><li>Many systems keep the gateway thin and put experience logic in BFFs.</li><li>Both hide services; only the BFF tailors the API per experience.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>API gateway</th><th>BFF</th></tr></thead><tbody><tr><td>Scope</td><td>All clients</td><td>One client type</td></tr>
+<tr><td>Primary job</td><td>Routing and edge policy</td><td>Aggregation and response shaping</td></tr>
+<tr><td>API design</td><td>General and stable</td><td>Optimized for one UI</td></tr>
+<tr><td>Typical owner</td><td>Platform team</td><td>Client team</td></tr>
+<tr><td>Risk</td><td>Becoming a god gateway</td><td>Duplicated logic across BFFs</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>What a BFF should own</h2>
+<ul><li>Request composition: fan out to services, apply timeouts, merge results.</li><li>Response shaping: drop unused fields, rename for the UI, precompute display values.</li><li>Client session and token exchange, mapping the client's credential to downstream calls.</li><li>Per-client caching and compression tuned to that client's network.</li><li>Protocol adaptation, for example exposing simple JSON over internal gRPC.</li><li>Graceful degradation rules: which sections to omit when a dependency fails.</li><li>Client-specific versioning so one app can lag without blocking others.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>What a BFF must not own</h2>
+<ul><li>Domain rules such as pricing, eligibility, or inventory reservations.</li><li>Direct writes to service databases, which breaks ownership and invariants.</li><li>Business validation that services must also perform, creating two sources of truth.</li><li>Long-running workflows that should be durable and service-owned.</li><li>Authorization decisions about resources the service is responsible for.</li><li>Cross-client policy that belongs in the gateway.</li><li>Anything that would force all BFFs to change together.</li></ul>
+
+
+<div class="note">A BFF is an experience layer. If a rule must hold regardless of client, it belongs in the service.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>How a request flows through a BFF</h2>
+<ul><li>The client calls one BFF endpoint for a screen, not five service endpoints.</li><li>The BFF authenticates or forwards the token through the gateway.</li><li>It fans out to the required services in parallel with per-call timeouts.</li><li>It handles partial failure, for example showing the page without recommendations.</li><li>It trims, renames, and merges fields into the exact shape the screen renders.</li><li>It caches what is safe to cache for that client and sets appropriate headers.</li><li>It returns one payload and logs the fan-out for tracing.</li></ul>
+
+<div class="flow"><span class="flow-step">Client calls screen endpoint on its BFF</span><span class="flow-arrow">→</span><span class="flow-step">BFF validates session and token</span><span class="flow-arrow">→</span><span class="flow-step">BFF fans out to services in parallel</span><span class="flow-arrow">→</span><span class="flow-step">Partial failures handled per section</span><span class="flow-arrow">→</span><span class="flow-step">Responses merged and trimmed</span><span class="flow-arrow">→</span><span class="flow-step">Single screen-shaped payload returned</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Ownership and team topology</h2>
+<ul><li>The team that builds the client usually owns its BFF, so API changes ship with the app.</li><li>This removes the shared-backend review queue that blocked every client.</li><li>Each team can deploy independently, at its own cadence.</li><li>The shared services keep one owner and one contract for all BFFs.</li><li>Ownership must be explicit or BFFs become unowned glue code.</li><li>Small teams can start with one BFF and split when divergence justifies it.</li><li>Conway's law applies: per-client backends mirror per-client teams.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Sharing code without merging the APIs</h2>
+<ul><li>Extract common aggregation, auth, and telemetry helpers into a shared library.</li><li>Share infrastructure and conventions, not endpoint contracts.</li><li>Keep each BFF's routes independent so one client can evolve alone.</li><li>Duplication of small mapping code is often cheaper than a shared abstraction.</li><li>Watch for the shared library becoming a distributed monolith that forces lockstep releases.</li><li>Generated clients from service schemas reduce drift in downstream calls.</li><li>Contract tests against services catch breakage before a client ships.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Failure modes</h2>
+<ul><li>A BFF grows into a mini-monolith with business logic and its own database.</li><li>Fan-out without timeouts lets one slow service stall every screen.</li><li>Inconsistent fallbacks produce blank sections that look like data loss.</li><li>Caching per BFF fragments caches and multiplies origin load.</li><li>Divergent BFFs implement the same rule differently, producing inconsistent behaviour.</li><li>Adding a client means a new BFF plus a new deployment and on-call surface.</li><li>Unversioned BFF contracts break old app versions still in the wild.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Alternatives and decision rules</h2>
+<ul><li>A single well-designed API with sparse field selection can cover similar clients.</li><li><strong>GraphQL</strong> lets clients declare fields, reducing over-fetching but not the team bottleneck.</li><li>A general API gateway with a few client-specific routes is lighter than several BFFs.</li><li>Adopt a BFF when clients differ materially in shape, network, or release cadence.</li><li>Adopt it when one team's changes are blocked by other clients' compatibility needs.</li><li>Avoid it when there is one client, or when the divergence is only cosmetic.</li><li>Start with one BFF for the most constrained client, then split by evidence.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Client-shaped APIs</strong> cut payloads and round trips but duplicate aggregation logic across BFFs.</li><li><strong>Team ownership</strong> unblocks independent releases but multiplies deployables and on-call surface.</li><li><strong>Shared services</strong> keep one domain model but require stable contracts for several consumers.</li><li><strong>Per-client caching</strong> improves hit locality but fragments caches and increases origin traffic.</li><li><strong>Fast client iteration</strong> is possible but old app versions still need compatible BFF routes.</li><li><strong>GraphQL field selection</strong> reduces over-fetching with one API but does not fix release-cadence conflicts.</li><li><strong>Shared helper libraries</strong> reduce duplication but risk coupling BFF releases together.</li><li><strong>Graceful partial responses</strong> keep screens usable but hide dependency failures from users.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the Backend for Frontend pattern?</summary><div class="answer"><p>It gives each client type its own backend that exposes an API designed for that client's screens. The BFF aggregates service calls and shapes responses, while the underlying services stay shared.</p></div></details>
+<details><summary>2. Why does one shared API stop working?</summary><div class="answer"><p>Clients diverge in screen size, network quality, and release cadence. A single contract either over-fetches for small clients or under-fetches for rich ones, and every change must be validated against all clients, including old app versions that cannot upgrade quickly.</p></div></details>
+<details><summary>3. What is over-fetching?</summary><div class="answer"><p>Returning more data than a client needs, such as full cast and reviews when mobile shows only a title and rating. The client pays bandwidth, parsing, and memory costs for fields it never displays.</p></div></details>
+<details><summary>4. What is under-fetching?</summary><div class="answer"><p>Returning too little for one screen, so the client must call several services. That adds round trips, latency, and per-platform failure handling. A BFF fixes it by composing the calls server-side.</p></div></details>
+<details><summary>5. How is a BFF different from an API gateway?</summary><div class="answer"><p>A gateway is one entry point for all clients and focuses on routing, auth, quotas, and TLS. A BFF is one entry point per client type and focuses on aggregation and response shape. In practice the BFF sits behind the gateway.</p></div></details>
+<details><summary>6. Should a BFF contain business logic?</summary><div class="answer"><p>No. It may format, filter, and compose, but rules such as pricing, eligibility, and inventory belong in services. Otherwise each BFF reimplements the rule differently and they drift.</p></div></details>
+<details><summary>7. Who should own a BFF?</summary><div class="answer"><p>The team that owns the client experience, so API changes can ship alongside the app without waiting on a shared backend team. The underlying services keep their own owners and contracts.</p></div></details>
+<details><summary>8. How do you avoid duplicating code across BFFs?</summary><div class="answer"><p>Share libraries for aggregation, auth, and telemetry, and keep endpoint contracts separate. Accept small duplication of mapping code where a shared abstraction would force lockstep releases.</p></div></details>
+<details><summary>9. What happens when a service behind a BFF is slow?</summary><div class="answer"><p>The BFF needs per-call timeouts and a defined degradation policy, such as omitting recommendations while still rendering the catalog. Without that, one slow dependency can stall or fail the entire screen.</p></div></details>
+<details><summary>10. Does a BFF solve the mobile release problem?</summary><div class="answer"><p>Partly. It lets the mobile backend evolve without breaking web, and it can keep old routes for old app versions. It does not remove app-store review or slow user upgrades, so backwards compatibility is still required.</p></div></details>
+<details><summary>11. When is GraphQL a better choice than several BFFs?</summary><div class="answer"><p>When clients mostly need different field selections over the same graph rather than genuinely different experiences and release cycles. GraphQL reduces over-fetching with one API but does not resolve team ownership or cadence conflicts.</p></div></details>
+<details><summary>12. When should you not use a BFF?</summary><div class="answer"><p>When there is only one client, clients differ only cosmetically, or a thin gateway with a couple of tailored routes is enough. Each BFF adds a deployment, an on-call surface, and a place for logic to drift.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Turning a BFF into a mini-monolith with domain rules and its own database.</li><li>Fanning out to services with no per-call timeout, so one slow dependency fails the whole screen.</li><li>Assuming a BFF removes the need to support old mobile app versions.</li><li>Letting all BFFs share one endpoint contract, which recreates the shared-API bottleneck.</li><li>Duplicating pricing or eligibility rules in each BFF so clients behave inconsistently.</li><li>Adding a BFF per platform before the clients actually diverge.</li><li>Caching the same data independently in every BFF and multiplying origin load.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="api-gateway-pattern.html"><span>← Previous</span><strong>API Gateway Pattern</strong></a><a class="next" href="sidecar-pattern.html"><span>Next →</span><strong>Sidecar Pattern</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/backend-for-frontend">AlgoMaster — Backend for Frontend (BFF)</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

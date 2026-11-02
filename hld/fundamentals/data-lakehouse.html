@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Lakehouse — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 105 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Data Lakehouse</h1>
+    <p class="dek">Big Data Processing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/data-lakehouse">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why companies ran two systems</a>
+<a href="#s2">What a lakehouse is</a>
+<a href="#s3">The table format: turning files into a table</a>
+<a href="#s4">ACID on top of object storage</a>
+<a href="#s5">Updates, deletes, and row-level changes</a>
+<a href="#s6">Time travel and snapshots</a>
+<a href="#s7">Schema enforcement and evolution</a>
+<a href="#s8">One copy for BI and machine learning</a>
+<a href="#s9">Performance: how lakehouses stay fast</a>
+<a href="#s10">Metadata, catalogs, and the small-file problem</a>
+<a href="#s11">Failure modes to design for</a>
+<a href="#s12">Trade-offs and when not to use one</a>
+<a href="#s13">Designing a lakehouse in an interview</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A data lakehouse keeps analytical data as open columnar files on cheap object storage and adds a table format on top, so one copy of the data supports both reliable SQL reporting and machine learning without a second warehouse copy.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Open table format</dt><dd>A metadata layer such as <code>Apache Iceberg</code>, <code>Delta Lake</code>, or <code>Apache Hudi</code> that makes a set of files behave like a transactional table.</dd></div><div class="term"><dt>Snapshot</dt><dd>An immutable view of the table at one commit, listing exactly which data files and delete files belong to that version.</dd></div><div class="term"><dt>Manifest</dt><dd>A metadata file that lists data files together with per-file statistics such as row counts and column min/max values.</dd></div><div class="term"><dt>Catalog</dt><dd>The service that stores the pointer to the current table metadata, so readers do not have to list the object store to find files.</dd></div><div class="term"><dt>Copy-on-write</dt><dd>An update strategy that rewrites whole data files containing changed rows; reads stay simple and fast.</dd></div><div class="term"><dt>Merge-on-read</dt><dd>An update strategy that writes new data files plus delete files, and reconciles them when the table is read.</dd></div><div class="term"><dt>Time travel</dt><dd>Querying a table as of an older snapshot or timestamp for audit, debugging, or reproducible model training.</dd></div><div class="term"><dt>Schema evolution</dt><dd>Changing columns of a table, such as adding or renaming one, without rewriting existing data files.</dd></div><div class="term"><dt>Compaction</dt><dd>A maintenance job that merges small files and applies pending deletes so reads do not degrade over time.</dd></div><div class="term"><dt>Separation of storage and compute</dt><dd>Keeping data in object storage while independent engines read it, so each can scale and be priced on its own.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why companies ran two systems</h2>
+<p class="lede">The lake and the warehouse solved different halves of the analytical problem, so most companies paid for both.</p>
+<ul><li>A <strong>data lake</strong> stores raw files cheaply on object storage and applies schema on read, which suits exploration and machine learning.</li><li>A <strong>data warehouse</strong> enforces schema on write, offers ACID transactions, indexes, and tuned SQL, which suits governed business reporting.</li><li>Feeding the warehouse means copying data out of the lake on a schedule, so the same rows exist twice and are paid for twice.</li><li>The copies <strong>drift</strong>: late fixes, changed transformations, and partial loads leave the two systems disagreeing about basic numbers.</li><li>Teams then argue about which copy is correct while machine learning uses one and dashboards use the other.</li><li>The root cause is that cheap open storage historically lacked table guarantees, and reliable tables historically required a closed, expensive store.</li></ul>
+
+
+<div class="note">The lakehouse is an attempt to move the warehouse guarantees onto the lake instead of moving the data into the warehouse.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a lakehouse is</h2>
+<ul><li>Data lives in <strong>open columnar files</strong> such as Parquet or ORC in object storage, not in a proprietary internal format.</li><li>A <strong>table format</strong> adds the database behaviours on top: transactions, updates and deletes, snapshots, schema checks, and partition management.</li><li>Any compatible engine can read the same table: Spark for batch, Flink for streaming, Trino or a warehouse-style engine for SQL, Python for ML.</li><li>Storage and compute stay separate, so you scale readers without copying data and pay for storage at object-store prices.</li><li>It is an <strong>architecture pattern</strong>, not a single product: the files plus the table format plus a catalog plus engines.</li><li>The lake keeps its flexibility because files remain readable by ordinary tools; nothing is hidden inside a storage engine.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The table format: turning files into a table</h2>
+<p class="lede">A directory of Parquet files is not a table. The table format supplies the missing structure.</p>
+<ul><li>Metadata records the <strong>schema</strong>, the partition specification, the sort order, and the list of files that currently make up the table.</li><li>Each data file is registered with statistics: row count, size, and per-column minimum, maximum, and null count.</li><li>A read resolves one snapshot, prunes files using those statistics, and only then opens the surviving files.</li><li>Readers never <strong>list the bucket</strong>; listing is slow, request-expensive, and not reliably consistent, so metadata is the source of truth.</li><li>Because old metadata is retained, a reader can pin a snapshot and get a stable answer while writers keep committing.</li><li>The format also owns table-level rules such as which partition layout is valid and how new columns are identified.</li></ul>
+
+<div class="flow"><span class="flow-step">Writer creates new data files in object storage</span><span class="flow-arrow">→</span><span class="flow-step">Writer writes manifest entries with file statistics</span><span class="flow-arrow">→</span><span class="flow-step">Writer commits a new metadata version</span><span class="flow-arrow">→</span><span class="flow-step">Catalog atomically points to the new version</span><span class="flow-arrow">→</span><span class="flow-step">Reader resolves the snapshot and prunes files</span><span class="flow-arrow">→</span><span class="flow-step">Reader scans only the surviving files</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>ACID on top of object storage</h2>
+<ul><li>Object stores expose simple put and get operations and no atomic multi-file rename, so a multi-file commit cannot be made atomic by moving a directory.</li><li>The standard trick is to write the data files first, then commit one <strong>small metadata file</strong> atomically, so the visible change is a single pointer swap.</li><li>A reader sees either the old snapshot or the new one, never a half-written table, which is what makes the table transactional.</li><li>Writers use <strong>optimistic concurrency</strong>: two writers can prepare commits, but the second one detects the conflict and retries or fails.</li><li>Conflict checks compare which files each transaction read and wrote, which is why the metadata tracks the file set and not just row counts.</li><li>A writer that crashes after writing data but before committing leaves <strong>orphan files</strong> that no snapshot references; a garbage-collection job removes them later.</li></ul>
+
+
+<div class="note">The commit protocol is the whole product. Everything else, such as SQL and time travel, is a consequence of having atomic commits.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Updates, deletes, and row-level changes</h2>
+<ul><li>Analytical stores were append-only for years, but privacy deletes, corrections, and change-data-capture upserts require row-level change.</li><li><strong>Copy-on-write</strong> rewrites every file that contains an affected row; the read path stays a plain file scan, but writes are amplified.</li><li><strong>Merge-on-read</strong> writes new data files plus small delete files, and the reader applies those deletes while scanning.</li><li>Delete files are recorded as positions in a file or as predicates, so a delete can target specific rows without rewriting history.</li><li>Merge-on-read favours frequent updates and streaming ingest; copy-on-write favours read-heavy tables with occasional corrections.</li><li><strong>Compaction</strong> later rewrites affected files, applies the deletes, and restores a clean read path, at the cost of extra writes.</li><li>A table that never compacts accumulates delete files until read latency and planning time become the visible problem.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>Copy-on-write</th><th>Merge-on-read</th></tr></thead><tbody><tr><td>Write cost</td><td>High, rewrites whole files</td><td>Low, appends data and delete files</td></tr>
+<tr><td>Read cost</td><td>Low, plain file scan</td><td>Higher, deletes applied during scan</td></tr>
+<tr><td>Best for</td><td>Read-heavy, periodic corrections</td><td>Frequent updates and streaming ingest</td></tr>
+<tr><td>Maintenance</td><td>Less compaction pressure</td><td>Regular compaction is mandatory</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Time travel and snapshots</h2>
+<ul><li>Every commit produces a snapshot, so the table has a readable history rather than a single mutable state.</li><li>A query can read <code>AS OF</code> a timestamp or a version number, which is useful for audits and for reproducing a model's training data.</li><li>A bad load can be rolled back by pointing the table at the previous snapshot instead of restoring from a backup.</li><li>Incremental reads between two snapshots expose the rows that changed, which is how downstream jobs avoid full rescans.</li><li>Snapshots cost storage, so retention policies expire old metadata and let garbage collection remove files that no live snapshot references.</li><li>Expiring snapshots is a real decision: expire too aggressively and you lose audit and rollback ability, too slowly and storage and metadata grow.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Schema enforcement and evolution</h2>
+<ul><li>The table enforces a schema when a writer commits, so a malformed batch is rejected instead of silently polluting the table.</li><li>Columns are tracked by <strong>stable identifiers</strong>, so renaming a column does not make old files unreadable or mis-map data.</li><li>Adding a nullable column is cheap because old files simply have no value for it; dropping or reordering is handled by the metadata mapping.</li><li>Partition layouts can evolve, so a table can switch from daily to hourly partitioning without rewriting everything written so far.</li><li>Compatibility rules still matter for consumers: a widened type or a renamed column can break dashboards even when the table itself accepts the change.</li><li>Use a schema registry or a contract with producers so upstream teams cannot surprise every reader with an incompatible field.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>One copy for BI and machine learning</h2>
+<ul><li>The same tables serve SQL dashboards, ad-hoc analysis, feature engineering, and model training, so there is one definition of each entity.</li><li>Removing the lake-to-warehouse copy removes a scheduled job, its lag, and a class of reconciliation bugs.</li><li>Training on the same tables that feed reporting reduces <strong>train/serve skew</strong>, because features come from the governed source.</li><li>Open formats avoid lock-in: the data outlives any one vendor's engine or pricing change.</li><li>Governance is centralised in the catalog, so access control, lineage, and audit apply to every engine that reads the table.</li><li>The caveat is that a lakehouse does not automatically match a mature warehouse on high-concurrency BI, workload isolation, or optimiser maturity.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Performance: how lakehouses stay fast</h2>
+<ul><li>Columnar files plus compression mean a query reads only the columns it projects.</li><li><strong>Partition pruning</strong> removes whole directories when the filter matches the partition key.</li><li><strong>File statistics</strong> skip files whose minimum and maximum values cannot satisfy the predicate; some formats also keep bloom filters for equality lookups.</li><li>Clustering or sorting data on common filter columns co-locates related values, so pruning skips more files.</li><li>Local disk caches and engine-side caches hide repeated object-store latency for hot tables.</li><li>Compaction keeps file sizes in a healthy range; many tiny files make planning and per-file overhead dominate the actual scan.</li><li>There is no B-tree index to seek a single row, so skipping files with metadata is the main performance lever.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Metadata, catalogs, and the small-file problem</h2>
+<ul><li>Every commit writes metadata, so thousands of tiny commits create thousands of tiny metadata files and slow query planning.</li><li>Formats periodically collapse metadata into checkpoints so a reader does not replay the entire commit history.</li><li>Streaming ingest is the usual source of small files: a short micro-batch or checkpoint interval writes a new file each time.</li><li>A scheduled compaction job groups small files, and a manifest-rewrite job keeps planning cost bounded.</li><li>The <strong>catalog</strong> holds the current pointer and enforces naming and access; options range from a Hive metastore to a REST catalog to vendor catalogs.</li><li>Catalog features such as branching and tagging let teams stage a table version before promoting it, similar to a code branch.</li><li>Table maintenance is production work: it needs owners, schedules, monitoring, and a rollback plan, not a one-off script.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes to design for</h2>
+<ul><li>Concurrent writers to the same partition can conflict repeatedly; partition the writes or serialise them through one job.</li><li>A compaction job racing with readers can cause stale reads or wasted work if snapshot isolation and retention are not respected.</li><li>A schema change that the table accepts can still break every downstream consumer, so contracts and tests are required.</li><li>Snapshot expiry can silently destroy the audit trail or the ability to reproduce an old model.</li><li>An engine that lists the bucket instead of reading metadata can return wrong results, especially with merge-on-read deletes.</li><li>Many small GET requests to an object store can hit request throttling and cost more than the data scanned.</li><li>Orphaned files from failed writes waste storage until garbage collection runs, and aggressive GC can delete files a slow reader still needs.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Trade-offs and when not to use one</h2>
+<ul><li>Against a warehouse, a lakehouse wins on storage cost, open formats, and multi-engine access, but usually loses on concurrency, workload isolation, and SQL maturity.</li><li>Against a raw lake, it wins on correctness and manageability, but adds a table format, a catalog, and ongoing maintenance jobs.</li><li>For a small dataset with one BI tool and one team, a managed warehouse is simpler and may be cheaper than operating a lakehouse.</li><li>For large volumes read by several engines, including ML, the avoided copy and avoided lock-in usually justify the operational work.</li><li>The table format is a long-lived commitment: migrating snapshots, deletes, and catalogs later is possible but expensive.</li><li>A hybrid is common: lakehouse as the system of record, plus a warehouse or serving layer for the highest-concurrency dashboards.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Designing a lakehouse in an interview</h2>
+<ul><li>State the <strong>freshness requirement</strong> per layer: raw landing in minutes, curated tables in tens of minutes, or near real time.</li><li>Pick partition keys from the dominant filters, and avoid over-partitioning small tables because metadata and file counts grow.</li><li>Choose copy-on-write or merge-on-read based on update frequency versus read latency, and say who runs compaction.</li><li>Define retention for snapshots and raw files explicitly, because it determines both audit ability and storage cost.</li><li>Say which consumers still need a warehouse or serving store, rather than claiming one system fits every workload.</li><li>Mention cost drivers honestly: storage volume, request counts, compute hours, and maintenance jobs.</li></ul>
+
+<div class="flow"><span class="flow-step">Sources: databases, events, files</span><span class="flow-arrow">→</span><span class="flow-step">Ingest: batch loads and streaming writes</span><span class="flow-arrow">→</span><span class="flow-step">Raw zone: immutable landing files</span><span class="flow-arrow">→</span><span class="flow-step">Curated zone: table format with schema and partitions</span><span class="flow-arrow">→</span><span class="flow-step">Catalog and governance: access, lineage, audit</span><span class="flow-arrow">→</span><span class="flow-step">Consumers: SQL engines, dashboards, ML training</span><span class="flow-arrow">→</span><span class="flow-step">Maintenance: compaction, snapshot expiry, garbage collection</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>One copy instead of two</strong> removes sync jobs and drift, but makes the lakehouse a single system whose outages and mistakes affect both BI and ML.</li><li><strong>Open files on object storage</strong> cut storage cost and lock-in, but object stores lack atomic renames, so every guarantee must be built in the metadata commit protocol.</li><li><strong>Copy-on-write</strong> gives fast, simple reads but multiplies write cost and rewrite volume on update-heavy tables.</li><li><strong>Merge-on-read</strong> makes updates cheap but pushes work to readers and requires disciplined compaction.</li><li><strong>Time travel</strong> improves audit, rollback, and reproducibility but retains files and metadata that must eventually be expired.</li><li><strong>Schema evolution</strong> lets the table change without rewrites but can still break downstream consumers that assumed the old shape.</li><li><strong>A single governed catalog</strong> simplifies access control and lineage but concentrates risk and can become a cross-team bottleneck.</li><li><strong>Lakehouse over warehouse</strong> favours large, multi-engine, ML-heavy workloads; a warehouse still wins on concurrency, isolation, and operational simplicity.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does a data lakehouse solve?</summary><div class="answer"><p>It removes the need to keep one copy of analytical data in a lake and another in a warehouse. The lakehouse keeps data in open files on object storage and adds a table format for transactions, schema, and snapshots, so SQL reporting and machine learning can share one governed copy.</p></div></details>
+<details><summary>2. What does the table format actually add on top of Parquet files?</summary><div class="answer"><p>It adds a metadata layer: the schema, partition specification, the list of files in each snapshot, and per-file statistics. That enables atomic commits, file pruning, time travel, row-level deletes, and schema evolution, none of which plain files provide.</p></div></details>
+<details><summary>3. How do you get ACID transactions when object storage has no atomic rename?</summary><div class="answer"><p>Write the new data files first, then commit one small metadata file atomically and let the catalog pointer move to it. Readers resolve a snapshot, so they see the old version or the new one, never a partial table. Writers use optimistic concurrency and retry on conflict.</p></div></details>
+<details><summary>4. Copy-on-write or merge-on-read: how do you choose?</summary><div class="answer"><p>Choose copy-on-write for read-heavy tables with occasional corrections, because reads stay a plain scan. Choose merge-on-read for frequent updates or streaming ingest, because writes are cheap, but commit to running compaction so delete files do not accumulate.</p></div></details>
+<details><summary>5. What is time travel useful for in practice?</summary><div class="answer"><p>Auditing what a report showed on a given date, debugging a bad pipeline run, rolling back an incorrect load, and reproducing the exact training set behind a model. It depends on snapshot retention, so expiry policy is part of the design.</p></div></details>
+<details><summary>6. How does a lakehouse avoid the small-file problem?</summary><div class="answer"><p>Batch or micro-batch writes produce files sized to a target, and a scheduled compaction job merges the small ones. Metadata checkpoints and manifest rewrites keep planning cost bounded. Without maintenance, file count grows and query planning dominates.</p></div></details>
+<details><summary>7. Where does a lakehouse still lose to a warehouse?</summary><div class="answer"><p>High-concurrency BI with many simultaneous short queries, strict workload isolation, mature cost-based optimisation, and hands-off operations. A warehouse is a tuned appliance; a lakehouse is a collection of engines and maintenance jobs you operate.</p></div></details>
+<details><summary>8. How would you design zones in a lakehouse?</summary><div class="answer"><p>Land raw immutable files first, then curate them into conformed tables with enforced schema and sensible partitions, then build aggregated or serving tables for specific consumers. Each zone has an owner, a freshness target, and a quality check.</p></div></details>
+<details><summary>9. What breaks if you skip compaction?</summary><div class="answer"><p>Reads must open more files, apply more delete files, and plan over more metadata, so latency and cost climb steadily. Streaming tables are the worst case because every checkpoint can create a new file.</p></div></details>
+<details><summary>10. How do you handle deletes for privacy requirements?</summary><div class="answer"><p>Use row-level deletes supported by the table format, then run compaction so the deleted rows are physically removed from rewritten files. Expire old snapshots and garbage-collect unreferenced files, otherwise the deleted data still exists in history.</p></div></details>
+<details><summary>11. When would you not use a lakehouse?</summary><div class="answer"><p>When the data is small, one team owns it, and one managed warehouse already meets latency and concurrency needs. The table format, catalog, and maintenance jobs are overhead that only pays off with scale, multiple engines, or a real ML workload.</p></div></details>
+<details><summary>12. How do you keep BI and ML from disagreeing in a lakehouse?</summary><div class="answer"><p>Publish one governed table per entity, document its grain, and make both consumers read that table rather than private extracts. Add tests and lineage so a transformation change is visible to every downstream owner before it ships.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Calling a directory of Parquet files a lakehouse when there is no table format, catalog, or commit protocol.</li><li>Assuming object storage gives you atomic multi-file commits for free.</li><li>Choosing merge-on-read for a read-heavy table and never scheduling compaction.</li><li>Forgetting snapshot expiry, so storage grows forever or audit history disappears unexpectedly.</li><li>Over-partitioning on a high-cardinality column and creating millions of tiny files.</li><li>Letting a schema change through because the table accepts it, without checking downstream consumers.</li><li>Running garbage collection while long readers still depend on older snapshots.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="data-warehousing.html"><span>← Previous</span><strong>Data Warehousing</strong></a><a class="next" href="lambda-architecture.html"><span>Next →</span><strong>Lambda Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/data-lakehouse">AlgoMaster — Data Lakehouse</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Key-Value Stores — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 47 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Key-Value Stores</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/key-value-stores">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem key-value stores solve</a>
+<a href="#s2">What a key-value store is</a>
+<a href="#s3">Common use cases</a>
+<a href="#s4">In-memory versus persistent stores</a>
+<a href="#s5">How it works internally</a>
+<a href="#s6">Designing good keys</a>
+<a href="#s7">Expiration and eviction</a>
+<a href="#s8">Scaling with partitioning</a>
+<a href="#s9">Replication and consistency</a>
+<a href="#s10">Limitations</a>
+<a href="#s11">Hot keys</a>
+<a href="#s12">The landscape, and when to use one</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A key-value store is the simplest useful database: a value under a unique key, with get, put, and delete — extremely fast and easy to partition, but blind to what is inside the value.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Key</dt><dd>The unique identifier used to store and retrieve one value, usually a string built by the application.</dd></div><div class="term"><dt>Value</dt><dd>An opaque blob of bytes from the store's point of view — JSON, a serialized object, or just a number.</dd></div><div class="term"><dt>Cache-aside</dt><dd>A pattern where the application reads the cache first, loads from the database on a miss, then writes the result back with a TTL.</dd></div><div class="term"><dt>TTL</dt><dd>Time-to-live: an expiry attached to a key so the store removes it automatically after a period.</dd></div><div class="term"><dt>Eviction</dt><dd>The policy that decides which keys to drop when an in-memory store runs out of memory.</dd></div><div class="term"><dt>Consistent hashing</dt><dd>Placing nodes and keys on a ring so adding or removing a node moves only the keys in its section.</dd></div><div class="term"><dt>Hash slot</dt><dd>A fixed partition of the key space, assigned in groups to nodes, so capacity moves by moving slots rather than rehashing every key.</dd></div><div class="term"><dt>Quorum (N, W, R)</dt><dd>N replicas, W acknowledgments required for a write, R responses required for a read; if R + W > N, reads overlap the newest write.</dd></div><div class="term"><dt>Leaderless replication</dt><dd>A model where a write goes to several replicas at once instead of to one primary.</dd></div><div class="term"><dt>Hot key</dt><dd>A single key whose traffic overloads its node even though the rest of the cluster is idle.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem key-value stores solve</h2>
+<p class="lede">A web application with millions of logged-in users loads a session on every request: who the user is, their permissions, and their cart.</p>
+<ul><li>The lookup is always identical: fetch one record by its session id.</li><li>There is no join, no search by content, no aggregation — just a fetch that must be fast, thousands of times per second.</li><li>A relational database can store it, but each fetch pays for parsing, planning, and possibly disk reads to answer a trivial question.</li><li>The work is pure overhead because the access pattern is already known exactly.</li><li>What is wanted is a shared hash map that many application servers can use.</li><li>That is exactly the shape of a key-value store.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a key-value store is</h2>
+<ul><li>Data is stored as pairs: a unique key and the value associated with it.</li><li>The interface is tiny — <strong>put</strong> stores, <strong>get</strong> returns, <strong>delete</strong> removes.</li><li>A key like <code>session:abc123</code> maps to a value holding the session details.</li><li>The store usually does not interpret the value; to it, the value is a blob of bytes.</li><li>Some stores add structure: Redis supports lists, sets, sorted sets, and hashes with operations on each element.</li><li>A sorted set, for example, makes a leaderboard a single command instead of an application-side sort.</li><li>The core contract stays the same: you must know the key to reach the data.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Common use cases</h2>
+<ul><li>The common thread is that the application already knows the exact key it needs and needs the answer immediately.</li><li>Caching, sessions, carts, rate limits, feature flags, leaderboards, tokens, and one-time codes all fit that shape.</li><li>Each use case stresses a different feature: expiry for sessions, atomicity for counters, ordering for leaderboards.</li><li>What they share is a value that is small, self-contained, and meaningful only when paired with its key.</li><li>None of them needs a join or a scan, which is exactly why the store can stay minimal.</li><li>A workload that needs to answer questions across many keys does not belong here.</li></ul>
+<h3>Caching</h3>
+<ul><li>Store the result of an expensive query or API call under a key derived from the request.</li><li>The <strong>cache-aside</strong> flow: read the cache; on a hit return; on a miss read the database, store the result with a TTL, then return it.</li><li>The benefit is skipped work on every subsequent request.</li><li>The cost is freshness: the cached value can be older than the database until it expires or is deleted.</li><li>Decide explicitly whether expiry or explicit invalidation owns correctness.</li></ul>
+
+<div class="flow"><span class="flow-step">Read cache</span><span class="flow-arrow">→</span><span class="flow-step">Hit: return value</span><span class="flow-arrow">→</span><span class="flow-step">Miss: read database</span><span class="flow-arrow">→</span><span class="flow-step">Store result with TTL</span><span class="flow-arrow">→</span><span class="flow-step">Return value</span></div>
+<h3>Sessions, carts, and rate limits</h3>
+<ul><li>Session storage uses the session id as key and the session data as value, which lets any app server serve any user.</li><li>Shopping carts work the same way with the user id as key.</li><li>A rate limiter keys on user plus time window and stores a counter incremented per request.</li><li>That increment must be <strong>atomic</strong>: a read-then-write in the application lets two requests race and both pass.</li><li>Windows are usually fixed or sliding; the key design decides which is easy.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>In-memory versus persistent stores</h2>
+<ul><li><strong>In-memory</strong> stores such as Redis and Memcached keep data in RAM, so reads and writes are extremely fast.</li><li>The trade-off is cost per gigabyte and volatility: memory is more expensive than disk and disappears on restart.</li><li>Memcached is purely a cache, so a restart or eviction simply loses entries.</li><li>Redis can persist to disk, with different guarantees per mode.</li><li><strong>Persistent</strong> stores — DynamoDB, RocksDB, etcd — are designed to be the permanent home of data and to survive restarts and node loss.</li><li>They are slightly slower but durable and horizontally scalable.</li><li>The first design question is therefore: is this a cache that can be rebuilt, or a source of truth that must never lose data?</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Persistence mode</th><th>How it works</th><th>Trade-off</th></tr></thead><tbody><tr><td>Snapshot (RDB)</td><td>Periodic snapshot of all data</td><td>Fast restart, but writes since the last snapshot can be lost</td></tr>
+<tr><td>Append-only file (AOF)</td><td>Every change appended to a log, replayed on restart</td><td>Safer, but more disk use and slower recovery</td></tr>
+<tr><td>Both</td><td>Snapshots plus the append-only log</td><td>Common practical compromise</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>How it works internally</h2>
+<ul><li>On one machine, an in-memory store is usually a <strong>hash table</strong>: hash the key to find a slot.</li><li>That gives constant-time average lookup regardless of how many keys are stored.</li><li>Disk-based stores need a structure suited to pages: many use an <strong>LSM tree</strong>, where writes are buffered and flushed as sorted files.</li><li>Others use a <strong>B-tree</strong>, which keeps keys sorted in pages on disk.</li><li>A useful side effect of sorted structures is <strong>range scans</strong>, such as all keys starting with <code>user:42:</code>.</li><li>A pure hash table cannot do that efficiently, because hashing scatters related keys.</li><li>So the choice of structure decides whether prefix scans are possible, not just how fast a single get is.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Structure</th><th>Typical store</th><th>Point lookups</th><th>Range scans</th></tr></thead><tbody><tr><td>Hash table</td><td>Redis, Memcached</td><td>O(1) average</td><td>No</td></tr>
+<tr><td>LSM tree</td><td>RocksDB, DynamoDB-style engines</td><td>Fast</td><td>Yes</td></tr>
+<tr><td>B-tree</td><td>etcd (bbolt), LMDB</td><td>O(log n)</td><td>Yes</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Designing good keys</h2>
+<ul><li>The key is the only way to find data, so key design is the schema of a key-value store.</li><li>Use a <strong>structured naming pattern</strong> such as <code>user:42:profile</code> to group related data and avoid collisions between types.</li><li>Make keys <strong>predictable</strong>: if the application can build the key from data it has, one lookup suffices.</li><li><strong>Composite keys</strong> add ordering: DynamoDB's partition key plus sort key lets you fetch all orders for a user sorted by date.</li><li>The partition key decides placement; the sort key decides order inside the partition.</li><li>Keep keys and values small — large values cost network time and replication bandwidth, and long keys cost memory across millions of entries.</li><li>Prefer <code>user:42:profile</code> over a name that repeats the whole application hierarchy.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Expiration and eviction</h2>
+<ul><li>Much of the data is temporary: sessions expire, caches go stale, rate windows pass.</li><li><strong>TTL</strong> lets the store delete a key automatically, so the application does not need a cleanup job.</li><li><strong>Eviction</strong> is what happens when memory fills and something must go.</li><li><strong>LRU</strong> evicts the least recently used keys, which suits general caches.</li><li><strong>LFU</strong> evicts the least frequently used, which suits a stable set of popular keys.</li><li><code>volatile-*</code> policies evict only keys that have a TTL, so permanent keys survive.</li><li><code>noeviction</code> rejects new writes instead, which is what a primary store should do rather than silently lose data.</li><li>Policy choice follows directly from the cache-versus-source-of-truth question.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Policy</th><th>Evicts</th><th>Good for</th></tr></thead><tbody><tr><td>allkeys-lru</td><td>Least recently used keys</td><td>General-purpose caches</td></tr>
+<tr><td>allkeys-lfu</td><td>Least frequently used keys</td><td>Stable popular key sets</td></tr>
+<tr><td>volatile-lru / volatile-ttl</td><td>Only keys with a TTL</td><td>Mixing cache data with keys that must stay</td></tr>
+<tr><td>noeviction</td><td>Nothing; rejects writes</td><td>Using the store as a primary database</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Scaling with partitioning</h2>
+<ul><li>One machine eventually cannot hold all keys or serve all requests, and keys are independent, so they partition naturally.</li><li><strong>Hash modulo N</strong> is the simplest scheme: <code>node = hash(key) % N</code>.</li><li>Its flaw is resharding: changing N remaps most keys, so adding one node moves a large share of the data.</li><li><strong>Consistent hashing</strong> places nodes and keys on a ring; a key belongs to the next node clockwise.</li><li>Adding a node then moves only the keys in its arc, not the whole key space.</li><li><strong>Hash slots</strong> take a related approach: divide the key space into fixed slots and assign groups of slots to nodes.</li><li>Redis Cluster uses this idea with a fixed slot count, so rebalancing moves slots rather than rehashing every key.</li><li>Keys that must be operated on together can be forced into one slot with a hash tag: only the part inside braces is hashed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Replication and consistency</h2>
+<ul><li>Partitioning spreads load, but a failed node makes its keys unavailable, so each partition is replicated.</li><li><strong>Primary-replica</strong> replication sends writes to one primary that copies to followers; on failure a replica is promoted.</li><li>Reads from replicas may lag, so a read can return an older value.</li><li><strong>Leaderless</strong> replication sends a write to several replicas at once and uses quorums.</li><li>With N replicas, W write acknowledgments, and R read responses, <code>R + W &gt; N</code> guarantees the read set overlaps the newest write.</li><li>Lower W and R give faster responses and weaker consistency; with both at one, a read can easily miss the write.</li><li><strong>Consensus</strong> systems such as etcd run Raft, where a majority must agree before a write commits, so reads see the latest committed value.</li><li>The right model depends on the data: a stale product page is harmless, a stale lock owner or permission check is not.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>Write path</th><th>Consistency</th></tr></thead><tbody><tr><td>Primary-replica</td><td>Primary accepts, copies to replicas</td><td>Replica reads may lag</td></tr>
+<tr><td>Leaderless quorum</td><td>Write to W of N, read from R</td><td>Tunable per request</td></tr>
+<tr><td>Consensus</td><td>Majority must agree</td><td>Strong; reads see the latest commit</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Limitations</h2>
+<ul><li>You can look data up efficiently <strong>only by its key</strong>.</li><li>A store holding profiles keyed by user id cannot answer <em>all users in India</em>; it has no idea what is inside the values.</li><li>The workaround is a second key you maintain yourself, such as <code>country:India</code> pointing at a list of user ids.</li><li>That index is now application-owned: a user moving countries must update both keys in one logical step.</li><li>There are <strong>no joins</strong>: data from two keys is fetched separately and combined in the application.</li><li>Transactions are limited: often only single-key atomic operations, sometimes limited multi-key transactions, and rarely anything like relational semantics.</li><li>So a key-value store is excellent at one access pattern and poor at everything else.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Good fit</th><th>Poor fit</th></tr></thead><tbody><tr><td>Get a session by session id</td><td>Find sessions by browser or city</td></tr>
+<tr><td>Get a cached product by id</td><td>Search products by text</td></tr>
+<tr><td>Increment a counter per user</td><td>Compute analytics across all users</td></tr>
+<tr><td>Get a cart by user id</td><td>Join carts with orders and payments</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Hot keys</h2>
+<ul><li>Partitioning balances traffic across <em>keys</em>, not within one key.</li><li>If a celebrity posts and millions of users request that data, every request maps to the same partition and one node saturates.</li><li>The rest of the cluster can be idle while that node is overloaded.</li><li><strong>Local cache:</strong> keep extremely popular values in a small in-process cache so most requests never reach the store.</li><li><strong>Key splitting:</strong> replicate a hot key across several keys and pick one at random per read.</li><li>Hot counters can be split into bucket keys and summed when the total is needed.</li><li><strong>Read replicas</strong> spread read traffic for that partition across machines.</li><li>The design lesson is explicit: sharding does not fix a single hot key; it needs its own strategy.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>The landscape, and when to use one</h2>
+<ul><li>Redis and Memcached are the classic in-memory choices, the first with rich data structures and optional persistence.</li><li>DynamoDB is a managed, durable key-value and document store built for predictable performance at scale.</li><li>RocksDB is an embeddable storage engine used inside other databases rather than as a standalone server.</li><li>etcd is a strongly consistent store used for configuration, service discovery, and coordination.</li><li>They share one model but differ sharply on memory, durability, and consistency — so compare those properties, not the label.</li><li>Choose one when you always know the key, need very low latency, and need to scale many simple reads and writes.</li><li>Do not choose one when you must filter by value, join related records, or run ad hoc reports.</li><li>Most production systems combine it with a relational source of truth, using the key-value store for the hottest paths.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Store</th><th>Type</th><th>Typical use</th></tr></thead><tbody><tr><td>Redis</td><td>In-memory, rich structures</td><td>Caching, sessions, leaderboards, rate limits</td></tr>
+<tr><td>Memcached</td><td>Simple in-memory cache</td><td>Plain get and set of values</td></tr>
+<tr><td>DynamoDB</td><td>Managed, durable key-value and document</td><td>Large-scale predictable workloads</td></tr>
+<tr><td>RocksDB</td><td>Embeddable engine</td><td>Storage layer inside other systems</td></tr>
+<tr><td>etcd</td><td>Strongly consistent key-value</td><td>Configuration, discovery, coordination</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>In-memory storage</strong> gives the lowest latency but costs more per gigabyte and loses data on restart unless persisted.</li><li><strong>Snapshots</strong> restart quickly but can lose recent writes; <strong>append-only logging</strong> is safer but slower to recover.</li><li><strong>Opaque values</strong> keep the store simple and fast but make value-based queries impossible.</li><li><strong>TTL</strong> removes stale data automatically but means the application must tolerate a cache miss at any time.</li><li><strong>LRU eviction</strong> keeps recent keys but can drop a rarely read key that is expensive to recompute.</li><li><strong>Consistent hashing</strong> minimizes data movement on resharding but adds ring management and virtual nodes.</li><li><strong>Quorum reads and writes</strong> are tunable per request but you must reason about R, W, and N for each use case.</li><li><strong>Leaderless replication</strong> keeps writes available during node loss but can produce conflicting versions that need resolution.</li><li><strong>Consensus replication</strong> gives strong consistency but needs a majority, so it is unavailable when quorum is lost.</li><li><strong>Key duplication for secondary indexes</strong> enables lookups by another attribute but moves index maintenance into the application.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a key-value store?</summary><div class="answer"><p>A database that stores a value under a unique key and exposes a minimal interface: put, get, delete. The store usually treats the value as an opaque blob, so lookups are fast and simple but limited to exact key access.</p></div></details>
+<details><summary>2. Why is it a good fit for sessions?</summary><div class="answer"><p>Session access is always the same lookup by session id, with no joins, filters, or reports. A key-value store answers that in one hop, scales horizontally by key, and lets any application server serve any user, which is exactly what stateless app tiers need.</p></div></details>
+<details><summary>3. Walk through cache-aside.</summary><div class="answer"><p>Read the cache; on a hit return the value. On a miss, read the source of truth, write the result back with a TTL, and return it. The trade-off is freshness: until expiry or invalidation, the cached value can be older than the database.</p></div></details>
+<details><summary>4. In-memory or persistent: how do you decide?</summary><div class="answer"><p>Ask whether the data can be rebuilt. A cache can live purely in memory because losing it only costs a miss. If the data is the source of truth — configuration, sessions that must survive, counters that matter — choose a durable store or enable persistence with an explicit durability setting.</p></div></details>
+<details><summary>5. Why must a rate-limit counter increment atomically?</summary><div class="answer"><p>If the application reads the counter, decides, then writes it back, two concurrent requests can both read the same value and both be allowed. An atomic increment at the store closes that window, so the limit holds under concurrency.</p></div></details>
+<details><summary>6. What does the internal data structure change?</summary><div class="answer"><p>A hash table gives constant-time point lookups but cannot serve range or prefix queries. An LSM tree or B-tree keeps keys sorted, so it supports range scans at the cost of slightly more work per lookup or per write. That decides whether <code>user:42:</code> prefix scans are even possible.</p></div></details>
+<details><summary>7. How should keys be designed?</summary><div class="answer"><p>Use a structured, predictable pattern like <code>entity:id:field</code> so the application can construct the key without a lookup, collisions between data types are impossible, and related keys group together. Keep keys and values small, and add a sort key where ordered access inside a partition is needed.</p></div></details>
+<details><summary>8. What is the difference between TTL and eviction?</summary><div class="answer"><p>TTL is a per-key expiry the application sets deliberately, so the data disappears on schedule. Eviction is the store's reaction to memory pressure, governed by a policy such as LRU or LFU. One models data lifetime; the other models running out of room.</p></div></details>
+<details><summary>9. Why does hash modulo N fail when you add a node?</summary><div class="answer"><p>Because N changes, so almost every key's <code>hash % N</code> points somewhere new. Going from four nodes to five remaps the large majority of keys, forcing a mass migration. Consistent hashing and hash slots move only a fraction of the data instead.</p></div></details>
+<details><summary>10. Explain R + W > N.</summary><div class="answer"><p>With N replicas, a write waits for W acknowledgments and a read waits for R responses. If R + W exceeds N, the read set and the newest write set must overlap in at least one replica, so the reader can see the latest version. Smaller W and R are faster but can miss the write.</p></div></details>
+<details><summary>11. What is a hot key and how do you fix it?</summary><div class="answer"><p>It is one key receiving so much traffic that its owning node saturates while the cluster is idle. Fixes include caching the value locally in the application, splitting the key into several copies or buckets and choosing one per read, and adding read replicas for that partition.</p></div></details>
+<details><summary>12. When is a key-value store the wrong choice?</summary><div class="answer"><p>When you need to filter or search by values, join related records, or run ad hoc reports. The key is the only efficient access path, so any other question means a full scan or an application-maintained index. A relational or document store fits those needs better.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Using a cache-only store as the source of truth and discovering the data loss on the first restart.</li><li>Filtering by value and assuming the store will do it efficiently, when it can only scan.</li><li>Leaving a large key-value pair unpaginated, then paying network and replication cost on every read.</li><li>Choosing noeviction for a cache and then rejecting writes when memory fills.</li><li>Adding a node under hash-modulo partitioning and triggering a near-total remap.</li><li>Sharding a hot key and expecting partitioning to spread one key's load.</li><li>Reading from a replica for a flow that must reflect the user's own last write.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="document-databases.html"><span>← Previous</span><strong>Document Databases</strong></a><a class="next" href="full-text-search-engines.html"><span>Next →</span><strong>Full-Text Search Engines</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/key-value-stores">AlgoMaster — Key-Value Stores</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

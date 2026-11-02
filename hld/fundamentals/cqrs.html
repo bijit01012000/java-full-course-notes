@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CQRS — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 72 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>CQRS</h1>
+    <p class="dek">Architectural Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/cqrs">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with one model for everything</a>
+<a href="#s2">What CQRS is: commands versus queries</a>
+<a href="#s3">The write side</a>
+<a href="#s4">The read side</a>
+<a href="#s5">Two levels of separation</a>
+<a href="#s6">Keeping the read side in sync</a>
+<a href="#s7">Eventual consistency and the user experience</a>
+<a href="#s8">Where CQRS fits</a>
+<a href="#s9">CQRS and event sourcing are not the same</a>
+<a href="#s10">Failure modes and correctness risks</a>
+<a href="#s11">Operational cost and when not to use it</a>
+<a href="#s12">Worked example and decision checklist</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>CQRS separates the model that changes data from the model that reads it, so writes can protect invariants and reads can be shaped for the screen — at the cost of a second model that must be kept in sync.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Command</dt><dd>An intent to change state, such as Place Order or Change Email; it is validated, may be rejected, and does not return query data.</dd></div><div class="term"><dt>Query</dt><dd>A request for data that must not change state, shaped to answer a specific read need.</dd></div><div class="term"><dt>Write model</dt><dd>The model that enforces invariants and records state changes, optimized for correctness rather than reporting.</dd></div><div class="term"><dt>Read model</dt><dd>A denormalized, query-optimized projection of data, often one per screen or use case.</dd></div><div class="term"><dt>Projection</dt><dd>The process or component that consumes change events and updates one or more read models.</dd></div><div class="term"><dt>Eventual consistency</dt><dd>A guarantee that a read model will converge to the write state after some delay, not immediately.</dd></div><div class="term"><dt>Task-based UI</dt><dd>A user interface organized around intents such as cancel or approve, which maps naturally to commands.</dd></div><div class="term"><dt>Idempotency</dt><dd>The property that applying the same change twice produces the same state, essential when projections consume at-least-once events.</dd></div><div class="term"><dt>Read-your-writes</dt><dd>A consistency guarantee that a user immediately sees their own successful command reflected in subsequent reads.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with one model for everything</h2>
+<p class="lede">Most applications start with a single data model used to create, update, and read data. That is usually the right place to start.</p>
+<ul><li>Writes care about <strong>correctness</strong>: invariants, uniqueness, and transaction boundaries.</li><li>Reads care about <strong>shape and speed</strong>: one response for one screen, without joins at request time.</li><li>A normalized write schema avoids duplication but forces expensive joins and assembly for display.</li><li>A denormalized read schema is fast to read but risky to write through without breaking invariants.</li><li>The same object becomes a compromise: too heavy for writes, too awkward for reads.</li><li>As read and write volumes diverge, the compromise gets more expensive on both sides.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What CQRS is: commands versus queries</h2>
+<ul><li><strong>CQRS</strong> means Command Query Responsibility Segregation: one model for changing state, another for reading it.</li><li>A <strong>command</strong> expresses intent and can be rejected; it does not return query results.</li><li>A <strong>query</strong> returns data and must not mutate state.</li><li>The separation can be only in code, or all the way to separate stores and services.</li><li>It is a pattern for a bounded context, not a global rule for every table.</li><li>CQRS is often confused with event sourcing; they are independent choices that combine well.</li><li>The simplest CQRS is two different models over the same database.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The write side</h2>
+<ul><li>The write model holds the aggregates and invariants of the domain.</li><li>Commands are validated against current state before anything is persisted.</li><li>Writes are transactional over the smallest set of data that must change together.</li><li>The write side emits facts about what happened — domain events or change records — for the read side.</li><li>It does not try to answer reporting questions and does not build screen-shaped views.</li><li>Optimistic concurrency, unique constraints, and version numbers protect against lost updates.</li><li>Keeping the write model narrow makes invariants easier to reason about.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The read side</h2>
+<ul><li>Each read model is a denormalized view built for a specific query or screen.</li><li>Read models can live in a different store: a search index, a document database, or a cache.</li><li>Multiple read models over the same events are normal, for example a list view and a detail view.</li><li>Queries never need to join across aggregates; the join happened when the projection was written.</li><li>Read models can be rebuilt from scratch by replaying the source of change.</li><li>Because they are disposable, changing a read model is cheaper than migrating the write schema.</li><li>Isolation lets read traffic scale independently of write traffic.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Two levels of separation</h2>
+<p class="lede">CQRS is a spectrum. Most teams should start at the light end.</p>
+<ul><li><strong>Light CQRS:</strong> separate command handlers and query objects over one database and one schema.</li><li><strong>Separate read tables:</strong> projections write denormalized tables in the same database.</li><li><strong>Separate stores:</strong> the read side lives in another database, search engine, or cache.</li><li><strong>Separate services:</strong> write and read sides deploy and scale independently.</li><li>Each step adds capability and adds sync lag, operational surface, and failure modes.</li><li>Choose the lightest level that fixes the actual problem you measured.</li><li>Separate stores make the most sense when read and write load profiles differ sharply.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Level</th><th>What is separate</th><th>Main cost</th></tr></thead><tbody><tr><td>Code only</td><td>Command handlers vs query objects</td><td>Almost none; limited benefit</td></tr>
+<tr><td>Read tables</td><td>Denormalized projections in one database</td><td>Projection code, rebuild procedure</td></tr>
+<tr><td>Separate stores</td><td>Different database or index for reads</td><td>Replication lag, dual infrastructure</td></tr>
+<tr><td>Separate services</td><td>Independent deployment and scaling</td><td>Distributed consistency, tracing, ops</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Keeping the read side in sync</h2>
+<ul><li>The write side publishes changes as events after the transaction commits.</li><li>A projection subscribes, translates each event, and upserts the read model.</li><li>Delivery is usually at-least-once, so projections must be <strong>idempotent</strong>.</li><li>Ordering matters: an update older than the current row must not overwrite newer data.</li><li>A durable log or outbox prevents publishing events that never reach the projector.</li><li>Backfills rebuild new read models from the write side or from retained events.</li><li>Sync lag is a first-class metric, not an implementation detail.</li></ul>
+
+<div class="flow"><span class="flow-step">Command validated against write model</span><span class="flow-arrow">→</span><span class="flow-step">Transaction commits new state</span><span class="flow-arrow">→</span><span class="flow-step">Change event written durably</span><span class="flow-arrow">→</span><span class="flow-step">Projection consumes the event</span><span class="flow-arrow">→</span><span class="flow-step">Read model updated</span><span class="flow-arrow">→</span><span class="flow-step">Query returns the new view</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Eventual consistency and the user experience</h2>
+<ul><li>After a successful command, a query may briefly return the previous view.</li><li>Users notice this most on save-then-redirect screens and on lists they just edited.</li><li>Options include reading your own write from the write side, optimistic UI, or waiting for a version token.</li><li>A <strong>read-your-writes</strong> route can send a user's reads to a fresher source for a short window.</li><li>The UI should show a pending state rather than silently displaying stale data.</li><li>Some domains cannot tolerate lag — for example, a balance check before a withdrawal.</li><li>Decide the acceptable lag per query, not once for the whole system.</li></ul>
+
+
+<div class="note">State the lag budget explicitly. A projection that is normally fast but unbounded under backlog is a correctness problem, not a performance one.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Where CQRS fits</h2>
+<ul><li>Read and write workloads with very different volume or scaling needs.</li><li>Complex domains where invariants need a clean, narrow write model.</li><li>Reporting or search needs that do not match the transactional schema.</li><li>Collaborative or task-based systems where users issue explicit intents.</li><li>Systems already using events, where projections are a natural consumer.</li><li>Audit-heavy domains that need a durable record of changes.</li><li>It fits poorly in small CRUD systems with balanced, simple traffic.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>CQRS and event sourcing are not the same</h2>
+<ul><li>CQRS separates read and write <strong>models</strong>; event sourcing makes events the <strong>source of truth</strong>.</li><li>You can do CQRS with a normal relational write model and no event log.</li><li>You can do event sourcing with a single model that also serves reads, though it is awkward.</li><li>Together they are powerful: events are both the history and the feed for projections.</li><li>Combining them multiplies operational complexity, so adopt each for its own reason.</li><li>CQRS without event sourcing still needs a change feed, often an outbox or CDC stream.</li><li>Event sourcing without CQRS usually means rebuilding state on every read, which needs snapshots.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Failure modes and correctness risks</h2>
+<ul><li>A projection crash creates lag; a poison event can stall an entire partition.</li><li>Duplicate delivery without idempotency double-counts totals or duplicates rows.</li><li>Out-of-order events can resurrect deleted records or overwrite newer values.</li><li>Publishing inside the write transaction without an outbox can lose events on rollback or crash.</li><li>A read model that silently diverges is worse than a slow one; reconciliation jobs catch drift.</li><li>Rebuilds can saturate the source database and the projection workers at the same time.</li><li>Schema changes to events break projections that were not versioned.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Operational cost and when not to use it</h2>
+<ul><li>Two models to design, test, deploy, monitor, and migrate.</li><li>Projection infrastructure: consumers, retries, dead letters, checkpoints, replay tooling.</li><li>Consistency reasoning moves into the application and the UI.</li><li>Debugging spans the command, the event, the projection, and the query.</li><li>Small teams with simple domains pay all of this for little benefit.</li><li>Default to a single model until a measured read or write problem justifies the split.</li><li>If you only need faster reads, caching or a read replica is usually cheaper.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Worked example and decision checklist</h2>
+<p class="lede">An order system takes orders and also shows an operations dashboard with totals, statuses, and search.</p>
+<ul><li>Commands: place order, cancel order, mark shipped — validated against order invariants.</li><li>Events: OrderPlaced, OrderCancelled, OrderShipped.</li><li>Projections: an order detail view, an operations list, and a search index.</li><li>Queries read only the projections and never touch the order aggregate.</li><li>The dashboard can lag briefly; the confirmation screen reads its own write.</li><li>A nightly reconciliation compares projection totals with the write database.</li><li>Decision rule: adopt CQRS when read shape or read scale genuinely conflicts with write correctness.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Specialized models</strong> make reads fast and writes safe but require two models and a translation layer.</li><li><strong>Independent read scaling</strong> absorbs heavy query load but adds stores, infrastructure, and cost.</li><li><strong>Denormalized read models</strong> remove joins at query time but duplicate data and require rebuilds.</li><li><strong>Event-driven sync</strong> decouples the sides but introduces lag, duplicates, and ordering concerns.</li><li><strong>Rebuildable projections</strong> make schema change cheap but demand durable events and replay tooling.</li><li><strong>Task-based commands</strong> clarify intent and validation but push consistency handling into the UI.</li><li><strong>Separate deployment</strong> lets teams move independently but expands the debugging and tracing surface.</li><li><strong>Event sourcing plus CQRS</strong> gives full history and flexible views but is one of the heaviest designs to operate.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What does CQRS stand for and what does it separate?</summary><div class="answer"><p>Command Query Responsibility Segregation. It separates the model used to change state from the model used to read it, so writes can enforce invariants and reads can be shaped for specific queries.</p></div></details>
+<details><summary>2. Why is one model often a problem?</summary><div class="answer"><p>Writes need normalization and invariants; reads need denormalized, screen-shaped data. Forcing one model to do both produces awkward queries and fragile write paths, and read and write load cannot scale independently.</p></div></details>
+<details><summary>3. What is the difference between a command and a query?</summary><div class="answer"><p>A command expresses an intent to change state, is validated, and can be rejected; it does not return query data. A query returns data and must not mutate anything. The distinction is about responsibility, not about HTTP verbs.</p></div></details>
+<details><summary>4. Is CQRS the same as event sourcing?</summary><div class="answer"><p>No. CQRS separates read and write models; event sourcing makes an event log the source of truth. You can do CQRS with a normal relational write model, and you can do event sourcing without separate read models. They combine well but are independent decisions.</p></div></details>
+<details><summary>5. How do the read and write sides stay in sync?</summary><div class="answer"><p>The write side publishes committed changes as events, usually through an outbox or change data capture. Projections consume them idempotently and update the read models, tracking a checkpoint so they can resume and replay.</p></div></details>
+<details><summary>6. What consistency does CQRS give?</summary><div class="answer"><p>Strong consistency inside the write model for each command, and eventual consistency between the write model and the read models. The lag is usually small but must be bounded and monitored, because it is a correctness property, not just latency.</p></div></details>
+<details><summary>7. How do you handle read-your-writes?</summary><div class="answer"><p>Route a user's reads to the write side or a fresh replica for a short window after their command, use a version token to wait for the projection to catch up, or show an optimistic pending state. Which one depends on how much the user notices the gap.</p></div></details>
+<details><summary>8. What happens if a projection processes an event twice?</summary><div class="answer"><p>Nothing if projections are idempotent: upserts keyed by entity and version, deduplication by event ID, or conditional writes that ignore older versions. Without that, duplicates inflate totals and create repeated rows.</p></div></details>
+<details><summary>9. How do you rebuild a read model?</summary><div class="answer"><p>Reset the projection checkpoint, replay retained events or run a backfill query from the write side, then switch reads over once the rebuild catches up. This requires durable events or a reliable change feed and enough capacity to replay without harming live traffic.</p></div></details>
+<details><summary>10. When would you not use CQRS?</summary><div class="answer"><p>Small CRUD systems with balanced, simple traffic, or cases where caching or a read replica solves the read problem. CQRS adds a second model, sync infrastructure, and consistency reasoning that must be justified by a measured conflict between read and write needs.</p></div></details>
+<details><summary>11. What is the lightest form of CQRS?</summary><div class="answer"><p>Separate command handlers from query objects while sharing one database and schema. It clarifies code and validation without distributed sync. If reads still hurt, add denormalized read tables, and only then consider separate stores or services.</p></div></details>
+<details><summary>12. How does CQRS affect the UI?</summary><div class="answer"><p>Commands map to explicit user intents, which suits task-based interfaces. The UI must handle the possibility that a query briefly lags a just-completed command, so it needs pending states, version checks, or a read-your-writes path.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Applying CQRS to every bounded context instead of the one place where read and write needs actually conflict.</li><li>Claiming strong consistency between write and read models while syncing asynchronously.</li><li>Publishing events inside the write transaction without an outbox, losing them on rollback or crash.</li><li>Writing non-idempotent projections and then discovering at-least-once delivery duplicates data.</li><li>Treating eventual consistency as a latency detail instead of a user-visible correctness concern.</li><li>Building CQRS without replay or reconciliation tooling, so a diverged read model cannot be repaired.</li><li>Confusing CQRS with event sourcing and adopting both when only one was needed.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="hexagonal-architecture.html"><span>← Previous</span><strong>Hexagonal Architecture</strong></a><a class="next" href="event-sourcing.html"><span>Next →</span><strong>Event Sourcing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/cqrs">AlgoMaster — CQRS</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

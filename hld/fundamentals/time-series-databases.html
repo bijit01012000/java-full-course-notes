@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Time Series Databases — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 50 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Time Series Databases</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/time-series-databases">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem time-series databases solve</a>
+<a href="#s2">What a time-series database is</a>
+<a href="#s3">Data model and cardinality</a>
+<a href="#s4">The write path</a>
+<a href="#s5">Storage layout and compression</a>
+<a href="#s6">Indexing time and labels</a>
+<a href="#s7">Query patterns</a>
+<a href="#s8">Retention and tiered storage</a>
+<a href="#s9">Downsampling and continuous aggregates</a>
+<a href="#s10">Late and out-of-order samples</a>
+<a href="#s11">Scaling</a>
+<a href="#s12">Alternatives and comparisons</a>
+<a href="#s13">When to use one</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A time-series database assumes every row is an append-only sample tagged with a timestamp, so it can compress time-ordered data aggressively, answer range-and-aggregate queries quickly, and expire old data cheaply.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Sample</dt><dd>One measurement: a metric, a set of labels, a timestamp, and a numeric value.</dd></div><div class="term"><dt>Series</dt><dd>All samples sharing one metric name and one exact label set; the unit of storage and indexing.</dd></div><div class="term"><dt>Label (tag)</dt><dd>A key-value attribute that identifies a series, such as host, region, or endpoint.</dd></div><div class="term"><dt>Cardinality</dt><dd>The number of distinct series; high-cardinality labels multiply series and are the main scaling limit.</dd></div><div class="term"><dt>Head block</dt><dd>The in-memory, still-writable block holding the most recent samples before they are flushed.</dd></div><div class="term"><dt>Block</dt><dd>An immutable, time-bounded chunk of compressed samples written to storage.</dd></div><div class="term"><dt>Delta-of-delta encoding</dt><dd>Storing changes between consecutive timestamp gaps, which compresses regular scrape intervals to almost nothing.</dd></div><div class="term"><dt>Downsampling</dt><dd>Replacing many fine-grained samples with fewer aggregated ones so old data stays cheap to query.</dd></div><div class="term"><dt>Rollup</dt><dd>A precomputed aggregate over a time window, such as one-minute averages or hourly maximums.</dd></div><div class="term"><dt>Retention policy</dt><dd>A rule that deletes or moves data older than a defined age, usually applied per series or per block.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem time-series databases solve</h2>
+<p class="lede">Monitoring and metering produce a very particular workload: many sources each emit one number every few seconds, forever, and almost every query asks about a time range.</p>
+<ul><li>The write rate is high and constant, and writes are nearly all appends of new timestamps.</li><li>Rows are rarely updated or deleted individually; they simply age out.</li><li>Queries ask for a range — last hour, last day — grouped by host, endpoint, or region.</li><li>A general-purpose table accumulates enormous numbers of rows, and its indexes grow with them.</li><li>Storing each sample with full row overhead wastes space, because timestamps and label sets repeat constantly.</li><li>Deleting old data through row-by-row deletes is slow and leaves bloat.</li><li>Every property points to a specialized layout: append-only, time-ordered, columnar, and easy to expire.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a time-series database is</h2>
+<ul><li>It stores <strong>samples</strong>: a metric name, a label set, a timestamp, and a value.</li><li>A <strong>series</strong> is the identity formed by the metric plus its exact label set; all its samples share that identity.</li><li>Writes are appends keyed by series and time, with no read-modify-write and no cross-row relationships.</li><li>The engine indexes series by labels, and stores samples ordered by time inside each series.</li><li>Queries select series by label matchers and a time range, then aggregate the values.</li><li>The design assumes data is <em>immutable once written</em>, which unlocks compression and cheap retention.</li><li>Engines differ in interface — some pull from scrape targets, others accept pushed writes — but the model is the same.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Data model and cardinality</h2>
+<ul><li>Labels are the dimensions you filter and group by, such as <code>host</code>, <code>region</code>, or <code>endpoint</code>.</li><li>Every distinct label combination creates a new <strong>series</strong>, with its own index entry and storage stream.</li><li><strong>Cardinality</strong> is the number of distinct series, and it is the dominant cost driver.</li><li>A label like user id or request id turns one metric into millions of series and overwhelms the index.</li><li>A label like region or status code stays small and is safe to group by.</li><li>So label design is the schema design of a time-series database, and it must be decided before ingest.</li><li>The usual failure is invisible at first: cardinality explodes when a new high-cardinality label is deployed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The write path</h2>
+<ul><li>Samples are batched, because one write per sample would waste most of the effort on overhead.</li><li>The batch is appended to a <strong>write-ahead log</strong> so it survives a crash before being stored.</li><li>Samples are added to the in-memory <strong>head block</strong>, indexed by series and sorted by time.</li><li>When the head block reaches its size or time limit, it is written out as an immutable <strong>block</strong>.</li><li>Blocks are never edited, so later writes create new blocks rather than modifying old ones.</li><li>Compaction merges small blocks into larger ones, which reduces query fan-out over time.</li><li>Writes are cheap because the engine appends rather than searching for an existing row.</li></ul>
+
+<div class="flow"><span class="flow-step">Collect samples</span><span class="flow-arrow">→</span><span class="flow-step">Batch and append to WAL</span><span class="flow-arrow">→</span><span class="flow-step">Insert into in-memory head block</span><span class="flow-arrow">→</span><span class="flow-step">Flush head to an immutable block</span><span class="flow-arrow">→</span><span class="flow-step">Compaction merges blocks</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Storage layout and compression</h2>
+<ul><li>Within a series, timestamps are usually regular, and values change slowly or repeat.</li><li>The engine stores samples <strong>column by column</strong> — all timestamps together, all values together — rather than as rows.</li><li>Timestamps are stored as <strong>deltas</strong>, and then deltas of deltas, so a constant scrape interval encodes as near-zero.</li><li>Floating-point values are stored by their bit patterns with XOR compression, which makes repeated values very cheap.</li><li>Labels are stored once per series rather than repeated on every sample.</li><li>The result is that storage grows with the number of <em>changes</em>, not with the number of samples times a row size.</li><li>That compression is what makes retaining fine-grained data for weeks or months practical.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Technique</th><th>Exploits</th><th>Effect</th></tr></thead><tbody><tr><td>Columnar blocks</td><td>Queries read one column at a time</td><td>Less I/O per aggregate</td></tr>
+<tr><td>Delta-of-delta timestamps</td><td>Regular scrape intervals</td><td>Timestamps shrink to a few bits</td></tr>
+<tr><td>XOR float compression</td><td>Slowly changing values</td><td>Repeated values cost almost nothing</td></tr>
+<tr><td>Labels stored per series</td><td>Labels repeat on every sample</td><td>Row overhead disappears</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Indexing time and labels</h2>
+<ul><li>The label index maps each label pair to the series that contain it, which makes matcher-based selection fast.</li><li>Time is handled by partitioning storage into blocks with bounded time ranges, so a range query touches only the relevant blocks.</li><li>Recent data lives in memory, so dashboards over the last minutes read from the head block.</li><li>Older blocks carry a sparse index of series and time inside the block, so a query can seek instead of scanning.</li><li>Queries combine a label match with a time range; both filters prune before any sample is decoded.</li><li>Block metadata lets the engine skip blocks entirely when their time range or label set cannot match.</li><li>The cost of a query grows with the number of matched series and the range width, which is why cardinality matters so much.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Query patterns</h2>
+<ul><li>The canonical query is: select series by labels, take a time range, aggregate the values.</li><li>Common aggregations are sum, average, minimum, maximum, count, and rate over a window.</li><li>Percentiles are computed from histograms or approximated from compressed sketches, because exact percentiles over raw samples are expensive.</li><li>Grouping by a label produces one result series per label value, which is how per-host or per-region charts are built.</li><li>A rate query converts a monotonically increasing counter into a per-second value by differencing over the window.</li><li>Long ranges over raw samples are costly, which is why rollups exist for historical views.</li><li>Query cost is dominated by matched series count and window size, not by total table size.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Retention and tiered storage</h2>
+<ul><li>Time-series data loses value with age, so retention is a first-class feature rather than an afterthought.</li><li>Because storage is organized in immutable time-bounded blocks, expiry is just dropping whole blocks.</li><li>Policies can differ per series or per table: keep raw data briefly, keep rollups much longer.</li><li>Older blocks can move to cheaper object storage while remaining queryable, at higher latency.</li><li>Deleting a whole block is far cheaper than deleting rows and leaves no bloat.</li><li>Retention must be planned against query needs: if a dashboard needs a year of data, keep a rollup for it.</li><li>This is a large operational advantage over general-purpose databases, where aging data out is a maintenance burden.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Downsampling and continuous aggregates</h2>
+<ul><li><strong>Downsampling</strong> replaces many fine-grained samples with a smaller number of aggregates.</li><li>A one-minute rollup keeps count, sum, min, max, and sometimes a histogram, so averages remain computable later.</li><li>Keeping count and sum rather than only the average is essential, or later re-aggregation is wrong.</li><li>Rollups are computed continuously as new blocks arrive, so historical queries never rescan raw samples.</li><li>The cost is resolution: a yearly chart cannot show second-level spikes that were averaged away.</li><li>Late-arriving samples can invalidate a rollup window, so recomputation or a lateness window is needed.</li><li>Choosing granularities — raw, minute, hour — is choosing between query cost and the detail users can still see.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Late and out-of-order samples</h2>
+<ul><li>Sensors buffer, retry, and report late, so samples do not always arrive in timestamp order.</li><li>Many engines accept out-of-order writes only within a bounded window, then reject or drop them.</li><li>Handling them requires rewriting the affected block, which is why it is treated as an exception rather than the norm.</li><li>The same sample may be delivered twice; the engine must deduplicate by series and timestamp to keep sums correct.</li><li>Idempotent writes — same timestamp replacing the same value — make retries safe.</li><li>A lateness window should be documented, because it defines when a dashboard's past values stop changing.</li><li>Aggregations that already ran over an incomplete window will be wrong unless they are recomputed.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Scaling</h2>
+<ul><li>Sharding is usually by series, so one series lands on one node and queries can be routed.</li><li>Some designs also shard by time, which helps retention and parallel range scans.</li><li>Replication provides availability and read capacity, with the usual staleness trade-off.</li><li>A query spanning many series fans out to the owning nodes and merges partial aggregates.</li><li>Merging partial results requires combinable aggregates: counts and sums combine, distinct counts need sketches.</li><li>Very long ranges over many series are the hardest query shape, and rollups are the standard mitigation.</li><li>Ingest scale and query scale are separate dimensions, so they are sized independently.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Alternatives and comparisons</h2>
+<ul><li>A relational table with an index on <code>(series_id, timestamp)</code> handles modest volumes and keeps SQL and transactions.</li><li>It becomes expensive at scale because each row carries overhead and retention means bulk deletes.</li><li>A wide-column store can hold high-volume time-ordered rows partitioned by series, but lacks the compression and rollups.</li><li>A search or columnar analytics engine can answer time-range aggregates, but usually at higher ingest cost.</li><li>Prometheus-style systems pull metrics from targets, while other engines accept pushed writes; the choice affects how targets are discovered and how gaps appear.</li><li>The specialized engine wins when ingest rate, retention, and range queries dominate and rows are never updated.</li><li>If you need relational relationships or transactions, a time-series store is the wrong tool.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Option</th><th>Strengths</th><th>Weaknesses</th></tr></thead><tbody><tr><td>Relational with time index</td><td>SQL, transactions, one store</td><td>Row overhead, expensive retention at scale</td></tr>
+<tr><td>Wide-column</td><td>High write throughput, partition by series</td><td>No compression or rollups designed for time</td></tr>
+<tr><td>Time-series database</td><td>Compression, retention, range aggregation</td><td>Narrow model, cardinality limits</td></tr>
+<tr><td>Columnar analytics engine</td><td>Cheap large scans and group-bys</td><td>Ingest overhead, no per-series retention</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use one</h2>
+<ul><li>Infrastructure and application monitoring: metrics per host, service, and endpoint.</li><li>IoT and sensor telemetry, where devices emit readings continuously.</li><li>Financial or trading ticks, where ordered timestamps and range aggregation dominate.</li><li>Any workload that is append-only, time-ordered, and queried by range and label.</li><li>Not for records that are updated by attributes, joined across entities, or need multi-row transactions.</li><li>Not for sparse, irregular events that are read one at a time; a document or relational store fits better.</li><li>The decisive question is whether the value of the data decays with age — if yes, retention and rollups are the core features.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Compression</strong> makes long retention affordable but works because data is append-only, so updates become rewrites.</li><li><strong>High-cardinality labels</strong> allow precise filtering but multiply series and can overwhelm the index.</li><li><strong>Small head blocks</strong> limit memory use and data loss on crash but create many blocks for compaction to merge.</li><li><strong>Downsampling</strong> cuts query cost for old data but permanently removes fine-grained detail.</li><li><strong>Rollups</strong> make long-range queries fast but must store combinable aggregates and handle late data.</li><li><strong>Bounded lateness windows</strong> keep blocks immutable but reject genuinely late samples.</li><li><strong>Sharding by series</strong> spreads ingest and routes queries but makes cross-series comparisons a fan-out.</li><li><strong>Tiered storage</strong> lowers cost per byte but makes historical queries slower.</li><li><strong>Deduplication</strong> keeps aggregates correct but adds index and write overhead per sample.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What distinguishes a time-series database from a normal one?</summary><div class="answer"><p>It assumes every row is an append-only sample identified by a metric, labels, and a timestamp. That assumption lets it store data in time-ordered columnar blocks, compress timestamps and values heavily, and expire data by dropping whole blocks instead of deleting rows.</p></div></details>
+<details><summary>2. What is a series and why does cardinality matter?</summary><div class="answer"><p>A series is one metric plus one exact label set, and each one gets its own index entry and storage stream. Cardinality is how many series exist, so a high-cardinality label such as user id or request id multiplies both index size and query fan-out. It is the main scaling limit of the model.</p></div></details>
+<details><summary>3. Why is time-series data so compressible?</summary><div class="answer"><p>Timestamps usually arrive at a regular interval, so deltas are constant and deltas of deltas are near zero. Values often change slowly or repeat, which XOR encoding captures cheaply. Labels are stored once per series rather than on every sample. Together that removes most per-row overhead.</p></div></details>
+<details><summary>4. Walk through a write.</summary><div class="answer"><p>Samples are batched, appended to a write-ahead log for durability, and inserted into the in-memory head block sorted by series and time. When the head block fills, it is flushed as an immutable block, and compaction later merges small blocks into larger ones.</p></div></details>
+<details><summary>5. How does a range query execute?</summary><div class="answer"><p>The engine uses the label index to select matching series, then uses block metadata to skip blocks whose time range cannot match. Within the remaining blocks it decodes only the needed columns and aggregates per series and window. Cost follows matched series count and range width.</p></div></details>
+<details><summary>6. What is downsampling and what must it preserve?</summary><div class="answer"><p>Downsampling replaces many samples with fewer aggregates over a window. It must keep combinable values — count, sum, min, max — rather than only the average, or later re-aggregation over a longer range becomes wrong. The cost is losing fine detail permanently.</p></div></details>
+<details><summary>7. Why is retention cheap here?</summary><div class="answer"><p>Because storage is organized into immutable, time-bounded blocks, expiring old data means deleting whole blocks. That is a metadata operation plus a file removal, with no row-level deletes, no index churn, and no bloat left behind.</p></div></details>
+<details><summary>8. How should out-of-order samples be handled?</summary><div class="answer"><p>Accept them only within a documented lateness window, write them idempotently so retries cannot double-count, and recompute affected rollups. Frequent out-of-order data means rewriting blocks, so it should be treated as an exception rather than a normal path.</p></div></details>
+<details><summary>9. What happens if a metric gains a high-cardinality label?</summary><div class="answer"><p>Each distinct value creates a new series, so index memory, storage streams, and query fan-out all grow with the value count. A single deployment can multiply series count dramatically. Guard against it by reviewing label choices and monitoring series count as a first-class metric.</p></div></details>
+<details><summary>10. Why are percentiles harder than averages?</summary><div class="answer"><p>An average is one number that combines across series, but a percentile describes a distribution and cannot be averaged. Accurate percentiles need the underlying samples or a histogram or sketch that preserves the distribution, which is also why rollups must keep that sketch.</p></div></details>
+<details><summary>11. When is a relational database good enough?</summary><div class="answer"><p>When ingest volume is modest, retention is short or unimportant, and you value SQL, joins, and transactions over compression. An index on series and timestamp handles range queries well at small scale, and one store is simpler to operate than two.</p></div></details>
+<details><summary>12. How do you decide between pushing and pulling metrics?</summary><div class="answer"><p>Pulling lets the collector discover targets and detect absence as a failed scrape, which suits service discovery. Pushing suits short-lived jobs, devices behind NAT, and high-volume producers. The decision affects gap handling and how you instrument targets, not the storage model.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Adding a per-user or per-request label and destroying the index with cardinality.</li><li>Storing only the average in a rollup, then being unable to compute an honest longer-range average.</li><li>Assuming a time-series store can answer joins or transactions across entities.</li><li>Deleting individual samples and expecting space to be reclaimed like block expiry.</li><li>Sending one write per sample and paying connection and batching overhead on every point.</li><li>Ignoring out-of-order writes until dashboards start disagreeing with each other.</li><li>Retaining raw data forever because compression is cheap, without planning query cost growth.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="wide-column-databases.html"><span>← Previous</span><strong>Wide Column Databases</strong></a><a class="next" href="graph-databases.html"><span>Next →</span><strong>Graph Databases</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/time-series-databases">AlgoMaster — Time Series Databases</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

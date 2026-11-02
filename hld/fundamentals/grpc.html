@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gRPC Fundamentals — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 24 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>gRPC Fundamentals</h1>
+    <p class="dek">API Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>10</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/grpc">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">What gRPC is</a>
+<a href="#s2">Protocol Buffers and the .proto contract</a>
+<a href="#s3">HTTP/2 transport</a>
+<a href="#s4">Communication patterns</a>
+<a href="#s5">Code generation and schema evolution</a>
+<a href="#s6">Deadlines, cancellation, and retries</a>
+<a href="#s7">Metadata, interceptors, and auth</a>
+<a href="#s8">Load balancing and service discovery</a>
+<a href="#s9">Performance characteristics</a>
+<a href="#s10">gRPC vs REST, and when to use it</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>gRPC turns a method call in a <code>.proto</code> contract into a network call over <strong>HTTP/2</strong> with compact binary messages, which suits internal service-to-service communication.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>gRPC</dt><dd>A framework for remote procedure calls where a service is defined in a schema and client and server stubs are generated from it.</dd></div><div class="term"><dt>Protocol Buffers</dt><dd>A binary serialization format defined by a schema, producing compact messages that are fast to encode and decode.</dd></div><div class="term"><dt>.proto file</dt><dd>The interface definition document that declares services, methods, and message types.</dd></div><div class="term"><dt>Stub</dt><dd>Generated client code exposing a service's methods as local-looking functions that perform the network call.</dd></div><div class="term"><dt>Unary RPC</dt><dd>One request and one response, the direct analogue of a normal function call.</dd></div><div class="term"><dt>Server streaming</dt><dd>One request followed by a stream of responses, useful for feeds and progress updates.</dd></div><div class="term"><dt>Bidirectional streaming</dt><dd>Both sides send independent streams of messages over one connection.</dd></div><div class="term"><dt>Deadline</dt><dd>A per-call time limit propagated to downstream services so work is cancelled rather than left running.</dd></div><div class="term"><dt>Metadata</dt><dd>Key-value pairs attached to a call, used for authentication tokens, tracing, and routing hints.</dd></div><div class="term"><dt>Interceptor</dt><dd>Middleware around a call that can add auth, logging, metrics, or retries on client or server side.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>What gRPC is</h2>
+<ul><li>You describe a service and its methods in a <code>.proto</code> file, and tooling generates client and server code.</li><li>Calling a remote method looks like calling a local function, which keeps service code readable.</li><li>The framework handles serialization, transport, deadlines, and status propagation.</li><li>It is strongly typed: the schema is the contract, and generated stubs prevent drift between services.</li><li>It is designed primarily for <strong>internal service-to-service</strong> traffic, not for browser-facing APIs.</li><li>Browsers cannot speak raw gRPC, so public surfaces usually use gRPC-Web, a proxy, or a REST facade.</li><li>The initial learning cost is tooling and build integration, not the call model itself.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Protocol Buffers and the .proto contract</h2>
+<ul><li>Messages are declared as typed fields, each with a name, type, and a numeric field number.</li><li>The wire format is binary and uses field numbers, not names, so payloads are compact and parsing is fast.</li><li>Fields are optional by default in proto3, with explicit <code>optional</code> presence where you need it.</li><li>Repeated fields model lists, and nested messages model structure, so the schema is a real data model.</li><li>Enums are numeric on the wire, so unknown values must be handled rather than crashing.</li><li><strong>Never reuse or renumber a field number</strong>; reserve retired numbers and names instead.</li><li>JSON is available as an alternative encoding, which helps debugging but gives up the size advantage.</li><li>The same message definitions can generate code for many languages, which is why polyglot fleets use it.</li></ul>
+
+
+<pre class="code"><code>service OrderService {
+  rpc GetOrder (GetOrderRequest) returns (Order);
+  rpc WatchOrders (WatchRequest) returns (stream OrderEvent);
+}
+
+message GetOrderRequest {
+  string order_id = 1;
+}
+
+message Order {
+  string order_id = 1;
+  int64 total_cents = 2;
+  string currency = 3;
+}</code></pre>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>HTTP/2 transport</h2>
+<ul><li>gRPC uses HTTP/2 as its transport, which gives multiplexed streams over one connection.</li><li>Many concurrent calls share a connection, so you avoid a handshake per request.</li><li>Header compression reduces repeated metadata overhead across calls.</li><li>Binary framing carries length-prefixed messages, which is what enables streaming.</li><li>Flow control per stream stops a fast sender from overwhelming a slow receiver.</li><li>Because one connection carries many calls, connection-count-based load balancing is misleading for gRPC.</li><li>Some proxies and load balancers handle HTTP/2 unevenly, so check end-to-end support before designing around it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Communication patterns</h2>
+<ul><li><strong>Unary</strong>: one request, one response, the default for ordinary RPCs.</li><li><strong>Server streaming</strong>: one request, many responses, good for feeds, logs, and progress.</li><li><strong>Client streaming</strong>: many requests, one response, good for uploads and aggregation.</li><li><strong>Bidirectional streaming</strong>: independent streams both ways, used for chat and real-time sync.</li><li>Streaming keeps a call open, so it needs explicit deadlines, cancellation, and backpressure handling.</li><li>Streams are not resumable by default: if the connection drops, the call fails and the client must restart.</li><li>Choose streaming only when the interaction is genuinely incremental; a unary call is simpler to operate.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Pattern</th><th>Request</th><th>Response</th><th>Typical use</th></tr></thead><tbody><tr><td>Unary</td><td>One</td><td>One</td><td>Ordinary CRUD and queries</td></tr>
+<tr><td>Server streaming</td><td>One</td><td>Many</td><td>Feeds, logs, progress</td></tr>
+<tr><td>Client streaming</td><td>Many</td><td>One</td><td>Uploads, aggregation</td></tr>
+<tr><td>Bidirectional</td><td>Many</td><td>Many</td><td>Chat, live sync, telemetry</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Code generation and schema evolution</h2>
+<ul><li>The <code>.proto</code> file is the source of truth; generated code is a build artifact, not something to hand-edit.</li><li>Changing a field number or type breaks compatibility with peers built against the old schema.</li><li>Adding a new field with a new number is backward compatible: old readers ignore it, new readers default it.</li><li>Removing a field requires reserving its number and name so nobody reuses them by accident.</li><li>Renaming a field changes generated code but not the wire format, so it breaks source compatibility, not data compatibility.</li><li>Version the package or service name when a change cannot be made additively.</li><li>Keep generated code in the build pipeline so contract changes are reviewed like any other API change.</li></ul>
+
+
+<div class="note">Field numbers are the contract; field names are a convenience for developers. That distinction explains most protobuf compatibility rules.</div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Deadlines, cancellation, and retries</h2>
+<ul><li>Every call should set a <strong>deadline</strong>, and the remaining budget should propagate to downstream calls.</li><li>When a deadline expires the call fails with a status code, and the server should stop working on it.</li><li>Cancellation propagates through context, so abandoned client work does not keep consuming server capacity.</li><li>Without deadlines, a slow dependency turns into thread or connection exhaustion across the fleet.</li><li>Retries belong in an interceptor with a policy: only retry idempotent methods or transient status codes.</li><li>Retries need backoff, jitter, and a budget, or a degraded service receives multiplied traffic.</li><li>Because a timeout is an unknown outcome, non-idempotent calls need an idempotency key before retrying.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Metadata, interceptors, and auth</h2>
+<ul><li><strong>Metadata</strong> carries key-value pairs such as bearer tokens, trace IDs, and tenant identifiers.</li><li>Interceptors are the middleware layer: authentication, logging, metrics, retries, and rate limiting.</li><li>Server interceptors can enforce auth uniformly instead of repeating checks in every handler.</li><li>Client interceptors attach credentials and propagate tracing headers automatically.</li><li>Metadata is not a place for large payloads; it is transmitted per call and often compressed with headers.</li><li>Use mutual TLS or token-based auth for service identity, and keep authorisation decisions in the service.</li><li>Propagate the same request ID across services so one trace shows the whole call graph.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Load balancing and service discovery</h2>
+<ul><li>Because HTTP/2 multiplexes, a single long-lived connection can pin all traffic to one backend.</li><li>Client-side load balancing lets the caller spread calls across endpoints it discovers itself.</li><li>Layer 7 proxies that understand HTTP/2 can balance per stream instead of per connection.</li><li>Headless service discovery plus client-side balancing is the common Kubernetes pattern for gRPC.</li><li>Least-request or power-of-two policies fit better than connection counts for multiplexed traffic.</li><li>The gRPC health checking protocol lets balancers and orchestrators probe real service health.</li><li>Service mesh sidecars can handle balancing, mTLS, and retries without changing application code.</li></ul>
+
+
+<div class="note">The classic “connections are balanced but all traffic goes to one pod” failure is a gRPC-specific trap caused by connection-level balancing.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Performance characteristics</h2>
+<ul><li>Binary Protobuf payloads are typically smaller and cheaper to parse than JSON text.</li><li>Connection reuse and multiplexing remove repeated handshakes under high call volume.</li><li>Streaming avoids repeated request overhead when transferring many small messages.</li><li>Schema-based code generation removes runtime reflection and hand-written mapping in many cases.</li><li>These gains are largest for high-volume internal calls and smallest for low-traffic public endpoints.</li><li>Payload size is not the only cost: serialization, TLS, and network hops often dominate.</li><li>Measure before assuming gRPC is faster; a JSON API with connection reuse can be fast enough.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>gRPC vs REST, and when to use it</h2>
+<ul><li>Choose gRPC for internal, high-volume, strongly typed service calls, especially in polyglot systems.</li><li>Choose it when streaming or low per-call overhead is a real requirement.</li><li>Choose REST for public APIs, browser clients, and anything that benefits from HTTP caching and ubiquity.</li><li>Choose GraphQL when client-driven response shaping matters more than call efficiency.</li><li>gRPC's weakness is operational and human: binary payloads are harder to debug, and browser support needs a bridge.</li><li>Contracts need governance, because a shared <code>.proto</code> becomes a dependency between teams.</li><li>A common architecture uses gRPC internally with a REST or GraphQL edge for clients.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Aspect</th><th>gRPC</th><th>REST/JSON</th></tr></thead><tbody><tr><td>Payload</td><td>Binary Protobuf</td><td>Text JSON</td></tr>
+<tr><td>Contract</td><td>Required .proto schema</td><td>Optional OpenAPI schema</td></tr>
+<tr><td>Streaming</td><td>Native, four patterns</td><td>Limited; SSE or WebSocket add-ons</td></tr>
+<tr><td>Browser support</td><td>Needs gRPC-Web or a proxy</td><td>Native</td></tr>
+<tr><td>HTTP caching</td><td>Not a good fit</td><td>Native</td></tr>
+<tr><td>Debugging</td><td>Needs tooling</td><td>Readable with curl</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Binary Protobuf</strong> is compact and fast but unreadable without tooling during debugging.</li><li><strong>Schema-first contracts</strong> prevent drift but make every change a cross-team coordination event.</li><li><strong>HTTP/2 multiplexing</strong> cuts handshakes but breaks connection-count load balancing.</li><li><strong>Streaming</strong> enables incremental interaction but adds backpressure, cancellation, and non-resumable failure.</li><li><strong>Code generation</strong> removes boilerplate but couples builds to the protobuf toolchain.</li><li><strong>Deadlines everywhere</strong> prevent runaway work but require careful budget propagation across services.</li><li><strong>Interceptors</strong> centralise cross-cutting concerns but can hide retries and auth behind opaque layers.</li><li><strong>Binary protocols</strong> discourage casual inspection, which is good for efficiency and bad for incident response.</li><li><strong>A shared proto repository</strong> improves consistency but creates a release-coupling bottleneck.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is gRPC in one paragraph?</summary><div class="answer"><p>A remote procedure call framework where a service is defined in a <code>.proto</code> contract, client and server code is generated, and calls run over HTTP/2 with compact binary messages. It makes a remote call look like a local method while the framework handles serialization, deadlines, and status codes.</p></div></details>
+<details><summary>2. How does gRPC differ from REST?</summary><div class="answer"><p>REST is a resource-oriented style over HTTP with text representations such as JSON, while gRPC is a method-oriented RPC framework with a required schema and binary payloads over HTTP/2. gRPC is better for internal high-volume calls; REST is better for public, cacheable, browser-facing APIs.</p></div></details>
+<details><summary>3. Why does gRPC use HTTP/2?</summary><div class="answer"><p>HTTP/2 provides multiplexed streams over one connection, header compression, and binary framing with flow control. Those features make many concurrent calls and true streaming possible without opening a connection per request.</p></div></details>
+<details><summary>4. What are the four call types?</summary><div class="answer"><p>Unary (one request, one response), server streaming (one request, many responses), client streaming (many requests, one response), and bidirectional streaming (independent streams both ways). Unary covers ordinary CRUD; streaming suits feeds and real-time sync.</p></div></details>
+<details><summary>5. Why must you never reuse a protobuf field number?</summary><div class="answer"><p>The wire format identifies fields by number, not name. Reusing a retired number makes an old peer interpret a new field as the old one, silently corrupting data, so retired numbers and names should be reserved.</p></div></details>
+<details><summary>6. How do you evolve a proto safely?</summary><div class="answer"><p>Add fields with new numbers and leave existing ones alone. When removing a field, reserve its number and name, and start a new package or service version for changes that cannot be made additively.</p></div></details>
+<details><summary>7. Why are deadlines important in gRPC?</summary><div class="answer"><p>A deadline bounds how long a call may take and propagates the remaining budget downstream, so abandoned work is cancelled instead of consuming capacity. Without them, one slow dependency can exhaust threads and connections across the fleet.</p></div></details>
+<details><summary>8. What is the gRPC connection-pinning problem?</summary><div class="answer"><p>Since HTTP/2 reuses one long-lived connection for many calls, a connection-level load balancer sends all of a client's traffic to one backend. Fix it with client-side balancing, per-stream L7 balancing, or a service mesh.</p></div></details>
+<details><summary>9. How does gRPC handle errors?</summary><div class="answer"><p>It uses canonical status codes plus optional error details, returned as trailers. Handlers map domain failures onto these codes so clients can branch on a stable, protocol-level signal instead of parsing messages.</p></div></details>
+<details><summary>10. Can browsers call gRPC directly?</summary><div class="answer"><p>No. Browsers do not expose the HTTP/2 features gRPC requires, so you need gRPC-Web with a proxy or a REST or GraphQL facade at the edge.</p></div></details>
+<details><summary>11. Where do interceptors fit?</summary><div class="answer"><p>They are the middleware layer around calls and streams, used for authentication, metadata propagation, tracing, metrics, retries, and rate limiting. Centralising them keeps handlers focused on business logic and makes policy consistent.</p></div></details>
+<details><summary>12. When should you avoid gRPC?</summary><div class="answer"><p>For public APIs and browser clients where ubiquity and HTTP caching matter, for simple low-volume endpoints where tooling cost outweighs the benefit, and for teams without the build and debugging tooling to support binary protocols.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Balancing gRPC by connection count and sending all traffic to a single healthy pod.</li><li>Omitting deadlines, so a slow dependency exhausts capacity across the fleet.</li><li>Reusing retired protobuf field numbers and silently corrupting data for older peers.</li><li>Retrying non-idempotent calls in an interceptor without an idempotency key.</li><li>Exposing raw gRPC to browsers and expecting it to work without a proxy.</li><li>Treating a shared proto repository as free, then blocking every team on one release.</li><li>Assuming binary encoding alone makes the system fast, without measuring actual latency.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="graphql.html"><span>← Previous</span><strong>GraphQL Fundamentals</strong></a><a class="next" href="jwt.html"><span>Next →</span><strong>JWT</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/grpc">AlgoMaster — gRPC Fundamentals</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

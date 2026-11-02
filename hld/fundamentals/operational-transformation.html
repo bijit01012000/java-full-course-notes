@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operational Transformation — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 86 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Operational Transformation</h1>
+    <p class="dek">Distributed System Fundamentals · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/operational-transformation">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: editing the same document at once</a>
+<a href="#s2">The core idea</a>
+<a href="#s3">Operations and the document model</a>
+<a href="#s4">Transforming a concurrent pair</a>
+<a href="#s5">Inclusion and exclusion transformation</a>
+<a href="#s6">Convergence and intention preservation</a>
+<a href="#s7">The central-server model</a>
+<a href="#s8">The client loop</a>
+<a href="#s9">Cursors, selections, and presence</a>
+<a href="#s10">Why OT is difficult in practice</a>
+<a href="#s11">Failure modes</a>
+<a href="#s12">OT versus CRDTs</a>
+<a href="#s13">Implementation checklist</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Operational transformation lets several people edit one document at once: each edit applies instantly on its author's screen, and remote edits are rewritten to still mean the same thing once they arrive.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Operational transformation</dt><dd>A technique that transforms concurrent edits against each other so all replicas converge on the same document.</dd></div><div class="term"><dt>Operation</dt><dd>A minimal edit such as insert characters at a position or delete a range, addressed by index.</dd></div><div class="term"><dt>Transform function</dt><dd>The routine that rewrites operation B so it keeps its intent after operation A has already been applied.</dd></div><div class="term"><dt>Tie-break rule</dt><dd>A deterministic ordering, such as client ID, that decides which of two concurrent inserts goes first.</dd></div><div class="term"><dt>Inclusion transformation</dt><dd>Rewriting an operation against one already applied at the same site.</dd></div><div class="term"><dt>Exclusion transformation</dt><dd>Rewriting an operation as if a given operation had not been applied, used to invert or reorder history.</dd></div><div class="term"><dt>TP1</dt><dd>The convergence property that transforming each of two concurrent operations against the other yields the same document.</dd></div><div class="term"><dt>TP2</dt><dd>The stronger property required when three or more operations are concurrent, ensuring transform composition is consistent.</dd></div><div class="term"><dt>Revision</dt><dd>A server-assigned version number identifying a document state; operations are expressed against a revision.</dd></div><div class="term"><dt>Pending buffer</dt><dd>A client-side queue of local operations not yet acknowledged, kept so remote operations can be transformed against them.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: editing the same document at once</h2>
+<ul><li>Two users can insert, delete, and replace in the same region before either sees the other's change.</li><li>Applying both edits literally can produce duplicated text, lost text, or text in the wrong place.</li><li>Serialising all edits through a lock destroys the interactive feel and blocks users behind each other.</li><li>Last-write-wins on whole documents throws away one person's work entirely.</li><li>The system must keep <strong>every replica identical</strong> while letting each user see their own keystroke immediately.</li><li>It must also preserve <strong>intent</strong>: an edit that meant <em>add a comma here</em> must still land there after remote edits shift the text.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The core idea</h2>
+<ul><li>Every edit is expressed as an <strong>operation</strong> against a known document state, not as a whole new document.</li><li>The local edit is applied immediately, so typing never waits for the network.</li><li>When a concurrent remote operation arrives, it is <strong>transformed</strong> against the operations already applied locally.</li><li>Transformation adjusts positions so the remote edit still targets the same logical text after local changes moved it.</li><li>Each site converges because every site eventually applies the same set of transformed operations in a consistent order.</li><li>The technique needs either a central server to order operations, or a peer-to-peer protocol with a total order and correct transformation.</li><li>The hard part is not the simple case; it is guaranteeing convergence when three or more edits overlap.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Operations and the document model</h2>
+<ul><li>A minimal operation set is <code>insert(position, text)</code> and <code>delete(position, length)</code>.</li><li>Richer editors add <code>replace</code>, attribute changes, and structural operations for lists or tables.</li><li>Positions are indexes into the current document, which is exactly why they become invalid after concurrent edits.</li><li>An operation is only meaningful relative to the state it was created against, usually tagged with a revision.</li><li>Character-level operations converge more precisely but produce many more messages than line-level ones.</li><li>Some systems batch keystrokes into a single operation to cut traffic, at the cost of coarser transformation.</li><li>The operation model dictates the transformation matrix, so keep the set small and well-defined.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Transforming a concurrent pair</h2>
+<ul><li>Two inserts at the same position: apply both, but order them by a <strong>deterministic tie-break</strong> so every site agrees.</li><li>An insert before a deletion's range: the insert's index is unaffected, and the remote deletion proceeds as-is.</li><li>An insert inside a deletion's range: the deletion must extend to cover the inserted text, or the insert must be shifted out.</li><li>A deletion overlapping a deletion: the second delete must be shrunk or shifted to avoid removing text twice.</li><li>A deletion covering text that a remote insert already deleted: the remote operation becomes a no-op rather than an error.</li><li>Transformation is a function of <em>both</em> operations, not of the document alone, which is why it is easy to get subtly wrong.</li><li>Every case must have a defined result; undefined cases become divergence bugs that appear only under racing edits.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Concurrent pair</th><th>What transformation must do</th></tr></thead><tbody><tr><td>Insert / insert, same position</td><td>Order by tie-break so both sites agree</td></tr>
+<tr><td>Insert / delete, before range</td><td>Shift the delete by the inserted length</td></tr>
+<tr><td>Insert / delete, inside range</td><td>Decide whether the insert survives the delete</td></tr>
+<tr><td>Delete / delete, overlap</td><td>Shrink the later delete to avoid double removal</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Inclusion and exclusion transformation</h2>
+<ul><li><strong>Inclusion transformation</strong> rewrites an operation so it can be applied after another one at the same site.</li><li>It is the common path: a remote edit is included on top of local edits already applied.</li><li><strong>Exclusion transformation</strong> rewrites an operation as if another had not been applied.</li><li>Exclusion is needed for undo, for restoring a checkpoint, and for certain multi-way transformation paths.</li><li>Together they let a site move an operation across the history it has already applied.</li><li>Formal correctness is stated as transformation properties TP1 and TP2 rather than as ad-hoc case checks.</li><li>Having both directions available is what separates a real OT library from a naive insert/delete shifter.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Convergence and intention preservation</h2>
+<ul><li><strong>TP1</strong> requires that two concurrent operations, each transformed against the other, produce the same document.</li><li>TP1 alone is enough for two concurrent edits and is the property most simple implementations check.</li><li><strong>TP2</strong> extends this to three or more concurrent operations and constrains how transforms compose.</li><li>Classic counterexamples exist: three concurrent inserts at the same spot can diverge if the tie-break is not consistent across transformation orders.</li><li>Satisfying TP2 for all operation pairs is difficult, which is why many production systems rely on a central server to serialise.</li><li><strong>Intention preservation</strong> is the separate goal that the user's edit still lands where they meant it.</li><li>Convergence and intention are different properties; a system can agree on a document nobody wanted.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The central-server model</h2>
+<p class="lede">The dominant architecture, often called the Jupiter model, uses one server as the serialisation point for all operations.</p>
+<ul><li>The server holds the authoritative document and assigns a monotonically increasing <strong>revision</strong> to each accepted operation.</li><li>Clients send operations tagged with the revision they were created against.</li><li>The server transforms incoming operations against everything committed since that revision, then broadcasts the result.</li><li>Because the server orders operations, each client only needs to transform against its own unacknowledged edits.</li><li>This removes the need for full N-way transformation on clients and is far easier to reason about.</li><li>The cost is a coordinator: latency depends on the server, and the server must retain history for transformations.</li><li>Google Docs and Etherpad-style editors use this shape because it keeps client logic tractable.</li></ul>
+
+<div class="flow"><span class="flow-step">Client applies its edit locally, buffers it</span><span class="flow-arrow">→</span><span class="flow-step">Sends operation with its base revision</span><span class="flow-arrow">→</span><span class="flow-step">Server transforms against newer operations</span><span class="flow-arrow">→</span><span class="flow-step">Server assigns a new revision and broadcasts</span><span class="flow-arrow">→</span><span class="flow-step">Clients transform remote operations against pending locals</span><span class="flow-arrow">→</span><span class="flow-step">All sites converge on the same text</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>The client loop</h2>
+<ul><li>The client keeps a <strong>pending buffer</strong> of operations sent but not yet acknowledged by the server.</li><li>Local edits apply immediately and enter the buffer, giving instant feedback.</li><li>When a remote operation arrives, the client transforms it against every buffered local operation before applying it.</li><li>When the server acknowledges an operation, the client removes it from the buffer.</li><li>Acknowledgements must be matched by identifier; assuming order lets a lost ack corrupt the buffer.</li><li>If the client's revision is far behind, it may need to resync the whole document rather than transform a long history.</li><li>A reconnect must resend unacknowledged operations idempotently so retries do not duplicate text.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Cursors, selections, and presence</h2>
+<ul><li>A remote cursor is just a position, so it must be transformed by the same rules as edits.</li><li>Without transformation, cursors drift and appear to point at the wrong word.</li><li>Cursor <strong>affinity</strong> decides behaviour at boundaries: does the caret stick to the character before or after an insertion?</li><li>Selections are ranges and need both endpoints transformed plus overlap handling.</li><li>Presence updates are frequent and disposable, so they usually take a lossy path separate from document operations.</li><li>Comment anchors and highlights are positions too, so they need the same treatment as cursors.</li><li>Users notice cursor jumps immediately, making this a visible correctness signal rather than a cosmetic detail.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Why OT is difficult in practice</h2>
+<ul><li>The transformation function must handle every pair of operation types, and the matrix grows with each new operation.</li><li>Three-way concurrency exposes composition bugs that two-way tests never reach.</li><li>Undo is not the inverse of the original operation: it must be transformed against everything applied since.</li><li>Redo, history navigation, and branching undo stacks multiply the cases further.</li><li>Attribute and rich-text operations add a second dimension, because formatting ranges also shift.</li><li>The server must keep enough history to transform late operations, which conflicts with memory limits.</li><li>Correctness is hard to test: divergence may need a specific interleaving of three clients to appear.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes</h2>
+<ul><li><strong>Divergence:</strong> replicas silently hold different text because one transformation case was wrong.</li><li>A <strong>stuck client</strong> waits forever for an acknowledgement or revision that never arrives.</li><li>A <strong>duplicate operation</strong> from a retry inserts the same text twice without idempotency keys.</li><li><strong>Long offline edits</strong> force transformation against a large history, which is slow and error-prone.</li><li><strong>History truncation</strong> makes an old revision untransformable, so the client must be resynced.</li><li>A client that reconnects with a stale buffer can reintroduce edits the server already committed.</li><li>Divergence is the worst case because it is invisible until a user notices the document does not match.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>OT versus CRDTs</h2>
+<ul><li>OT needs a total order of operations; CRDTs encode ordering in the data itself.</li><li>OT keeps documents compact because it does not store per-character identifiers or tombstones.</li><li>CRDTs tolerate offline and peer-to-peer editing more naturally, at the cost of metadata growth.</li><li>OT server logic is harder to write correctly, while CRDT libraries are harder to bound in memory.</li><li>OT gives a central place to enforce permissions and validation; CRDTs accept any valid update.</li><li>Modern collaborative editors increasingly choose CRDTs for offline and multi-device support, while OT remains proven for server-centric editing.</li><li>The decision usually comes down to whether you can accept a central coordinator and whether offline editing is a first-class requirement.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>OT</th><th>CRDT</th></tr></thead><tbody><tr><td>Ordering</td><td>Server or total order</td><td>Encoded in the data</td></tr>
+<tr><td>Offline editing</td><td>Awkward</td><td>Native</td></tr>
+<tr><td>Document overhead</td><td>Low</td><td>Higher metadata</td></tr>
+<tr><td>Server role</td><td>Required for transformation</td><td>Optional sync relay</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Implementation checklist</h2>
+<ul><li>Define the smallest operation set that covers the product and keep it closed under transformation.</li><li>Write the transformation matrix explicitly and test every pair, including no-ops and overlapping deletes.</li><li>Fix a deterministic tie-break rule and apply it identically on server and client.</li><li>Tag operations with a client identifier, a sequence number, and a base revision.</li><li>Make operation application idempotent so retries and reconnects cannot duplicate edits.</li><li>Test with three or more simulated clients and randomised interleavings, not just two.</li><li>Bound server history with snapshots and force a resync when a client is too far behind.</li></ul>
+
+<div class="flow"><span class="flow-step">Model operations</span><span class="flow-arrow">→</span><span class="flow-step">Define transform for every pair</span><span class="flow-arrow">→</span><span class="flow-step">Pick a tie-break rule</span><span class="flow-arrow">→</span><span class="flow-step">Add revision and client IDs</span><span class="flow-arrow">→</span><span class="flow-step">Simulate N-way concurrency</span><span class="flow-arrow">→</span><span class="flow-step">Snapshot history and resync stragglers</span></div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Central ordering</strong> simplifies correctness but adds a coordinator, latency, and a single point of failure.</li><li><strong>Character-level operations</strong> merge precisely but generate far more messages than line-level ones.</li><li><strong>Local echo</strong> makes typing feel instant but forces pending buffers and transformation on every remote edit.</li><li><strong>Rich operation sets</strong> support better editing features but explode the transformation matrix.</li><li><strong>Long server history</strong> allows late operations to be transformed but costs memory and slows startup.</li><li><strong>Batching keystrokes</strong> reduces traffic but makes conflicts coarser and intention harder to preserve.</li><li><strong>OT over CRDTs</strong> keeps documents compact and server-controlled but handles offline editing poorly.</li><li><strong>Aggressive history truncation</strong> caps memory but forces expensive full resyncs.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is operational transformation?</summary><div class="answer"><p>A technique for collaborative editing where each edit is an operation that is applied locally at once and transformed against concurrent remote operations when they arrive. Transformation adjusts positions so every replica converges on the same document while each edit keeps its intent.</p></div></details>
+<details><summary>2. Why not just apply operations in arrival order?</summary><div class="answer"><p>Positions are indexes into a specific document state. A remote insert computed against an older state points at the wrong offset once local edits have shifted the text, so applying it directly duplicates or misplaces content.</p></div></details>
+<details><summary>3. What does the transform function actually do?</summary><div class="answer"><p>Given two concurrent operations, it rewrites one so it can be applied after the other while preserving intent. For example, a delete must be shifted by the length of an insert that landed before it, and overlapping deletes must be shrunk to avoid removing text twice.</p></div></details>
+<details><summary>4. What are TP1 and TP2?</summary><div class="answer"><p>TP1 says two concurrent operations, each transformed against the other, produce the same document. TP2 extends this to three or more concurrent operations and constrains how transformations compose, which is where naive implementations diverge.</p></div></details>
+<details><summary>5. Why is TP2 so hard?</summary><div class="answer"><p>It must hold for every combination of operation types and transformation paths, including cases only reachable with three concurrent editors. Classic counterexamples show that a locally consistent tie-break can still yield different documents depending on the order transforms are composed.</p></div></details>
+<details><summary>6. How does the central-server model work?</summary><div class="answer"><p>The server serialises operations and assigns each a revision. Clients send operations against the revision they saw; the server transforms them against newer operations and broadcasts the result. Clients only transform remote operations against their own unacknowledged edits.</p></div></details>
+<details><summary>7. What is a pending buffer for?</summary><div class="answer"><p>It holds local operations that have been applied and sent but not yet acknowledged. When a remote operation arrives, the client transforms it against everything in the buffer so the local edits are not overwritten or duplicated.</p></div></details>
+<details><summary>8. How do you handle two users inserting at the same position?</summary><div class="answer"><p>Apply both and order them with a deterministic tie-break such as client ID so every replica picks the same order. Without a shared rule, different sites could interleave the inserts differently and diverge.</p></div></details>
+<details><summary>9. Why is undo difficult in OT?</summary><div class="answer"><p>An undo cannot simply invert the original operation, because the document has changed since. The inverse must be transformed against every operation applied after it, and the undo stack itself may need transformation when remote edits arrive.</p></div></details>
+<details><summary>10. How do remote cursors stay correct?</summary><div class="answer"><p>Cursor positions are transformed like edits, with an affinity rule deciding whether the caret sticks to the character before or after an insertion at the boundary. Selections transform both endpoints and handle overlap.</p></div></details>
+<details><summary>11. What breaks when a client edits offline for a long time?</summary><div class="answer"><p>Its operations must be transformed against a long history, which is slow and exposes rare transformation cases. If the server has truncated that history, the client cannot be transformed at all and must resync the document.</p></div></details>
+<details><summary>12. OT or CRDT for a new collaborative editor?</summary><div class="answer"><p>OT is a good fit for server-centric editing where documents must stay compact and a coordinator is acceptable. CRDTs are better when offline, peer-to-peer, or multi-device editing is a first-class requirement, at the cost of metadata growth.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Handling only insert/insert and insert/delete, then diverging on overlapping deletes.</li><li>Using document position as identity instead of transforming positions.</li><li>Forgetting a deterministic tie-break for concurrent inserts at the same index.</li><li>Testing with two clients only, so TP2 failures never appear.</li><li>Assuming undo is the inverse of the original operation.</li><li>Letting server history grow unbounded, then running out of memory.</li><li>Retrying operations without idempotency keys, so a lost acknowledgement duplicates text.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="crdts.html"><span>← Previous</span><strong>CRDTs</strong></a><a class="next" href="saga-pattern.html"><span>Next →</span><strong>SAGA Pattern</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/operational-transformation">AlgoMaster — Operational Transformation</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HyperLogLog — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 97 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>HyperLogLog</h1>
+    <p class="dek">Data Structures for Scale · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/hyperloglog">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: how many distinct items?</a>
+<a href="#s2">Why exact counting gets expensive</a>
+<a href="#s3">What HyperLogLog is</a>
+<a href="#s4">The core observation: leading zeros are rare</a>
+<a href="#s5">Registers and stochastic averaging</a>
+<a href="#s6">The estimator</a>
+<a href="#s7">Accuracy and the precision knob</a>
+<a href="#s8">Small and large range corrections</a>
+<a href="#s9">Merging and distributed analytics</a>
+<a href="#s10">Implementations and variants</a>
+<a href="#s11">Limitations</a>
+<a href="#s12">When to use it</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>HyperLogLog estimates how many distinct items a stream contains by recording the longest run of leading zeros seen per register, so cardinality fits in kilobytes instead of a set of every ID.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>HyperLogLog</dt><dd>A probabilistic structure that estimates the number of distinct items in a multiset using a fixed, small array of registers.</dd></div><div class="term"><dt>Register</dt><dd>One small counter in the sketch that stores the maximum rank observed for the items hashed into it.</dd></div><div class="term"><dt>Precision (p)</dt><dd>The number of hash bits used to choose a register, giving <code>m = 2^p</code> registers and setting both memory and accuracy.</dd></div><div class="term"><dt>Rank</dt><dd>The position of the leftmost 1 bit in the remaining hash bits, equivalent to one plus the count of leading zeros.</dd></div><div class="term"><dt>Stochastic averaging</dt><dd>Splitting the stream across many registers and combining their estimates, which reduces variance compared with one counter.</dd></div><div class="term"><dt>Relative standard error</dt><dd>The typical relative error of the estimate, approximately <code>1.04 / sqrt(m)</code>.</dd></div><div class="term"><dt>Linear counting</dt><dd>The small-cardinality correction that behaves like counting occupied registers when few are set.</dd></div><div class="term"><dt>Sparse representation</dt><dd>A compact encoding used while few registers are non-zero, which is promoted to a full register array as cardinality grows.</dd></div><div class="term"><dt>Merge by maximum</dt><dd>Combining two sketches register by register with <code>max</code>, which yields the estimate for the union of both streams.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: how many distinct items?</h2>
+<p class="lede">A content platform wants to show how many unique readers each article received today.</p>
+<ul><li>The metric is distinct users, not total views: one person reading ten times counts once.</li><li>The exact approach keeps a set of user IDs per article and adds each viewer's ID.</li><li>Set semantics handle the deduplication automatically, and the final size is the answer.</li><li>This is correct and simple, and it works perfectly at small scale.</li><li>The trouble starts when the cardinality of each set becomes very large and the number of sets multiplies.</li><li>The question is whether the exact identity of each reader is actually needed, or only the count.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why exact counting gets expensive</h2>
+<ul><li>A popular article with tens of millions of unique readers needs hundreds of megabytes just for the IDs, before hash-set overhead.</li><li>That cost is per article per day, and platforms have enormous numbers of articles.</li><li>Every additional slice — week, month, country, device — needs its own set.</li><li>Combining exact counts across servers means shipping every ID to one place to deduplicate.</li><li>Retention multiplies the problem: keeping daily sets for a year multiplies memory by the number of days.</li><li>So exact distinct counts scale with <strong>cardinality times the number of slices</strong>, which is the wrong shape for analytics.</li><li>A fixed-size summary per slice would make cost independent of traffic volume.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Question</th><th>Exact set</th><th>HyperLogLog</th></tr></thead><tbody><tr><td>Unique readers today</td><td>Grows with readers</td><td>Fixed small size</td></tr>
+<tr><td>Unique readers this week</td><td>Re-dedupe all daily IDs</td><td>Merge the daily sketches</td></tr>
+<tr><td>Per country and device</td><td>One large set each</td><td>One small sketch each</td></tr>
+<tr><td>Across servers</td><td>Ship all IDs</td><td>Ship one sketch per server</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What HyperLogLog is</h2>
+<ul><li>It estimates cardinality from a fixed array of <code>m</code> registers, without storing any item.</li><li>Each item is hashed to a large integer; part of the hash picks a register, the rest determines a rank.</li><li>The register keeps the maximum rank it has seen, so each register summarizes a subset of the stream.</li><li>The estimate combines all registers, corrected for the expected statistical behavior of random hashes.</li><li>Accuracy depends on <code>m</code>, not on how many items were seen.</li><li>The structure is mergeable, which makes it a natural fit for distributed and time-bucketed analytics.</li><li>It answers "how many distinct" and nothing else: not which items, not how often.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The core observation: leading zeros are rare</h2>
+<ul><li>For a uniformly random hash, the probability of the first bit being 1 is one half.</li><li>The probability of starting with two zeros and then a one is one quarter, and so on, halving each time.</li><li>So observing <code>r</code> leading zeros before the first 1 is roughly as rare as one event in <code>2^r</code>.</li><li>If the rarest pattern you have seen requires <code>r</code> zeros, you have probably seen on the order of <code>2^r</code> distinct items.</li><li>A single maximum is far too noisy: one lucky hash would dominate the estimate.</li><li>The fix is to average many independent observations, which is exactly what splitting the hash space into registers does.</li><li>This is the entire intuition: cardinality is inferred from how rare the rarest hashes look.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Registers and stochastic averaging</h2>
+<ul><li>Use the first <code>p</code> bits of the hash to select one of <code>m = 2^p</code> registers.</li><li>Use the remaining bits to compute the rank: one plus the number of leading zeros, or the position of the first 1.</li><li>Store the maximum rank per register, since duplicates and ordering do not affect a maximum.</li><li>Each register therefore tracks the rarest hash among roughly <code>n/m</code> items.</li><li>Averaging across registers reduces variance by a factor of roughly <code>m</code>, which is the point of the split.</li><li>Averaging is done on <code>2^-rank</code> values, a harmonic mean, because that is the quantity with the right expectation.</li><li>Adding the same item twice changes nothing, which is why the structure estimates distinct counts rather than totals.</li></ul>
+
+<div class="flow"><span class="flow-step">Hash the item</span><span class="flow-arrow">→</span><span class="flow-step">First p bits pick a register</span><span class="flow-arrow">→</span><span class="flow-step">Remaining bits give the rank</span><span class="flow-arrow">→</span><span class="flow-step">Register keeps the maximum rank</span><span class="flow-arrow">→</span><span class="flow-step">Combine registers into an estimate</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>The estimator</h2>
+<ul><li>The classic estimator is <code>E = alpha * m^2 / sum(2^-M[j])</code> over all registers.</li><li>The denominator is a harmonic-style sum: registers with high ranks contribute tiny values, so they raise the estimate strongly.</li><li>The constant <code>alpha</code> corrects for the bias of the harmonic mean at a given <code>m</code>.</li><li>The estimate is then adjusted for small and large cardinalities, where the raw formula is biased.</li><li>The arithmetic is cheap: one pass over the registers, no data scan.</li><li>Estimates are not exact integers and should be rounded only at presentation time.</li><li>Implementations sometimes smooth small values with a different estimator entirely, because the raw formula is poor when few registers are set.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Accuracy and the precision knob</h2>
+<ul><li>The relative standard error is approximately <code>1.04 / sqrt(m)</code>, so accuracy improves with the square root of memory.</li><li>Doubling <code>m</code> multiplies memory by two and reduces error by about 1.4.</li><li>Each register needs only a handful of bits because ranks are small, which is why the whole sketch is tiny.</li><li><code>p</code> is usually chosen to give an error appropriate to the metric: dashboards tolerate more error than billing.</li><li>The error is statistical, not adversarial: it is a typical deviation, and individual results can fall outside it.</li><li>The same precision must be used for sketches that will be merged.</li><li>A larger sketch also reduces the chance that the hash space itself limits the maximum observable rank.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Small and large range corrections</h2>
+<ul><li>At small cardinalities most registers are still zero, and the raw estimator overestimates badly.</li><li><strong>Linear counting</strong> handles this by treating the number of occupied registers as a sample of a coupon-collector process.</li><li>Implementations switch to that estimate below a threshold related to <code>m</code>.</li><li>At extremely large cardinalities, hash collisions and the finite hash width make the estimate saturate.</li><li>A large-range correction compensates, and wider hashes reduce the problem.</li><li>A practical implementation therefore has three regimes: linear counting, the main estimator, and the large-range correction.</li><li>Skipping the corrections is the usual reason a home-grown sketch is wrong at both ends of the range.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Merging and distributed analytics</h2>
+<ul><li>Two sketches with the same precision merge by taking the register-wise maximum.</li><li>That is correct because each register's maximum is a summary of the union of the underlying streams.</li><li>Union is exact; intersection and difference are not directly computable from sketches.</li><li>Merging is associative and commutative, so aggregation order does not matter.</li><li>This allows per-server sketches to be shipped and combined at a fraction of the cost of shipping IDs.</li><li>Daily sketches can be merged into weekly and monthly views without storing raw events.</li><li>Sketches with different precisions cannot merge, so the parameter is part of the data contract.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Implementations and variants</h2>
+<ul><li><strong>Redis</strong> exposes <code>PFADD</code>, <code>PFCOUNT</code>, and <code>PFMERGE</code>, keeping each key to a small fixed footprint.</li><li>Redis uses a sparse encoding while cardinality is low and promotes to a dense register array as it grows.</li><li><strong>HyperLogLog++</strong> improves small-range accuracy with bias correction and a sparse representation.</li><li>Database and analytics engines embed sketches as aggregate types so dashboards can merge partial results.</li><li>Some systems ship a sketch per time bucket and merge at query time, avoiding pre-aggregation of every slice.</li><li>Variant differences matter mostly at low cardinality and at extreme scale.</li><li>Treat the sketch as an opaque serialized value with a version and precision, not as a portable raw array.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Limitations</h2>
+<ul><li>No membership test: you cannot ask whether a specific user was counted.</li><li>No per-item counts: it estimates distinct cardinality only.</li><li>No direct intersection or set difference; only union via merging.</li><li>Error is inherent and statistical, so two runs over the same data with different hash seeds can disagree slightly.</li><li>Small cardinalities need the correction path, and home-grown code usually gets this wrong.</li><li>Extremely large cardinalities approach the limits of the hash width.</li><li>Cost is per sketch: many slices mean many sketches, and cardinality per slice still multiplies storage.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When to use it</h2>
+<ul><li>Unique visitors, unique viewers, unique search queries, and any distinct-count metric over large streams.</li><li>Cardinality estimation for query planners and for capacity planning.</li><li>Distributed aggregation where shipping raw IDs is impossible or too expensive.</li><li>Real-time dashboards that need approximate counts within seconds of ingestion.</li><li>Do not use it when the exact count is contractual, when you must identify members, or when the set is small enough for a hash set.</li><li>Pair it with exact counting for the few dimensions that must be precise, and use sketches for the long tail of slices.</li><li>Choose it over a Bloom filter when the question is "how many" rather than "is this one present".</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Structure</th><th>Answers</th><th>Memory</th><th>Merge</th></tr></thead><tbody><tr><td>Hash set</td><td>Exact distinct count and membership</td><td>Grows with items</td><td>Union of sets</td></tr>
+<tr><td>HyperLogLog</td><td>Approximate distinct count</td><td>Fixed, small</td><td>Register max</td></tr>
+<tr><td>Bloom filter</td><td>Possible membership</td><td>Fixed, small</td><td>Bitwise OR</td></tr>
+<tr><td>Count-Min Sketch</td><td>Approximate frequency</td><td>Fixed, small</td><td>Counter sum</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Fixed memory</strong> makes cost independent of cardinality but gives up exactness and membership.</li><li><strong>More registers</strong> improve accuracy but increase memory and serialization size.</li><li><strong>Fewer registers</strong> shrink the sketch but widen the error band on every reported number.</li><li><strong>Merging by max</strong> makes union cheap but offers no way to compute intersection or difference.</li><li><strong>Sparse encoding</strong> saves memory at low cardinality but adds conversion complexity.</li><li><strong>Bias correction</strong> improves small-range accuracy but ties the data to a specific implementation version.</li><li><strong>Per-slice sketches</strong> keep dashboards flexible but multiply the number of sketches stored.</li><li><strong>Approximate counts</strong> reduce infrastructure cost but cannot support exact billing or audit.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What does HyperLogLog actually measure?</summary><div class="answer"><p>It estimates the number of distinct items in a multiset — the cardinality — using a fixed-size array of registers. Repeats contribute nothing because registers only keep a maximum. It cannot tell you which items were seen or how often each appeared.</p></div></details>
+<details><summary>2. Why does counting leading zeros estimate cardinality?</summary><div class="answer"><p>For a uniform hash, <code>r</code> leading zeros before the first one occurs with probability about <code>2^-r</code>. So the rarest pattern observed suggests a set size on the order of <code>2^r</code>. A single maximum is too noisy, so the hash space is split into many registers whose observations are averaged.</p></div></details>
+<details><summary>3. Why split into registers instead of one counter?</summary><div class="answer"><p>One maximum has enormous variance: a single lucky hash dominates the estimate. Using <code>m</code> registers means each summarizes a smaller slice of the stream, and combining them reduces variance by roughly a factor of <code>m</code>. That is stochastic averaging.</p></div></details>
+<details><summary>4. How accurate is it?</summary><div class="answer"><p>The relative standard error is about <code>1.04 / sqrt(m)</code>, so accuracy improves with the square root of register count. That is a typical deviation, not a hard bound. Doubling registers cuts error by about 1.4, which is why the sketch stays small.</p></div></details>
+<details><summary>5. What does the precision parameter control?</summary><div class="answer"><p>It sets how many hash bits select a register, so it fixes <code>m = 2^p</code>. That determines both memory and error. All sketches that will be merged must use the same precision, so it is part of the schema.</p></div></details>
+<details><summary>6. Why are there special cases for small and large counts?</summary><div class="answer"><p>When few registers are set, the raw harmonic estimator overestimates, so implementations use linear counting based on occupied registers. At extreme cardinalities the finite hash width causes saturation, so a large-range correction applies. Both corrections are needed for the estimate to be usable across the whole range.</p></div></details>
+<details><summary>7. How do you merge two sketches?</summary><div class="answer"><p>Take the register-wise maximum, because each register's maximum summarizes the union of the streams. Merging is associative, so partial results can be combined in any order. This is what makes distributed distinct counts practical.</p></div></details>
+<details><summary>8. Can you compute the intersection of two audiences?</summary><div class="answer"><p>Not directly. Union is available through merging, but intersection and difference cannot be derived from cardinality sketches alone, because they lose the identities that overlap detection needs. Inclusion-exclusion over union and individual counts only works if you also know the intersection, which you do not.</p></div></details>
+<details><summary>9. How would you count unique readers per article per day?</summary><div class="answer"><p>Keep one sketch per article per day, updated on each view, and merge them for weekly or monthly totals. Sketches stay tiny, so many slices fit in memory or a small store. If a specific reader must be verified, keep a separate exact source for that case.</p></div></details>
+<details><summary>10. HyperLogLog or an exact set?</summary><div class="answer"><p>Use an exact set when the cardinality is modest, when you need membership, or when the number is contractual. Use HyperLogLog when cardinality is huge, many slices are tracked, and a small relative error is acceptable. The decision is about whether identity matters, not just size.</p></div></details>
+<details><summary>11. HyperLogLog or Count-Min Sketch?</summary><div class="answer"><p>HyperLogLog answers "how many distinct items" and ignores repetition. Count-Min Sketch answers "how often did this item appear" and overestimates. Both are tiny fixed-size summaries, but they answer different questions and are not interchangeable.</p></div></details>
+<details><summary>12. What breaks if two teams use different precisions?</summary><div class="answer"><p>Their sketches cannot be merged, and forcing a merge by padding or truncating produces a biased estimate. Precision, hash seed, and implementation version form a contract. The safe approach is to fix them centrally and version the serialized format.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Using HyperLogLog to answer membership or per-item frequency questions.</li><li>Skipping small-range correction and reporting badly inflated counts for low-cardinality slices.</li><li>Merging sketches built with different precisions or hash seeds.</li><li>Treating the error bound as a hard guarantee rather than a standard deviation.</li><li>Assuming intersections can be derived from merged cardinalities.</li><li>Keeping one sketch per tiny slice without bounding the number of slices, so storage still explodes.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="count-min-sketch.html"><span>← Previous</span><strong>Count-Min Sketch</strong></a><a class="next" href="merkle-trees.html"><span>Next →</span><strong>Merkle Trees</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/hyperloglog">AlgoMaster — HyperLogLog</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

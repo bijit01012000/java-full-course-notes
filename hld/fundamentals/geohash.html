@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geohash — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 89 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Geohash</h1>
+    <p class="dek">Data Structures for Scale · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/geohash">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why one index is not enough</a>
+<a href="#s2">What a geohash is</a>
+<a href="#s3">Encoding step one: bisecting the ranges</a>
+<a href="#s4">Interleaving the bits and Base32</a>
+<a href="#s5">Precision levels</a>
+<a href="#s6">Prefixes, storage, and prefix queries</a>
+<a href="#s7">The boundary problem</a>
+<a href="#s8">Neighbor search and choosing precision</a>
+<a href="#s9">Filtering by actual distance</a>
+<a href="#s10">End-to-end flow and moving objects</a>
+<a href="#s11">Limitations</a>
+<a href="#s12">Beyond nearby search</a>
+<a href="#s13">Real systems and when to use it</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A geohash turns a latitude and longitude into a short sortable string, so an ordinary B-tree index can answer "what is near this point?" with a few prefix scans instead of a two-dimensional search.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Geohash</dt><dd>A short Base32 string that encodes a rectangular cell on the Earth's surface; longer strings mean smaller cells.</dd></div><div class="term"><dt>Cell</dt><dd>The rectangle represented by one geohash prefix at a given length; every point inside it shares that prefix.</dd></div><div class="term"><dt>Prefix property</dt><dd>Locations in the same cell share the leading characters of their geohash, which is what makes a range scan on a string index work.</dd></div><div class="term"><dt>Morton code (Z-order curve)</dt><dd>The interleaving of longitude and latitude bits so that a two-dimensional point becomes one ordered value.</dd></div><div class="term"><dt>Base32 alphabet</dt><dd>The 32-character set used to write five bits per character; <code>a</code>, <code>i</code>, <code>l</code>, and <code>o</code> are omitted to avoid misreading.</dd></div><div class="term"><dt>Neighbor cell</dt><dd>One of the eight cells surrounding a given cell; together with the cell itself they form the 3&times;3 grid used for radius search.</dd></div><div class="term"><dt>Covering set</dt><dd>The collection of cells whose union contains the search area, used when the radius is much larger than one cell.</dd></div><div class="term"><dt>Two-phase filter</dt><dd>Cheap index lookup to get candidate rows by cell, followed by an exact distance computation on only those candidates.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why one index is not enough</h2>
+<p class="lede">A food-delivery app wants every restaurant within 500 meters of the user. Restaurants already have a latitude and a longitude, so it looks like a solved problem.</p>
+<ul><li>A separate index on <code>latitude</code> and on <code>longitude</code> still leaves the database to combine two independent ranges.</li><li>A B-tree organizes values in <strong>one dimension</strong>: it can seek to a latitude band quickly, but it cannot also narrow by longitude in the same descent.</li><li>Driving the query from the latitude index produces a strip that wraps around the entire globe, and every row in that strip must be filtered by longitude.</li><li>With millions of rows the strip is enormous relative to the handful of results, so most of the I/O is wasted.</li><li>The fix is to represent the 2D location as <strong>one value that sorts meaningfully</strong>, so a single index range scan returns a compact candidate set.</li></ul>
+
+
+<div class="note">The strip is worse the closer the query is to the poles, because a degree of longitude covers less ground there.</div>
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a geohash is</h2>
+<ul><li>A geohash converts a coordinate pair into a short string of letters and digits, for example <code>9q8yyk8</code>.</li><li>Each string identifies a <strong>rectangle</strong>, not a point: every coordinate inside that rectangle encodes to the same string.</li><li>The string length sets the precision, and each extra character subdivides the previous rectangle into 32 smaller ones.</li><li>Shorter strings cover continents and regions; longer strings narrow down to a neighborhood, a block, or a building.</li><li>Because nearby points usually land in the same or adjacent cells, they usually share a leading substring.</li><li>This turns a two-dimensional proximity question into a <strong>string prefix search</strong>, which any ordered index already supports.</li><li>The encoding is deterministic, so the same coordinates always produce the same key — a requirement for using it as a stored index value.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Encoding step one: bisecting the ranges</h2>
+<ul><li>Longitude spans <code>[-180, 180]</code> and latitude spans <code>[-90, 90]</code>; each dimension is bisected independently.</li><li>At each step, compare the value with the midpoint of the current interval and emit <strong>0 for the lower half, 1 for the upper half</strong>.</li><li>Then keep the half that contains the value and repeat, halving the interval every time.</li><li>Each bisection adds one bit of precision, so after <em>n</em> steps the coordinate is pinned to an interval of width <code>range / 2^n</code>.</li><li>Longitude and latitude are processed as two separate bit sequences of the same length.</li><li>The process is equivalent to writing the coordinate in binary and keeping the leading fractional bits.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Step</th><th>Longitude range</th><th>Midpoint</th><th>-122.4 is</th><th>Bit</th></tr></thead><tbody><tr><td>1</td><td>[-180, 180]</td><td>0</td><td>Left</td><td>0</td></tr>
+<tr><td>2</td><td>[-180, 0]</td><td>-90</td><td>Left</td><td>0</td></tr>
+<tr><td>3</td><td>[-180, -90]</td><td>-135</td><td>Right</td><td>1</td></tr>
+<tr><td>4</td><td>[-135, -90]</td><td>-112.5</td><td>Left</td><td>0</td></tr>
+<tr><td>5</td><td>[-135, -112.5]</td><td>-123.75</td><td>Right</td><td>1</td></tr></tbody></table></div>
+
+<div class="note">For San Francisco the latitude bits start <code>1 0 1 1 0</code>, because 37.8 is above 0, below 45, above 22.5, above 33.75, and below 39.375.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Interleaving the bits and Base32</h2>
+<ul><li>The two bit sequences are merged by taking longitude first, then latitude, then the next longitude bit, and so on.</li><li>Interleaving keeps both dimensions balanced: every extra pair of bits shrinks the rectangle horizontally <em>and</em> vertically.</li><li>This interleaving is a <strong>Morton code</strong>, also called a Z-order curve, because the order traces a Z-shaped path through the grid.</li><li>The combined bit stream is then cut into groups of five bits, and each group becomes one character.</li><li>A five-bit group has 32 possible values, so the alphabet is Base32: digits plus lowercase letters, minus the easily confused <code>a</code>, <code>i</code>, <code>l</code>, and <code>o</code>.</li><li>San Francisco's first ten bits produce <code>9</code> then <code>q</code>, which is why every geohash in the city begins <code>9q</code>.</li></ul>
+
+<div class="flow"><span class="flow-step">Bisect longitude, emit bits</span><span class="flow-arrow">→</span><span class="flow-step">Bisect latitude, emit bits</span><span class="flow-arrow">→</span><span class="flow-step">Interleave lon, lat, lon, lat</span><span class="flow-arrow">→</span><span class="flow-step">Group into 5-bit chunks</span><span class="flow-arrow">→</span><span class="flow-step">Map each chunk to a Base32 character</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Precision levels</h2>
+<ul><li>Every added character contributes five more bits, dividing the current cell by 32.</li><li>Cell height is roughly constant for a given length; cell <strong>width shrinks toward the poles</strong> because lines of longitude converge.</li><li>The table below gives the usual approximate sizes near the equator — treat them as magnitudes, not exact constants.</li><li>Pick a length from the search radius, not from a habit: a radius search needs cells at least as large as the radius.</li><li>The same length therefore means different ground distances in Nairobi and in Reykjavik.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Length</th><th>Cell width</th><th>Cell height</th><th>Roughly</th></tr></thead><tbody><tr><td>1</td><td>~5,000 km</td><td>~5,000 km</td><td>A continent</td></tr>
+<tr><td>3</td><td>~156 km</td><td>~156 km</td><td>A metro region</td></tr>
+<tr><td>4</td><td>~39 km</td><td>~19.5 km</td><td>A city</td></tr>
+<tr><td>5</td><td>~4.9 km</td><td>~4.9 km</td><td>A town or district</td></tr>
+<tr><td>6</td><td>~1.2 km</td><td>~0.6 km</td><td>A neighborhood</td></tr>
+<tr><td>7</td><td>~153 m</td><td>~153 m</td><td>A city block</td></tr>
+<tr><td>8</td><td>~38 m</td><td>~19 m</td><td>A building</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Prefixes, storage, and prefix queries</h2>
+<ul><li>Cells nest: the cell for <code>9q8</code> strictly contains every cell whose string starts with <code>9q8</code>.</li><li>So a common prefix of length <em>k</em> guarantees both points are inside the same cell of precision <em>k</em>.</li><li>Store the geohash in an ordinary string column and keep the raw latitude and longitude too, because exact distance needs the original numbers.</li><li>Create a normal B-tree index on the geohash column; no spatial extension is required.</li><li>A prefix query becomes <code>WHERE geohash LIKE '9q8yyk%'</code>, which the index answers as a range scan: seek to the first match and stop when the prefix no longer matches.</li><li>Some databases need an explicit operator class (PostgreSQL's <code>text_pattern_ops</code>) before a <code>LIKE</code> prefix can use the index at all.</li><li>The same scan can be written as a string range, for example <code>geohash &gt;= '9q8yyk' AND geohash &lt; '9q8yyl'</code>, because <code>l</code> is the next character after <code>k</code> in the alphabet.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The boundary problem</h2>
+<ul><li>A user standing just inside one cell can be meters away from a restaurant just inside the next cell.</li><li>Those two locations may share a very short prefix, or in the worst case no prefix at all.</li><li>Two points a couple of meters apart on opposite sides of the equator or the prime meridian can have geohashes with completely different first characters.</li><li>So the implication runs one way only: <strong>shared prefix implies close, but close does not imply shared prefix</strong>.</li><li>Searching a single cell therefore silently drops true neighbors, which is the classic geohash bug: flawless in a demo, lossy near cell edges in production.</li><li>The bug is invisible in metrics unless you specifically test points near boundaries.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Neighbor search and choosing precision</h2>
+<ul><li>Every cell has eight neighbors — north, south, east, west, and four diagonals — forming a 3&times;3 block with the user's cell.</li><li>Querying all nine cells covers everything within one cell width and height of the user, whichever side of a boundary they are on.</li><li>The nine prefix scans can be issued as one <code>IN</code> query or nine range scans; either way they are small index seeks.</li><li>Nine lookups are far cheaper than scanning a latitude strip that circles the planet.</li><li>Most geohash libraries provide a neighbor function; hand-rolling it is where date-line and pole bugs enter.</li><li>For the 3&times;3 rule to be correct, the cell must be at least as wide and tall as the search radius.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Length</th><th>Cell size</th><th>3&times;3 reach</th><th>500 m search</th></tr></thead><tbody><tr><td>5</td><td>~4.9 km</td><td>~15 km</td><td>Correct, but far too many candidates</td></tr>
+<tr><td>6</td><td>~1.2 km &times; 0.6 km</td><td>~3.6 km &times; 1.8 km</td><td>Correct, small candidate set</td></tr>
+<tr><td>7</td><td>~153 m</td><td>~460 m</td><td>Can miss places 400 m away</td></tr></tbody></table></div>
+
+<div class="note">If the radius is much larger than one cell, generate a covering set of cells instead of a fixed 3&times;3 block, and measure candidate counts in both dense and sparse regions.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Filtering by actual distance</h2>
+<ul><li>The nine cells form a <strong>rectangle</strong>, but the requirement is a circle, so corner candidates can be too far away.</li><li>Run an exact distance calculation on each candidate, typically the Haversine formula or the database's distance function.</li><li>Drop candidates beyond the radius, then sort the rest by distance before returning them.</li><li>This two-phase pattern — cheap index narrowing, then exact geometry — is standard in spatial queries.</li><li>The index is allowed to be approximate because the final filter is exact.</li><li>In a real app the spatial filter is combined with other predicates such as open-now or delivers-to-this-area, and those can be applied in the same query.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>End-to-end flow and moving objects</h2>
+<ul><li>On write, compute the geohash for the restaurant's coordinates and store it alongside latitude and longitude.</li><li>On read, encode the user's position, compute the eight neighbors, run nine prefix scans, distance-filter, and sort.</li><li>Location updates for moving objects follow the same path: recompute the geohash and update the stored row or key.</li><li>GPS pings arrive every few seconds, so writing a relational row per ping is usually the wrong shape.</li><li>Keep the latest driver position in a fast in-memory store and let TTLs or heartbeats remove drivers who go offline.</li><li>Keep <strong>live position state</strong> separate from the append-only history of location events, because they have different write rates and retention needs.</li></ul>
+
+<div class="flow"><span class="flow-step">Encode user location to a 6-character geohash</span><span class="flow-arrow">→</span><span class="flow-step">Compute the 8 neighboring cells</span><span class="flow-arrow">→</span><span class="flow-step">Prefix-scan all 9 cells for candidates</span><span class="flow-arrow">→</span><span class="flow-step">Compute exact Haversine distance</span><span class="flow-arrow">→</span><span class="flow-step">Filter by radius and sort</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Limitations</h2>
+<ul><li><strong>Uneven cell sizes:</strong> the grid splits degrees evenly, but a degree of longitude is widest at the equator and shrinks to nothing at the poles.</li><li><strong>Fixed grid:</strong> the cell size cannot adapt to density, so a downtown cell may hold thousands of rows while a rural cell of the same size holds none.</li><li>Dense cells return large candidate sets that all need distance filtering, which erodes the benefit of the index.</li><li><strong>Date line:</strong> points just east and west of 180&deg; are physically close but sit at opposite ends of the string range, so neighbor logic needs wraparound.</li><li><strong>Poles:</strong> cells become extremely thin and the 3&times;3 coverage argument becomes unreliable.</li><li>The structure indexes <strong>points only</strong>; polygons, routes, and delivery zones do not fit one key without duplication.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Beyond nearby search</h2>
+<ul><li>Because a cell is a grouping key, geohashes aggregate data by area: count ride requests per 6-character cell to build a heat map.</li><li>Shortening the prefix rolls smaller cells up into larger ones, so one dataset supports several zoom levels.</li><li>Prefixes also work as <strong>partition keys</strong>: send every driver whose geohash starts <code>9q</code> to the same shard.</li><li>The same density skew reappears here — a partition covering a busy city receives far more traffic than a rural one.</li><li>Fix hot partitions by splitting busy prefixes into longer prefixes or by giving them more capacity.</li><li>Prefix-based partitioning keeps related locations together, which helps local queries but concentrates load.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Real systems and when to use it</h2>
+<ul><li><strong>Redis</strong> stores locations in sorted sets using a geohash-derived score, so a score range narrows candidates before exact distance filtering; prefer <code>GEOSEARCH</code> over the older <code>GEORADIUS</code>.</li><li>Redis fits live, in-memory data such as driver positions, but the working set must fit in memory.</li><li><strong>Elasticsearch</strong> offers geohash grid aggregations for grouping documents by area, plus distance queries on <code>geo_point</code> fields.</li><li>A <strong>plain indexed column</strong> is often enough, and its portability is the main attraction: no spatial database required.</li><li>If the database already has strong spatial support — PostGIS, MongoDB <code>2dsphere</code> — use it for proximity and keep geohash for sharding, caching, or grouping.</li><li>Write the encoder yourself only to learn it: pole handling, date-line wrapping, precision choice, and covering generation are all easy to get subtly wrong, so production code should use a maintained library.</li><li>Choose a quadtree when data is very uneven, S2 or H3 at global scale, and an R-tree when the objects are shapes rather than points.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Method</th><th>Strength</th><th>Weakness</th><th>Good fit</th></tr></thead><tbody><tr><td>Geohash</td><td>Plain string key, prefix scans, any ordered index</td><td>Boundaries, rectangular cells, pole distortion</td><td>Nearby search on a normal database, heat maps, sharding</td></tr>
+<tr><td>Quadtree</td><td>Adapts to dense and sparse regions</td><td>Custom code, needs rebalancing</td><td>Uneven data, in-memory indexes</td></tr>
+<tr><td>S2</td><td>Consistent global coverage, handles poles and date line</td><td>More complex than geohash</td><td>Global systems, region coverings</td></tr>
+<tr><td>H3</td><td>Hexagons of similar area, equidistant neighbors</td><td>Cells do not nest perfectly</td><td>Spatial analytics, marketplace balancing</td></tr>
+<tr><td>R-tree</td><td>Indexes shapes as well as points</td><td>Needs spatial database support</td><td>Delivery zones, boundaries</td></tr></tbody></table></div>
+
+<pre class="code"><code>-- Prefix scan (needs text_pattern_ops to use the index)
+SELECT id, lat, lng FROM restaurants
+WHERE geohash LIKE &#x27;9q8yyk%&#x27;;
+
+-- Equivalent explicit range: &#x27;m&#x27; follows &#x27;k&#x27; in the alphabet
+SELECT id, lat, lng FROM restaurants
+WHERE geohash &gt;= &#x27;9q8yyk&#x27; AND geohash &lt; &#x27;9q8yyl&#x27;;</code></pre>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>One string key</strong> makes geohash portable to any ordered index, but it flattens a sphere onto a grid and inherits the distortion.</li><li><strong>Longer geohashes</strong> shrink candidate sets but risk missing neighbors unless the 3&times;3 search still covers the radius.</li><li><strong>Shorter geohashes</strong> guarantee coverage but return many candidates that must be distance-filtered.</li><li><strong>Nine prefix scans</strong> fix the boundary bug at the cost of roughly nine index seeks instead of one.</li><li><strong>Fixed cell sizes</strong> keep encoding trivial but waste work in dense areas and waste cells in empty ones.</li><li><strong>Prefix partitioning</strong> keeps nearby data co-located but concentrates traffic on popular regions.</li><li><strong>Storing raw coordinates alongside</strong> duplicates data but is mandatory for exact distance and for re-encoding at other precisions.</li><li><strong>Geohash over native spatial indexes</strong> maximizes portability but gives up polygon support and globe-correct geometry.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why is a normal B-tree index on latitude and longitude not enough?</summary><div class="answer"><p>A B-tree orders values along one dimension, so it can seek a latitude band or a longitude band but not intersect both cheaply. Driving from one column leaves a strip that spans the other dimension entirely, and every row in it must be filtered. A geohash collapses both coordinates into one sortable value so a single range scan returns a small candidate set.</p></div></details>
+<details><summary>2. How is a geohash actually computed?</summary><div class="answer"><p>Bisect the longitude range and the latitude range independently, emitting a 0 or 1 at each step depending on which half contains the value. Interleave the two bit streams starting with longitude — a Morton code — then cut the result into five-bit groups and map each group to a Base32 character.</p></div></details>
+<details><summary>3. What does a geohash represent: a point or an area?</summary><div class="answer"><p>An area. Every coordinate inside the rectangle encodes to the same string, and the string length determines the rectangle's size. This is why geohash is an index key rather than a precise location: the raw latitude and longitude are still needed for exact distance.</p></div></details>
+<details><summary>4. Why do nearby points sometimes share no prefix?</summary><div class="answer"><p>Because cell boundaries are arbitrary with respect to the data. Two points a few meters apart can sit in different cells, and near the equator, the prime meridian, or the date line their strings can differ from the first character. Proximity implies a shared prefix only in the other direction.</p></div></details>
+<details><summary>5. How do you fix the boundary problem?</summary><div class="answer"><p>Search the eight neighboring cells as well, so the 3&times;3 block covers everything within one cell width and height. For this to be correct, the chosen cell must be at least as large as the search radius, or you must generate a covering set of cells instead.</p></div></details>
+<details><summary>6. How do you pick the geohash precision for a radius search?</summary><div class="answer"><p>Pick the longest length whose cell is still at least as wide and tall as the radius, so the 3&times;3 grid reaches the full circle. Then measure candidate counts in both dense and sparse areas, because the same length behaves differently at different latitudes and densities.</p></div></details>
+<details><summary>7. Why is a distance filter still needed after the prefix scan?</summary><div class="answer"><p>The nine cells form a rectangle while the requirement is a circle, so corner candidates can lie outside the radius. Haversine or a database distance function removes them, and the result is sorted by distance. The index narrows, the geometry decides.</p></div></details>
+<details><summary>8. What happens to geohash accuracy near the poles?</summary><div class="answer"><p>Cells keep roughly the same height but become very narrow in ground distance, because lines of longitude converge. Coverage arguments based on cell width break down, and neighbor logic becomes unreliable. A spherical index such as S2 handles polar and date-line geometry properly.</p></div></details>
+<details><summary>9. How would you find all drivers within 2 km of a rider?</summary><div class="answer"><p>Encode the rider's position, choose a precision whose cells cover 2 km, and scan the 3&times;3 block of cells holding live driver positions — typically in memory with TTLs. Then compute exact distance, filter, and sort. History belongs in a separate store, not in the live position table.</p></div></details>
+<details><summary>10. How can geohash be used for sharding?</summary><div class="answer"><p>Use a geohash prefix as the partition key so nearby locations land on the same shard, which keeps local queries single-shard. The cost is skew: a prefix covering a dense city handles far more traffic than a rural one, so busy prefixes need splitting or extra capacity.</p></div></details>
+<details><summary>11. When would you not choose geohash?</summary><div class="answer"><p>When the data is highly uneven (a quadtree adapts), when the system is global and polar or date-line correctness matters (S2 or H3), or when the objects are polygons and lines rather than points (an R-tree). Geohash indexes points well and shapes poorly.</p></div></details>
+<details><summary>12. Why keep latitude and longitude if the geohash is already stored?</summary><div class="answer"><p>The geohash identifies a cell, not a position, so exact distance and sorting need the original coordinates. The coordinates also let you re-encode at a different precision later without going back to the source data.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Querying only the user's own cell and calling the feature done — results vanish near boundaries in production.</li><li>Choosing a geohash length without checking that the 3&times;3 block still reaches the search radius.</li><li>Forgetting <code>text_pattern_ops</code> or the equivalent, so the prefix query silently falls back to a full scan.</li><li>Assuming a shared prefix is required for proximity; the implication only holds in one direction.</li><li>Applying exact-distance filtering to millions of rows instead of to the small candidate set.</li><li>Sharding by geohash prefix and ignoring that dense regions become hot partitions.</li><li>Expecting one geohash key to index a delivery polygon without duplicating it into every overlapping cell.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="outbox-pattern.html"><span>← Previous</span><strong>Outbox Pattern</strong></a><a class="next" href="quad-tree.html"><span>Next →</span><strong>Quad Trees</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/geohash">AlgoMaster — Geohash</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

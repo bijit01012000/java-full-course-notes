@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Encryption at Rest — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 126 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Encryption at Rest</h1>
+    <p class="dek">Advanced Security · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/encryption-at-rest">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The threat: reading the storage instead of the database</a>
+<a href="#s2">What encryption at rest means</a>
+<a href="#s3">What it protects against — and what it does not</a>
+<a href="#s4">The layers where encryption can be applied</a>
+<a href="#s5">Key hierarchy and envelope encryption</a>
+<a href="#s6">Key management is the hard part</a>
+<a href="#s7">Rotation</a>
+<a href="#s8">The cost: what encryption breaks</a>
+<a href="#s9">Backups, snapshots, and derived copies</a>
+<a href="#s10">Crypto-shredding and deletion</a>
+<a href="#s11">Operational failure modes</a>
+<a href="#s12">Choosing a design</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Encryption at rest assumes the storage itself will be stolen — a discarded disk, a public backup bucket, a shared snapshot — and makes the bytes useless without a key that lives somewhere else.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Encryption at rest</dt><dd>Encrypting data while it is stored — on disk, in a database, in object storage, or in a backup — so raw files are unreadable without the key.</dd></div><div class="term"><dt>Data encryption key (DEK)</dt><dd>The symmetric key that actually encrypts a record, file, or volume; it is itself protected by a key-encryption key.</dd></div><div class="term"><dt>Key encryption key (KEK)</dt><dd>A longer-lived key, held in a KMS or HSM, used to wrap and unwrap data encryption keys rather than to encrypt data directly.</dd></div><div class="term"><dt>Envelope encryption</dt><dd>Encrypting the data with a DEK and then encrypting or wrapping that DEK with a KEK, so the DEK can be rotated cheaply.</dd></div><div class="term"><dt>KMS</dt><dd>A key management service that generates, stores, authorizes access to, rotates, and audits the use of cryptographic keys.</dd></div><div class="term"><dt>Transparent data encryption (TDE)</dt><dd>Database-level encryption of files and pages that is invisible to queries, so the engine decrypts on read and encrypts on write.</dd></div><div class="term"><dt>Field-level encryption</dt><dd>Encrypting specific columns or attributes in the application before storage, giving the finest granularity and the strongest isolation from the database operator.</dd></div><div class="term"><dt>Key rotation</dt><dd>Replacing a key with a new version, ideally without rewriting all data by rewrapping the DEK instead.</dd></div><div class="term"><dt>Crypto-shredding</dt><dd>Destroying the key so the encrypted data becomes permanently unrecoverable, which is faster and more reliable than deleting every copy.</dd></div><div class="term"><dt>HSM</dt><dd>A hardware security module that stores keys and performs cryptographic operations in tamper-resistant hardware, so keys never leave it in the clear.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The threat: reading the storage instead of the database</h2>
+<p class="lede">Access controls, network rules, and database passwords only apply when an attacker goes through the database. Many incidents never touch it.</p>
+<ul><li>A disk or drive is decommissioned or resold without being properly wiped.</li><li>A backup file is written to a storage bucket that was accidentally made public.</li><li>A database snapshot is shared with the wrong account or copied to a test environment.</li><li>A storage volume is detached and attached to an attacker-controlled instance.</li><li>An insider or a compromised service account reads object storage directly, bypassing the query layer.</li><li>In all of these cases the attacker reads raw bytes, so plaintext storage means every record is exposed.</li><li>Encryption at rest is the control that makes those bytes worthless without the key.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What encryption at rest means</h2>
+<ul><li>Data is transformed with a cipher and a key before it is written to persistent storage, and decrypted only when legitimately read.</li><li>It complements encryption in transit: transit protects data moving between systems, at rest protects data sitting in storage.</li><li>The ciphertext is only as safe as the key; if the key is stored next to the data, the encryption is mostly theater.</li><li>It applies to more than the primary database: backups, snapshots, replicas, caches, message queues, log stores, and analytics copies.</li><li>Modern cloud storage and managed databases often enable it by default, which makes <em>is it on</em> a weak question and <em>who can use the key</em> the real one.</li><li>The design question is not whether to encrypt but at which layer, under whose key control, and with what granularity.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What it protects against — and what it does not</h2>
+<ul><li><strong>Protects:</strong> stolen or improperly disposed media, leaked backups, misconfigured public storage, and snapshot sharing.</li><li><strong>Protects:</strong> the storage provider or an operator with physical access but no key access.</li><li><strong>Does not protect:</strong> a compromised application that legitimately decrypts data before returning it.</li><li><strong>Does not protect:</strong> SQL injection, authorization bugs, or an attacker with valid credentials — the data is decrypted for them.</li><li><strong>Does not protect:</strong> metadata such as row counts, access patterns, and file sizes, which can still leak information.</li><li>It reduces the blast radius of storage exposure; it is not a substitute for authentication, authorization, and input validation.</li><li>Treat it as one layer in defense in depth, specifically the layer that covers <em>the disk walked away</em>.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Scenario</th><th>Protected?</th><th>Why</th></tr></thead><tbody><tr><td>Disk stolen from a datacenter</td><td>Yes</td><td>Ciphertext without the key</td></tr>
+<tr><td>Public backup bucket</td><td>Yes, if the key is not in the bucket</td><td>Objects are ciphertext</td></tr>
+<tr><td>SQL injection reading rows</td><td>No</td><td>The database decrypts on read</td></tr>
+<tr><td>Compromised app credentials</td><td>No</td><td>The app has both data access and key access</td></tr>
+<tr><td>Snapshot shared with another account</td><td>Depends</td><td>Only if the key is not shared with it</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The layers where encryption can be applied</h2>
+<ul><li><strong>Disk or volume:</strong> full-disk encryption at the block layer; protects against physical theft, transparent to everything above.</li><li><strong>Database or filesystem (TDE):</strong> the engine encrypts pages and files; queries are unchanged, but anyone with database credentials sees plaintext.</li><li><strong>Object storage:</strong> server-side encryption where the provider holds the key, holds a key you supply per request, or uses a key from your KMS.</li><li><strong>Application-level:</strong> the service encrypts specific fields before writing; the database only ever stores ciphertext.</li><li><strong>Client-side:</strong> the end user's device encrypts before upload; the server cannot read the data at all.</li><li>Higher layers give finer granularity and stronger separation from the storage operator, but lose query capability and require key handling in code.</li><li>Many systems combine layers: volume encryption for everything, plus field-level encryption for the most sensitive attributes.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Granularity</th><th>Who can read plaintext</th><th>Query impact</th></tr></thead><tbody><tr><td>Disk / volume</td><td>Whole device</td><td>Anything that mounts it</td><td>None</td></tr>
+<tr><td>Database TDE</td><td>Files and pages</td><td>Anyone with database access</td><td>None</td></tr>
+<tr><td>Object storage SSE</td><td>Object</td><td>Provider or key holder</td><td>None</td></tr>
+<tr><td>Application field-level</td><td>Column or attribute</td><td>The application only</td><td>Encrypted fields lose indexing and range queries</td></tr>
+<tr><td>Client-side</td><td>Record, per user</td><td>The client only</td><td>Server cannot search or process</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Key hierarchy and envelope encryption</h2>
+<p class="lede">Encrypting data directly with a long-lived master key is inflexible: rotating it means rewriting everything. Envelope encryption decouples the two.</p>
+<ul><li>Generate a <strong>DEK</strong> per object, per tenant, or per time period, and encrypt the data with it.</li><li>Store the encrypted data alongside the <strong>wrapped DEK</strong> — the DEK encrypted under a <strong>KEK</strong> held in a KMS or HSM.</li><li>On read, ask the KMS to unwrap the DEK, decrypt the data, and discard the plaintext key from memory.</li><li>Rotation of the KEK only requires rewrapping DEKs, not re-encrypting the data.</li><li>The KEK is protected by a root key in hardware, so the plaintext KEK never exists in application memory.</li><li>Per-tenant or per-object DEKs limit blast radius: one leaked key exposes one tenant's data, not the whole store.</li><li>Envelope encryption also makes crypto-shredding practical: delete the wrapped DEK and that data is gone.</li></ul>
+
+<div class="flow"><span class="flow-step">Request data key for a new object</span><span class="flow-arrow">→</span><span class="flow-step">KMS generates DEK and returns plaintext plus wrapped form</span><span class="flow-arrow">→</span><span class="flow-step">Application encrypts data with the plaintext DEK</span><span class="flow-arrow">→</span><span class="flow-step">Store ciphertext and wrapped DEK together</span><span class="flow-arrow">→</span><span class="flow-step">On read, send wrapped DEK to KMS for unwrapping</span><span class="flow-arrow">→</span><span class="flow-step">Decrypt, use, and clear the plaintext DEK from memory</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Key management is the hard part</h2>
+<ul><li>Key generation must use a cryptographically secure source; weak randomness breaks the cipher regardless of algorithm.</li><li>Keys need a home with access control, audit logging, and no plaintext copies in config files, environment dumps, or code.</li><li>Separate duties: the team that can read data should not automatically be able to export or delete keys.</li><li>Grant keys per service and per environment; a staging key must not decrypt production data.</li><li>Log every key use — who, when, which key, which operation — because key access is the real access log.</li><li>Plan for key loss: a lost key means permanently lost data, so backup and recovery of keys is itself a critical process.</li><li>Prefer managed KMS or HSM-backed keys over custom crypto; rolling your own key management is where most failures happen.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Rotation</h2>
+<ul><li>Rotate on a schedule and on events: staff departure, suspected exposure, vendor change, or compliance requirement.</li><li>With envelope encryption, rotate the KEK by rewrapping DEKs; data is untouched and the operation is cheap.</li><li>Rotating a DEK requires re-encrypting the data it protects, which is expensive and must be done in the background.</li><li>Keep old key versions available for decryption during the transition, and track which objects still use which version.</li><li>Never delete a retired key until every object encrypted under it has been re-encrypted or intentionally shredded.</li><li>Automate rotation, because manual rotation is skipped under pressure and leaves keys in service for years.</li><li>Test the rotation procedure; a rotation that breaks decryption is an outage with no rollback.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>The cost: what encryption breaks</h2>
+<ul><li>Encrypted columns cannot be indexed normally, so equality, range, and sort queries on them become impossible or expensive.</li><li>Deterministic encryption allows equality search but leaks frequency patterns, since equal plaintexts produce equal ciphertexts.</li><li>Randomized encryption is safer but prevents server-side search entirely; filtering must happen in the application.</li><li>Joins, aggregations, and unique constraints on encrypted fields usually have to move to a blind index or a tokenized surrogate.</li><li>LIKE queries, fuzzy search, and full-text search over encrypted data are effectively unavailable without specialized schemes.</li><li>Application-level encryption complicates key access in batch jobs, analytics pipelines, and reporting tools.</li><li>The honest trade-off is often: encrypt the fewest fields that satisfy the threat model, and keep the rest under storage-level encryption.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Backups, snapshots, and derived copies</h2>
+<ul><li>Backups are the most commonly exposed copy of the data, because they are copied widely and protected less carefully.</li><li>Encrypt backups with a separate key from production, so a leaked production key does not open the archives.</li><li>Snapshots inherit encryption only if the key is available to whoever restores them; check cross-account and cross-region sharing.</li><li>Analytics warehouses, search indexes, and log stores hold copies of the same records and need the same treatment.</li><li>Test restores: an encrypted backup with an unavailable key is not a backup.</li><li>Expire backups on a schedule, because old encrypted copies still widen the exposure surface.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Crypto-shredding and deletion</h2>
+<ul><li>Deleting rows from a live database rarely removes them from replicas, backups, and caches immediately.</li><li>If each record or tenant has its own DEK, deleting the wrapped key makes all copies permanently unreadable.</li><li>This gives a verifiable deletion story that satisfies erasure requirements without hunting every replica.</li><li>Crypto-shredding requires per-tenant or per-record key granularity; a single global key cannot be destroyed without losing everything.</li><li>Key deletion must be irreversible and audited, with a delay window to prevent accidental destruction.</li><li>It does not remove metadata or access logs, which may still be subject to retention rules.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Operational failure modes</h2>
+<ul><li>KMS unavailability becomes a full outage: no key, no decryption, no reads.</li><li>KMS throttling under high request rates turns every read into a queued dependency; cache unwrapped DEKs briefly and safely.</li><li>A key policy change that revokes a service's access breaks that service instantly, often discovered in production.</li><li>Region or account isolation fails when the key lives in one region and the data is replicated to another.</li><li>Accidental key deletion is catastrophic and usually irreversible; require approval and a waiting period.</li><li>Per-object DEKs create millions of key operations and a metadata burden that must be planned for.</li><li>Debugging gets harder: support staff cannot read ciphertext, so tooling must decrypt through the application or not at all.</li></ul>
+
+
+<div class="note">Encryption adds a hard dependency on the key service. Its availability, latency, and authorization model belong in the system's SLOs, not in a footnote.</div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Choosing a design</h2>
+<ul><li>Start from the threat model: who are you protecting against — a thief, a cloud operator, an insider, or a compromised app?</li><li>For physical theft and lost media, storage-level or TDE is sufficient and operationally simple.</li><li>For regulatory separation from the storage operator, use provider keys you control through your own KMS.</li><li>For the most sensitive fields, encrypt in the application and accept that they become unsearchable.</li><li>Always pair at-rest encryption with encryption in transit, least-privilege access, and audit logging.</li><li>Document which key protects which data and how it rotates, because undocumented key topology is unmaintainable.</li><li>Verify with a real test: can someone with only storage access read a record? If yes, the design has a gap.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Volume or disk encryption</strong> is transparent and cheap but protects only against physical theft, not credential compromise.</li><li><strong>Database TDE</strong> needs no application change but leaves plaintext visible to anyone with database access.</li><li><strong>Application field-level encryption</strong> strongly isolates sensitive data but breaks indexing, sorting, and range queries.</li><li><strong>Deterministic encryption</strong> permits equality search but leaks patterns through repeated ciphertexts.</li><li><strong>Per-object data keys</strong> limit blast radius and enable crypto-shredding but multiply key operations and metadata.</li><li><strong>Frequent rotation</strong> limits key exposure but adds rewrap or re-encryption work and versioning complexity.</li><li><strong>HSM-backed keys</strong> keep key material out of software but add cost, latency, and operational constraints.</li><li><strong>Client-side encryption</strong> gives the strongest trust boundary but prevents the server from processing the data.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is encryption at rest?</summary><div class="answer"><p>It is encrypting stored data so the raw bytes are unreadable without the correct key, covering disks, databases, object storage, and backups. It addresses threats where an attacker obtains the storage rather than going through the application. It is distinct from encryption in transit, which protects data on the network.</p></div></details>
+<details><summary>2. What does encryption at rest not protect against?</summary><div class="answer"><p>It does not stop an attacker who compromises the application or presents valid credentials, because the data is decrypted for them. It does not prevent SQL injection, authorization bugs, or insider misuse through legitimate interfaces. It also cannot hide access patterns, row counts, or file sizes.</p></div></details>
+<details><summary>3. Why does storing the key next to the data defeat the purpose?</summary><div class="answer"><p>Because whoever obtains the storage usually obtains everything on it, including the key file or configuration. The key must live in a separate trust domain with its own access control and audit trail, such as a KMS or HSM. Otherwise the attacker decrypts the data as easily as you do.</p></div></details>
+<details><summary>4. Explain envelope encryption.</summary><div class="answer"><p>Data is encrypted with a data encryption key, and that DEK is encrypted or wrapped by a key encryption key held in a KMS. The ciphertext stores the wrapped DEK alongside the data. On read, the KMS unwraps the DEK and the application decrypts, which lets you rotate the KEK by rewrapping keys instead of rewriting data.</p></div></details>
+<details><summary>5. What are the layers where you can apply encryption at rest?</summary><div class="answer"><p>Disk or volume level, database or filesystem level such as TDE, object storage server-side encryption, application-level field encryption, and client-side encryption before upload. Each layer changes who can read plaintext and what queries remain possible. Systems often combine storage-level encryption with field-level encryption for the most sensitive attributes.</p></div></details>
+<details><summary>6. Why is field-level encryption usually the strongest option?</summary><div class="answer"><p>Because the database only ever stores ciphertext, so database credentials, backups, and snapshots do not expose those values. Only the application, which has key access, can decrypt them. The cost is that encrypted fields cannot be indexed or filtered normally, so it is reserved for the data that justifies that loss.</p></div></details>
+<details><summary>7. What is the trade-off with deterministic encryption?</summary><div class="answer"><p>It lets you perform equality searches and joins because the same plaintext always produces the same ciphertext. That also leaks frequency information and allows an attacker to group identical values. It is a reasonable compromise for lookup fields when the leak is acceptable, and a poor choice for low-entropy or highly sensitive values.</p></div></details>
+<details><summary>8. How does key rotation work without downtime?</summary><div class="answer"><p>With envelope encryption, the new KEK wraps DEKs while old versions remain available for decryption, so data is untouched. Rewrapping happens in the background and is tracked per object. A DEK rotation that requires re-encrypting data must run as a dual-read migration, accepting both old and new keys until every record is converted.</p></div></details>
+<details><summary>9. How do backups change the design?</summary><div class="answer"><p>Backups are copied widely and often protected less carefully, so they need their own encryption keys and access policy. Using a separate backup key means a production key leak does not expose the archive. Restoration must be tested, because an encrypted backup whose key is unavailable is worthless.</p></div></details>
+<details><summary>10. What is crypto-shredding?</summary><div class="answer"><p>Deleting the key that protects a set of data so all copies become permanently unreadable. This is faster and more reliable than chasing every replica, snapshot, and backup when a record must be erased. It requires per-record or per-tenant keys, and the key deletion must be irreversible and audited.</p></div></details>
+<details><summary>11. What operational risks does encryption introduce?</summary><div class="answer"><p>The key service becomes a hard dependency: if it is unavailable or throttling, reads fail or slow down. Key policy mistakes can lock a service out of its own data, and accidental key deletion is catastrophic. Replication across regions and accounts must carry key access with it, or restores will not decrypt.</p></div></details>
+<details><summary>12. How would you decide which encryption layer to use?</summary><div class="answer"><p>Start from the threat model. If the risk is stolen media, storage-level encryption is enough. If it is the storage operator or a leaked backup, use keys you control in your own KMS. If it is insiders or database credential compromise, encrypt those fields in the application and accept the query limitations.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Enabling storage encryption but storing the key in the same bucket or repository as the data.</li><li>Claiming compliance from TDE alone while anyone with database credentials can read every row in plaintext.</li><li>Encrypting a column that the product needs to filter, sort, or join on, then discovering the feature cannot be built.</li><li>Forgetting replicas, snapshots, analytics copies, and search indexes, which all hold the same plaintext.</li><li>Deleting a rotated key before all data encrypted under it has been migrated.</li><li>Adding a KMS call to every read without caching or capacity planning, turning encryption into a latency and availability bottleneck.</li><li>Assuming encryption at rest protects against application compromise or authorization bugs.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="ssl-tls.html"><span>← Previous</span><strong>SSL/TLS</strong></a><a class="next" href="secrets-management.html"><span>Next →</span><strong>Secrets Management</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/encryption-at-rest">AlgoMaster — Encryption at Rest</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Erasure Coding — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 64 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Erasure Coding</h1>
+    <p class="dek">Storage Systems · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/erasure-coding">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with keeping full copies</a>
+<a href="#s2">What erasure coding is</a>
+<a href="#s3">The k+m layout</a>
+<a href="#s4">Why any k chunks are enough</a>
+<a href="#s5">Failure tolerance in practice</a>
+<a href="#s6">The read path</a>
+<a href="#s7">Repair and reconstruction</a>
+<a href="#s8">Erasure coding versus replication</a>
+<a href="#s9">Where erasure coding is used</a>
+<a href="#s10">Costs and limitations</a>
+<a href="#s11">Choosing a code and placement</a>
+<a href="#s12">Decision rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Erasure coding splits data into <code>k</code> chunks, computes <code>m</code> parity chunks, and spreads all <code>k+m</code> across failure domains, so the data survives losing any <code>m</code> of them while storing far less overhead than full copies.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Erasure coding</dt><dd>A technique that encodes data with redundant parity so the original can be rebuilt from a subset of the stored pieces.</dd></div><div class="term"><dt>Data chunk</dt><dd>One of the <code>k</code> original pieces the object is split into.</dd></div><div class="term"><dt>Parity chunk</dt><dd>One of the <code>m</code> computed pieces that carries redundancy instead of new data.</dd></div><div class="term"><dt>k of k+m</dt><dd>The property that any <code>k</code> surviving chunks out of <code>k+m</code> are enough to reconstruct the object.</dd></div><div class="term"><dt>Redundancy overhead</dt><dd>Extra storage as a fraction of the original data, equal to <code>m/k</code> for a <code>k+m</code> code.</dd></div><div class="term"><dt>Reed-Solomon</dt><dd>A widely used erasure code based on linear algebra over a finite field, able to recover from any <code>m</code> losses.</dd></div><div class="term"><dt>Degraded read</dt><dd>Serving a read by reconstructing missing chunks from surviving ones instead of reading them directly.</dd></div><div class="term"><dt>Repair</dt><dd>Regenerating lost chunks onto a new disk or node after a failure.</dd></div><div class="term"><dt>Failure domain</dt><dd>A unit whose failure is independent of others, such as a disk, node, rack, or availability zone.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with keeping full copies</h2>
+<ul><li>Disks and servers fail constantly in large storage systems, so every byte needs redundancy.</li><li>The simplest defense is replication: keep two or three complete copies of everything.</li><li>Three copies means storing three times the data, so most of the budget buys durability rather than capacity.</li><li>Replication also triples the write traffic and the bytes moved during repair.</li><li>At very large scale, the storage overhead becomes the dominant cost of the cluster.</li><li>Erasure coding keeps comparable failure tolerance while storing far less extra data.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What erasure coding is</h2>
+<ul><li>The object is split into <code>k</code> equal-sized <strong>data chunks</strong>.</li><li>The system computes <code>m</code> additional <strong>parity chunks</strong> from those data chunks.</li><li>All <code>k+m</code> chunks are stored on different disks or servers.</li><li>Any <code>k</code> of the <code>k+m</code> chunks are enough to rebuild the original object.</li><li>If up to <code>m</code> chunks are lost, nothing is lost permanently.</li><li>The trade is storage efficiency for extra CPU and repair traffic.</li></ul>
+
+
+<div class="note">Erasure coding is redundancy without full copies: the parity chunks carry information about the data chunks rather than duplicate bytes.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The k+m layout</h2>
+<p class="lede">A code is described by how many data chunks it needs and how many it can lose. With <code>k=10</code> and <code>m=4</code>, an object becomes fourteen stored chunks and survives any four losses.</p>
+<ul><li>Total stored bytes are <code>(k+m)/k</code> times the object size — in that example, 1.4× instead of 3× for triple replication.</li><li>Increasing <code>m</code> raises durability but also overhead.</li><li>Increasing <code>k</code> lowers overhead but means each chunk is larger and repair reads more data.</li><li>A larger <code>k</code> also requires more chunks to be available for a normal read.</li><li>Extremely wide codes reduce overhead further but make reconstruction and repair more expensive.</li><li>The chosen ratio is a direct statement about how much durability you are willing to pay for.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Scheme</th><th>Storage overhead</th><th>Survives</th></tr></thead><tbody><tr><td>2× replication</td><td>2×</td><td>1 copy lost</td></tr>
+<tr><td>3× replication</td><td>3×</td><td>2 copies lost</td></tr>
+<tr><td>k=10, m=4</td><td>1.4×</td><td>Any 4 chunks lost</td></tr>
+<tr><td>k=6, m=3</td><td>1.5×</td><td>Any 3 chunks lost</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Why any k chunks are enough</h2>
+<ul><li>The parity chunks are linear combinations of the data chunks over a finite field.</li><li>That produces <code>k+m</code> equations in <code>k</code> unknowns.</li><li>Any <code>k</code> independent equations can solve for the original <code>k</code> data chunks.</li><li>Reed-Solomon codes are the standard construction and guarantee recovery from any <code>m</code> erasures.</li><li>The arithmetic is more than simple XOR; it needs multiplication in a Galois field.</li><li>Practically, the encoder computes parity in software or with hardware acceleration.</li><li>Not every code has this any-<code>m</code> property: simple XOR parity schemes only tolerate specific failure patterns.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Failure tolerance in practice</h2>
+<ul><li>Failure tolerance is <code>m</code> chunks, but only if no two chunks share a failure domain.</li><li>Chunks must be spread across disks, nodes, racks, and sometimes zones.</li><li>Placing two chunks of the same object on one server halves the effective tolerance for that server's failure.</li><li>A rack loss can remove several chunks at once, so placement must account for correlated failure.</li><li>Durability also depends on repair speed: the longer data stays degraded, the more chances for another loss.</li><li>This is why placement policy and repair scheduling are part of the durability guarantee, not just the code.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>The read path</h2>
+<ul><li><strong>Normal read:</strong> fetch the <code>k</code> data chunks, optionally in parallel, and reassemble.</li><li>Reading <code>k</code> chunks instead of one full copy means more requests but less total data than replication.</li><li>Latency is set by the slowest of the parallel requests, so tail latency matters.</li><li><strong>Degraded read:</strong> if some chunks are missing, fetch enough survivors and decode.</li><li>A degraded read costs extra network and CPU, so it should be rare and observable.</li><li>Clients usually verify checksums per chunk before trusting a reconstructed result.</li><li>Small objects do not suit this model well, because splitting and parity add overhead per object.</li></ul>
+
+<div class="flow"><span class="flow-step">Client requests an object</span><span class="flow-arrow">→</span><span class="flow-step">System looks up chunk locations from metadata</span><span class="flow-arrow">→</span><span class="flow-step">Client fetches chunks in parallel</span><span class="flow-arrow">→</span><span class="flow-step">If all data chunks arrive, assemble and return</span><span class="flow-arrow">→</span><span class="flow-step">If some are missing, fetch extra survivors and decode</span></div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Repair and reconstruction</h2>
+<ul><li>When a chunk is lost, the system reads <code>k</code> surviving chunks and recomputes the missing one.</li><li>This is cheaper in bytes than copying a full replica, but costs CPU and network.</li><li>Repair traffic competes with normal client traffic and must be throttled.</li><li>Repair is usually scheduled in the background with priority for the most degraded objects.</li><li>A single disk replacement may require reading from many other disks, creating a repair storm.</li><li>Placement should limit how many chunks of one object a single repair job must touch.</li><li>Faster repair directly improves durability because degraded windows shrink.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Erasure coding versus replication</h2>
+<ul><li>Replication is simple: write the same bytes to several places and read from any one.</li><li>Erasure coding stores far less overhead for the same failure tolerance.</li><li>Replication has lower read latency and no decode cost.</li><li>Replication repairs by copying one replica; erasure coding repairs by decoding from many chunks.</li><li>Erasure coding costs CPU on write, on degraded read, and on repair.</li><li>Replication handles small objects and random overwrites naturally; coding does not.</li><li>The usual pattern is replication for hot, small, latency-sensitive data and coding for large, cold, or archival objects.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Replication</th><th>Erasure coding</th></tr></thead><tbody><tr><td>Storage overhead</td><td>High (2×–3×)</td><td>Low (m/k)</td></tr>
+<tr><td>Write cost</td><td>Simple copies</td><td>Encode parity, more CPU</td></tr>
+<tr><td>Read latency</td><td>Low, single copy</td><td>Fetch k chunks, decode if degraded</td></tr>
+<tr><td>Repair cost</td><td>Copy one replica</td><td>Read k chunks and recompute</td></tr>
+<tr><td>Best for</td><td>Hot, small, latency-sensitive data</td><td>Large, cold, cost-sensitive data</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Where erasure coding is used</h2>
+<ul><li>Object storage backends storing large immutable blobs where storage cost dominates.</li><li>Archival and backup tiers that tolerate higher read latency.</li><li>Distributed file systems that apply coding to cold files while keeping hot files replicated.</li><li>Large-scale storage clusters that need high durability without tripling disk purchases.</li><li>Content-addressed or append-only stores where objects are written once and read rarely.</li><li>Any system where a lower redundancy ratio meaningfully changes the cost curve.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Costs and limitations</h2>
+<ul><li><strong>CPU:</strong> encoding and decoding are real work, especially for wide codes.</li><li><strong>Write amplification:</strong> one logical write produces <code>k+m</code> chunk writes.</li><li><strong>Update cost:</strong> changing a chunk means recomputing parity, so in-place mutation is expensive.</li><li><strong>Small objects:</strong> splitting a tiny object into many chunks is pure overhead.</li><li><strong>Latency:</strong> reads touch many chunks, so tail latency is worse than a single replica read.</li><li><strong>Operational complexity:</strong> placement, repair scheduling, and degraded-read monitoring are all required.</li><li>Coding is therefore a cost optimization for the right data class, not a universal replacement for replication.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Choosing a code and placement</h2>
+<ul><li>Pick <code>m</code> from the number of simultaneous failures you must survive.</li><li>Pick <code>k</code> to balance overhead against repair cost and read fan-out.</li><li>Never place two chunks of the same object in the same failure domain.</li><li>Match the code to the object size: tiny objects stay replicated or bundled.</li><li>Keep hot data replicated and transition cold data to coded form.</li><li>Set a repair priority policy so the most degraded objects are fixed first.</li><li>Measure degraded-read rate and repair backlog as first-class health signals.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Decision rules</h2>
+<ul><li>Use erasure coding when storage cost dominates and data is large, immutable, or cold.</li><li>Use replication when latency, simplicity, or small-object throughput dominates.</li><li>Use a hybrid when workloads differ: replicate the hot tier and code the cold tier.</li><li>Do not apply coding to a database's live data files.</li><li>Always validate that placement actually matches the failure domains you claim to survive.</li><li>State the redundancy target as <em>survive m concurrent failures</em>, not as a vague durability claim.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Erasure coding</strong> cuts storage overhead sharply, but adds CPU cost on write, read, and repair.</li><li><strong>A larger m</strong> survives more concurrent failures, but raises the storage multiplier and write cost.</li><li><strong>A larger k</strong> lowers overhead, but increases chunk size, read fan-out, and repair work per lost chunk.</li><li><strong>Degraded reads</strong> keep data available after loss, but cost extra network and CPU and raise tail latency.</li><li><strong>Faster repair</strong> shortens the vulnerable window, but competes with client traffic for bandwidth.</li><li><strong>Wide placement across racks</strong> improves failure independence, but increases cross-rack traffic and latency.</li><li><strong>Hybrid tiers</strong> get the best of both, but add a migration policy and two code paths to operate.</li><li><strong>Low-overhead storage</strong> makes capacity cheap, but concentrates risk in the repair system's ability to keep up.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is erasure coding?</summary><div class="answer"><p>A redundancy technique that splits data into <code>k</code> chunks, computes <code>m</code> parity chunks, and stores all of them across independent failure domains. Any <code>k</code> of the <code>k+m</code> chunks can rebuild the original. It provides replication-like durability with much less extra storage.</p></div></details>
+<details><summary>2. Why not just keep three copies?</summary><div class="answer"><p>Three copies triple storage, write traffic, and repair bytes, which dominates cost at large scale. Erasure coding can survive a comparable number of failures with overhead closer to 1.4× or 1.5×. The price is CPU for encoding and decoding plus more complex repair.</p></div></details>
+<details><summary>3. What do k and m mean?</summary><div class="answer"><p><code>k</code> is the number of data chunks the object is split into, and <code>m</code> is the number of parity chunks computed from them. The system tolerates any <code>m</code> lost chunks and stores <code>(k+m)/k</code> times the original size. Larger <code>m</code> means more durability and more overhead.</p></div></details>
+<details><summary>4. How can any k chunks reconstruct the data?</summary><div class="answer"><p>Parity chunks are linear combinations of the data chunks, so the <code>k+m</code> stored chunks form <code>k+m</code> equations over <code>k</code> unknowns. Any <code>k</code> independent equations are enough to solve for the originals. Reed-Solomon codes guarantee this for any <code>m</code> erasures.</p></div></details>
+<details><summary>5. What is a degraded read?</summary><div class="answer"><p>A read served while some chunks are missing, so the system fetches enough surviving chunks and decodes the object. It keeps data available after a failure but costs extra network and CPU. A high degraded-read rate means repair is falling behind.</p></div></details>
+<details><summary>6. How does repair work?</summary><div class="answer"><p>The system reads <code>k</code> surviving chunks, recomputes the lost chunk, and writes it to a new location. That is less data than copying a whole replica but more nodes are involved. Repair must be throttled and prioritized so it does not starve client traffic.</p></div></details>
+<details><summary>7. Why does placement matter as much as the code?</summary><div class="answer"><p>Because tolerance is counted in <em>independent</em> failures. If two chunks of one object sit on the same server or rack, a single failure consumes two of the <code>m</code> allowed losses. Placement across disks, nodes, racks, and zones is what makes the theoretical guarantee real.</p></div></details>
+<details><summary>8. When is erasure coding a bad choice?</summary><div class="answer"><p>For small objects, hot data, and workloads with frequent in-place updates. Splitting tiny objects wastes effort, reads fan out and hurt tail latency, and updating a chunk forces parity recomputation. Those cases are better served by replication.</p></div></details>
+<details><summary>9. Why is updating coded data expensive?</summary><div class="answer"><p>A logical update changes data chunks, which invalidates the parity computed from them. The system must recompute and rewrite parity, producing write amplification. Append-only or immutable objects avoid this, which is why coding suits cold and archival data.</p></div></details>
+<details><summary>10. Erasure coding vs replication — what is the rule of thumb?</summary><div class="answer"><p>Replicate what is hot, small, and latency-sensitive; code what is large, cold, and cost-sensitive. Many systems do both, keeping recent data replicated and moving aged data into coded form. The decision is about which cost dominates: latency and CPU, or raw capacity.</p></div></details>
+<details><summary>11. Does erasure coding replace backups?</summary><div class="answer"><p>No. It protects against losing chunks to hardware failure, not against deleting or corrupting the logical object. A delete propagates to every chunk and parity piece. Versioning, snapshots, and off-cluster backups are still required for logical damage.</p></div></details>
+<details><summary>12. What operational signals should you watch?</summary><div class="answer"><p>Degraded-read rate, under-repaired chunk count, repair backlog and throughput, and decode CPU usage. Placement drift matters too, since a rebalance can accidentally co-locate chunks. These signals tell you whether the durability you designed is the durability you have.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Quoting a failure-tolerance number without checking that chunks are actually spread across independent failure domains.</li><li>Applying erasure coding to small or hot objects and paying decode latency for no real saving.</li><li>Forgetting that repair consumes real bandwidth and can collide with production traffic.</li><li>Assuming erasure coding protects against deletion or corruption of the logical object.</li><li>Choosing a very wide code to minimize overhead and then being unable to repair it fast enough.</li><li>Ignoring degraded-read rate, so a cluster looks healthy while every read decodes.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="object-storage.html"><span>← Previous</span><strong>Object Storage</strong></a><a class="next" href="client-server-architecture.html"><span>Next →</span><strong>Client-Server Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/erasure-coding">AlgoMaster — Erasure Coding</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Server-Sent Events (SSE) — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 27 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Server-Sent Events (SSE)</h1>
+    <p class="dek">Communication Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/server-sent-events">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why SSE exists</a>
+<a href="#s2">What SSE is</a>
+<a href="#s3">How a connection works</a>
+<a href="#s4">The SSE event format</a>
+<a href="#s5">Automatic reconnection</a>
+<a href="#s6">Recovering missed events</a>
+<a href="#s7">Scaling SSE</a>
+<a href="#s8">Pub/sub behind SSE</a>
+<a href="#s9">Slow clients and backpressure</a>
+<a href="#s10">Heartbeats and infrastructure</a>
+<a href="#s11">Deployments and connection draining</a>
+<a href="#s12">When to use SSE</a>
+<a href="#s13">SSE for streaming AI responses</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>SSE keeps one long-lived HTTP response open and lets the server push a stream of events to the browser, one direction only, with automatic reconnection and resumable event IDs.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Server-Sent Events</dt><dd>A one-way streaming protocol where the server holds an HTTP response open and writes events to it as they occur.</dd></div><div class="term"><dt>EventSource</dt><dd>The browser API that opens an SSE connection, parses the stream, and reconnects automatically when it drops.</dd></div><div class="term"><dt>text/event-stream</dt><dd>The content type that marks a response as an SSE stream rather than a fixed-length HTTP body.</dd></div><div class="term"><dt>Last-Event-ID</dt><dd>A request header the browser sends on reconnect carrying the last event ID it received, so the server can resume the stream.</dd></div><div class="term"><dt>retry field</dt><dd>A server-suggested reconnect delay in milliseconds that overrides the browser's default backoff.</dd></div><div class="term"><dt>Heartbeat</dt><dd>A periodic comment line starting with <code>:</code> that keeps idle proxies from closing the stream and reveals dead connections.</dd></div><div class="term"><dt>Connection draining</dt><dd>Retiring a server by stopping new connections while existing ones finish, avoiding a mass simultaneous reconnect.</dd></div><div class="term"><dt>Backpressure</dt><dd>The policy for what to do when the server produces events faster than one client can consume them.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why SSE exists</h2>
+<p class="lede">A live dashboard needs to update whenever the server has new data. You want the browser to connect once and let the server talk whenever something changes.</p>
+<ul><li>Polling makes the browser ask repeatedly, so frequent polling wastes requests that return nothing.</li><li>Infrequent polling reduces traffic but adds delay before updates are seen.</li><li>Long polling improves on that, yet every response still closes the request and forces the browser to ask again.</li><li>SSE removes the trade-off: <strong>one connection</strong>, and the server pushes each update the moment it exists.</li><li>The cost is that the connection is now long-lived, which changes how you scale, deploy, and monitor.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What SSE is</h2>
+<ul><li>The client sends a normal HTTP request; the server replies with a response that <strong>never completes</strong> while the stream is open.</li><li>New data is written as individual events on that same response, and the client receives each event immediately.</li><li>SSE is strictly <strong>one-way</strong>: server to client. The client cannot send messages back over the stream.</li><li>Anything the client must send uses a separate ordinary request, such as a POST.</li><li>That asymmetry is a feature for feeds, dashboards, and progress bars where the server talks and the browser listens.</li><li>It is plain HTTP, so existing auth, TLS, and cookie handling apply, and it works through most corporate proxies.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>How a connection works</h2>
+<ul><li>The browser uses the <code>EventSource</code> API against a server endpoint.</li><li>The server responds with <code>Content-Type: text/event-stream</code> and keeps the response open.</li><li>The server writes events incrementally and must flush after each one; buffering hides the update.</li><li>EventSource exposes a connection state so the client can render connecting, open, and closed behavior.</li><li>Closing the endpoint or ending the response moves the client to a closed state that will not reconnect on its own.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>State</th><th>Value</th><th>Meaning</th></tr></thead><tbody><tr><td>CONNECTING</td><td>0</td><td>Connecting or reconnecting</td></tr>
+<tr><td>OPEN</td><td>1</td><td>Stream is open and receiving events</td></tr>
+<tr><td>CLOSED</td><td>2</td><td>Stream closed and will not reconnect</td></tr></tbody></table></div>
+<div class="flow"><span class="flow-step">Client opens EventSource to /stream</span><span class="flow-arrow">→</span><span class="flow-step">Server responds 200 with text/event-stream and keeps it open</span><span class="flow-arrow">→</span><span class="flow-step">Server writes events as they occur and flushes</span><span class="flow-arrow">→</span><span class="flow-step">Connection drops -> browser reconnects with Last-Event-ID</span><span class="flow-arrow">→</span><span class="flow-step">Client resumes the stream without a new API surface</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The SSE event format</h2>
+<p class="lede">An event is a few text lines followed by a blank line. The format is deliberately simple, which is why it is easy to implement on any server.</p>
+<ul><li><code>data</code> carries the payload, either plain text or JSON; multiple data lines are joined with newlines.</li><li><code>event</code> sets the event type so the client can attach a separate listener per kind of update.</li><li><code>id</code> marks the event's position and becomes the <code>Last-Event-ID</code> value on reconnect.</li><li><code>retry</code> suggests a reconnect delay in milliseconds for the browser to use.</li><li>A line starting with <code>:</code> is a comment and is ignored by the client, which makes it a natural heartbeat.</li><li>One stream can legitimately carry mixed types — notifications, order status, progress — on the same connection.</li></ul>
+
+
+<pre class="code"><code>event: order-status
+id: 1042
+data: {&quot;orderId&quot;:&quot;A-77&quot;,&quot;state&quot;:&quot;shipped&quot;}
+
+: heartbeat</code></pre>
+<div class="note">The blank line terminates an event. Forgetting it means the client buffers the event indefinitely.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Automatic reconnection</h2>
+<ul><li>If the connection drops, the browser reconnects by itself, so basic retry logic does not need to be written.</li><li>The default reconnect delay is short — on the order of a few seconds — and the server can override it with <code>retry</code>.</li><li>Automatic reconnection is why SSE survives flaky mobile networks and rolling restarts without client code.</li><li>The client should still observe errors and surface a degraded state; silent reconnection can hide a server problem.</li><li>A server that intentionally ends the stream should signal it clearly, otherwise the browser reconnects into a loop.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Recovering missed events</h2>
+<ul><li>The server stamps each event with an ID and the browser remembers the most recent one.</li><li>On reconnect the browser sends <code>Last-Event-ID</code>, and the server resumes from there — for example replaying everything after event 100.</li><li>SSE does <strong>not</strong> store events for you; the protocol only carries the marker.</li><li>Reliable replay needs durable storage: a database, cache, event log, or message broker the server can query.</li><li>If the gap is too large or storage has expired, the server should tell the client to resynchronize rather than silently skipping events.</li><li>Without a durable backing store, <code>Last-Event-ID</code> gives the illusion of resume while events are still lost.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Scaling SSE</h2>
+<ul><li>Behind a load balancer, each connection is pinned to one server for its lifetime, so users end up spread across servers.</li><li>A backend service that produces an event for a user has no idea which SSE server holds that user's connection.</li><li>The fix is a shared messaging layer: publishers emit events, every SSE server subscribes, and the server with the matching connection pushes it.</li><li>This keeps business services decoupled from the servers that manage long-lived connections.</li><li>Adding SSE servers then scales by connection count without touching producers.</li><li>Track connections per server, memory per connection, and event fan-out cost as the primary capacity signals.</li></ul>
+
+<div class="flow"><span class="flow-step">Backend service publishes an event</span><span class="flow-arrow">→</span><span class="flow-step">Messaging layer fans out to all SSE servers</span><span class="flow-arrow">→</span><span class="flow-step">Only the server holding that client's stream writes the event</span><span class="flow-arrow">→</span><span class="flow-step">Client receives it on the existing connection</span><span class="flow-arrow">→</span><span class="flow-step">Durable store covers any gap after a reconnect</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Pub/sub behind SSE</h2>
+<ul><li><strong>Redis Pub/Sub</strong> suits fast, transient events where replay does not matter: a server not subscribed at publish time never sees the message.</li><li><strong>Kafka</strong> suits durability, replay, and large-scale processing; retention lets a reconnecting client's <code>Last-Event-ID</code> be served from the log.</li><li>Either way the roles stay fixed: producers emit, the messaging layer distributes, SSE servers own connections.</li><li>Mixing both is common — pub/sub for live fan-out, a log or table for replay.</li><li>The messaging choice is a durability decision, not a protocol decision; SSE looks identical to the client either way.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Slow clients and backpressure</h2>
+<ul><li>If a server produces events faster than one client consumes them, that client's buffer keeps growing.</li><li>Unbounded buffering per connection turns a few slow clients into a memory problem for the whole server.</li><li>Explicit options: buffer temporarily up to a limit, drop oldest events, keep only latest state, or disconnect and let the client resume.</li><li><strong>Latest-state-only</strong> is right for prices and progress percentages where intermediate values are useless.</li><li><strong>Disconnect-and-resume</strong> is right when every event matters and the cursor can replay the gap.</li><li>Whatever the policy, it should be chosen per stream type rather than left implicit.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Best for</th><th>Cost</th></tr></thead><tbody><tr><td>Bounded buffer</td><td>Short bursts, mostly fast clients</td><td>Memory cap per connection</td></tr>
+<tr><td>Drop oldest</td><td>Live telemetry where stale data is worthless</td><td>Client sees gaps</td></tr>
+<tr><td>Latest state only</td><td>Prices, progress, status</td><td>Loses event history</td></tr>
+<tr><td>Disconnect client</td><td>Every event matters</td><td>Reconnect plus replay cost</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Heartbeats and infrastructure</h2>
+<ul><li>Quiet streams look idle to proxies and load balancers, which may close them.</li><li>Send periodic comment lines (<code>:</code>) as heartbeats; the client ignores them but the connection stays warm.</li><li>Heartbeats should be more frequent than the shortest idle timeout anywhere in the path.</li><li>They also detect half-open connections, since a write failure surfaces faster than waiting for a timeout.</li><li>Response buffering is the other silent killer: proxies, CDNs, and middleware may hold written bytes before forwarding.</li><li>Disable buffering along the whole path — in Nginx this is commonly done with <code>X-Accel-Buffering: no</code>.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Deployments and connection draining</h2>
+<ul><li>Shutting down an SSE server instantly disconnects thousands of clients that may then reconnect simultaneously.</li><li>That spike hits the remaining servers exactly while capacity is reduced.</li><li>Drain instead: the load balancer stops sending new connections to the retiring server.</li><li>Existing streams stay until they close naturally or the client reconnects elsewhere.</li><li>The server shuts down only when it holds no active connections.</li><li>Because clients resume with <code>Last-Event-ID</code>, moving servers does not lose events.</li></ul>
+
+<div class="flow"><span class="flow-step">Mark server as draining</span><span class="flow-arrow">→</span><span class="flow-step">Load balancer stops new connections</span><span class="flow-arrow">→</span><span class="flow-step">Existing streams finish or the client reconnects elsewhere</span><span class="flow-arrow">→</span><span class="flow-step">Wait for connection count to reach zero</span><span class="flow-arrow">→</span><span class="flow-step">Terminate the instance safely</span></div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When to use SSE</h2>
+<ul><li>Strong fit when you need frequent server-to-client updates and no bidirectional messaging on the same connection.</li><li>Common uses: notifications, live dashboards and monitoring, job progress, sports scores, social feeds.</li><li>If both directions need frequent messages on one connection, WebSockets are the better fit.</li><li>If updates are rare and the client is already request-driven, long polling may be simpler to operate.</li><li>SSE is the natural transport for streaming LLM responses: one request in, progressive tokens out.</li><li>Because it is HTTP, it is easier to route through firewalls and proxies than a custom upgrade protocol.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Need</th><th>SSE</th><th>WebSocket</th><th>Long polling</th></tr></thead><tbody><tr><td>Server to client push</td><td>Native</td><td>Native</td><td>Per-message reconnect</td></tr>
+<tr><td>Client to server messages</td><td>Separate HTTP request</td><td>Same connection</td><td>Separate request</td></tr>
+<tr><td>Automatic reconnect</td><td>Built into EventSource</td><td>Manual</td><td>Manual</td></tr>
+<tr><td>Resume from cursor</td><td>Last-Event-ID</td><td>Manual</td><td>Manual</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>SSE for streaming AI responses</h2>
+<ul><li>Generating a full LLM answer can take many seconds, which feels broken if the user sees nothing.</li><li>The server streams tokens as they are produced, so the answer starts appearing almost immediately.</li><li>The client sends one request and the server progressively writes the response back on that stream.</li><li>It is a textbook server-to-client pattern, not a bidirectional one, which is why SSE fits better than WebSockets here.</li><li>End-of-stream must be explicit so the client stops waiting and enables follow-up actions.</li><li>Because tokens arrive incrementally, the client should render partial text and handle mid-stream failures gracefully.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>One connection replaces many polls</strong>, but that connection must stay open and healthy for a long time.</li><li><strong>Automatic reconnection</strong> removes retry code, but hides transient failures unless the client also observes errors.</li><li><strong>Last-Event-ID</strong> enables resume, but only if the server keeps events in durable storage with enough retention.</li><li><strong>Plain HTTP compatibility</strong> eases proxying and auth, but the client cannot send messages back over the stream.</li><li><strong>Server push</strong> cuts latency, but adds per-connection memory and file descriptor cost at scale.</li><li><strong>Buffering disabled end to end</strong> gives immediate delivery, but requires coordinated proxy and CDN configuration.</li><li><strong>Heartbeats</strong> keep idle connections alive and detect dead ones, at the cost of constant background traffic.</li><li><strong>Connection draining</strong> makes deploys safe, but slows rollouts because old instances wait for clients to leave.</li><li><strong>Latest-state-only backpressure</strong> protects memory, but silently discards intermediate events.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is SSE and how does it differ from polling?</summary><div class="answer"><p>SSE is a one-way stream where the server keeps an HTTP response open and writes events as they occur. Polling makes the client ask repeatedly; SSE has the client connect once and receive updates immediately. That removes the latency-versus-wasted-requests trade-off polling forces.</p></div></details>
+<details><summary>2. Why is SSE described as one-way?</summary><div class="answer"><p>The protocol only defines server-to-client messages on the open response. The client sends data through separate normal HTTP requests. If an application needs frequent messages in both directions on one connection, WebSockets are the appropriate tool.</p></div></details>
+<details><summary>3. How does an SSE event look on the wire?</summary><div class="answer"><p>Each event is a few field lines followed by a blank line. Supported fields are <code>data</code>, <code>event</code>, <code>id</code>, and <code>retry</code>. Lines beginning with a colon are comments and are commonly used as heartbeats.</p></div></details>
+<details><summary>4. What does Last-Event-ID actually solve?</summary><div class="answer"><p>It tells the server where the client's stream left off, so the server can replay events after that ID. It only solves positioning: the server must still store events durably for replay to be possible.</p></div></details>
+<details><summary>5. Does the browser store events for replay?</summary><div class="answer"><p>No. The browser only remembers the last event ID it saw. Durable storage such as a database, log, cache, or broker is the application's responsibility, and retention limits determine how far back a reconnect can resume.</p></div></details>
+<details><summary>6. How do you scale SSE to many connections?</summary><div class="answer"><p>Run multiple SSE servers behind a load balancer and put a shared messaging layer in front of them. Producers publish events, every SSE server subscribes, and the server holding the client's connection writes it. Capacity then scales with connection count, not with producer logic.</p></div></details>
+<details><summary>7. Redis Pub/Sub or Kafka behind SSE?</summary><div class="answer"><p>Redis Pub/Sub is a good fit for fast transient events where a missed message is tolerable. Kafka is better when you need retention, replay, or large-scale processing, because a reconnecting client's cursor can be served from the log.</p></div></details>
+<details><summary>8. What happens when a client cannot keep up?</summary><div class="answer"><p>Its per-connection buffer grows. The server needs an explicit policy: bounded buffering, dropping old events, sending only latest state, or disconnecting the client so it resumes from its last event ID.</p></div></details>
+<details><summary>9. Why do SSE streams need heartbeats?</summary><div class="answer"><p>Idle proxies and load balancers close connections that look inactive. Comment heartbeats keep the stream warm and expose dead connections quickly. They should be more frequent than the shortest idle timeout in the path.</p></div></details>
+<details><summary>10. Events arrive several seconds late even though the server writes them immediately. Why?</summary><div class="answer"><p>Something in the path is buffering the response — a proxy, CDN, or middleware that collects bytes before forwarding. Disable response buffering end to end and verify the content type is <code>text/event-stream</code>.</p></div></details>
+<details><summary>11. How do you deploy without a reconnect stampede?</summary><div class="answer"><p>Drain connections. Stop routing new connections to the retiring server, let existing streams finish or move on reconnect, and terminate only when the connection count reaches zero. Clients resume with Last-Event-ID, so no events are lost.</p></div></details>
+<details><summary>12. Why is SSE popular for streaming LLM output?</summary><div class="answer"><p>LLM responses take seconds to generate and are strictly server-to-client, which matches SSE exactly. Streaming tokens as they are produced makes the interface feel responsive, and one HTTP request starts the whole stream.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Forgetting to flush the response, so events sit in a server or proxy buffer and arrive late in batches.</li><li>Assuming Last-Event-ID gives replay without a durable event store behind it.</li><li>Using SSE when the client must push frequent messages on the same connection instead of choosing WebSockets.</li><li>Ignoring per-connection buffering, letting a few slow clients exhaust server memory.</li><li>Omitting heartbeats so idle connections are closed by proxies and treated as mysterious disconnects.</li><li>Shutting down SSE servers abruptly and causing a reconnect stampede on the remaining capacity.</li><li>Treating automatic browser reconnection as proof the stream is healthy rather than monitoring errors and gaps.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="long-polling.html"><span>← Previous</span><strong>Long Polling</strong></a><a class="next" href="websockets.html"><span>Next →</span><strong>WebSockets</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/server-sent-events">AlgoMaster — Server-Sent Events (SSE)</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

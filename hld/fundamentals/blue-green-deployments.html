@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blue-Green Deployments — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 112 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Blue-Green Deployments</h1>
+    <p class="dek">Deployment Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/blue-green-deployments">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The question blue-green answers</a>
+<a href="#s2">How the two environments work</a>
+<a href="#s3">How traffic is switched</a>
+<a href="#s4">Validating the idle environment</a>
+<a href="#s5">Rollback reality</a>
+<a href="#s6">The database problem</a>
+<a href="#s7">Shared state beyond the database</a>
+<a href="#s8">Cost and environment parity</a>
+<a href="#s9">Observability and all-at-once exposure</a>
+<a href="#s10">Variations</a>
+<a href="#s11">Failure modes</a>
+<a href="#s12">When to choose blue-green</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Blue-green deployment keeps two identical production environments and switches traffic between them, so a release becomes a router change and recovery becomes the same change in reverse.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Blue-green deployment</dt><dd>A release model with two production-equivalent environments where one serves live traffic and the other hosts the next version.</dd></div><div class="term"><dt>Cutover</dt><dd>The moment traffic is redirected from the old environment to the new one, usually at a load balancer, proxy, or DNS layer.</dd></div><div class="term"><dt>Environment parity</dt><dd>Keeping both environments identical in configuration, dependencies, secrets, and infrastructure so the idle one is a genuine substitute.</dd></div><div class="term"><dt>Rollback target</dt><dd>The previous environment kept running and healthy so that reverting is a routing change rather than a rebuild.</dd></div><div class="term"><dt>Shared database</dt><dd>The single data store both environments use, which makes schema compatibility a hard requirement for fast rollback.</dd></div><div class="term"><dt>Warm-up</dt><dd>Pre-loading caches and connection pools in the idle environment so the first requests after cutover are not pathologically slow.</dd></div><div class="term"><dt>DNS TTL</dt><dd>The cache lifetime of a DNS record; a long TTL makes DNS-based cutover slow and partially propagated.</dd></div><div class="term"><dt>Smoke test</dt><dd>A small set of end-to-end checks run against the idle environment before it receives real traffic.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The question blue-green answers</h2>
+<p class="lede">When a release breaks in production, the only question that matters is how quickly users can be back on the last working version.</p>
+<ul><li>Rolling deployments recover by rolling the fleet backwards, which takes as long as the rollout did.</li><li>Recreate deployments recover by taking the service down again.</li><li>Blue-green reduces recovery to a single routing decision, measured in seconds.</li><li>It does this by never destroying the previous version during the risky window.</li><li>The trade is cost and environment complexity, not speed: you pay for a second environment to buy back time.</li><li>It is most valuable for critical services where minutes of degradation are expensive.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>How the two environments work</h2>
+<ul><li>Blue runs version 1 and holds all production traffic.</li><li>Green is an identical environment running version 2 and receiving no user traffic at first.</li><li>Version 2 is deployed to green while blue continues serving normally, so the deploy itself is invisible to users.</li><li>Green is warmed and smoke-tested in isolation, which is impossible during a rolling upgrade of live instances.</li><li>When green is trusted, the router or load balancer sends production traffic to it.</li><li>Blue keeps running afterwards, holding the previous version as an instant rollback target.</li></ul>
+
+<div class="flow"><span class="flow-step">Deploy version 2 to green</span><span class="flow-arrow">→</span><span class="flow-step">Warm caches and run smoke tests</span><span class="flow-arrow">→</span><span class="flow-step">Redirect traffic to green</span><span class="flow-arrow">→</span><span class="flow-step">Watch metrics</span><span class="flow-arrow">→</span><span class="flow-step">Keep blue as rollback, or recycle it as the next green</span></div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>How traffic is switched</h2>
+<ul><li>A load balancer or reverse proxy switch is the cleanest cutover: it is immediate and fully reversible.</li><li>DNS switching is slower and messier because resolvers cache records for the TTL, so some clients stay on blue and some move to green.</li><li>A long DNS TTL turns a seconds-long rollback into a minutes-long, partially applied one.</li><li>Weighted routing can move traffic in steps instead of all at once, which blends blue-green into a canary.</li><li>Long-lived connections such as WebSockets need explicit draining from the old environment.</li><li>Keep the switch mechanism external to the application so it works even when the new version is failing.</li></ul>
+
+
+<div class="note">If rollback depends on a control plane that the failing release can also break, it is not a reliable rollback path.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Validating the idle environment</h2>
+<ul><li>Run smoke tests against green through the same entry point users will use, not against a pod directly.</li><li>Verify configuration, secrets, and feature-flag state are present in green before the switch.</li><li>Warm caches and connection pools so the cutover does not present as a latency spike.</li><li>Check dependency connectivity: databases, queues, caches, and third-party endpoints must all be reachable from green.</li><li>Confirm capacity: green must handle full production load alone, because blue is no longer absorbing its share.</li><li>Validate data compatibility in both directions, not just that green can read the current schema.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Rollback reality</h2>
+<ul><li>Rollback is a routing change back to blue, which is fast only if blue is still running, healthy, and correctly sized.</li><li>Blue must not be scaled down, reconfigured, or repurposed before the new version is proven.</li><li>If the cutover included a destructive data change, routing back does not restore service.</li><li>In-flight requests on green complete against the new version, so a small amount of new-version behavior survives the rollback.</li><li>Sessions created on green may not be understood by blue unless session format is compatible.</li><li>Rehearse rollback as a normal operation; a rollback path exercised only during incidents tends to fail.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>The database problem</h2>
+<p class="lede">Both environments almost always share a single database, which quietly turns every schema change into a rollback constraint.</p>
+<ul><li>If version 2 adds a column with a default and drops the old one, version 1 can no longer run against the schema.</li><li>Safe schema changes are additive: add first, backfill, dual-write or dual-read, then remove later.</li><li>The removal step must happen in a separate release, after blue is no longer needed as a rollback target.</li><li>Data written by version 2 in a new format may be unreadable by version 1, so rollback can corrupt or fail.</li><li>A separate database per environment solves schema coupling but creates a data-merge problem that is usually worse.</li><li>Migrations that rewrite large tables lock them, which can make the cutover fail for reasons unrelated to application code.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Shared state beyond the database</h2>
+<ul><li>Sessions must be stored in a shared, version-tolerant format or users will be logged out on rollback.</li><li>Cached values written by one version can be read by the other, so cache key versions help separate incompatible payloads.</li><li>Queue messages outlive deployments; consumers must tolerate messages produced by either version.</li><li>Search indexes and materialized views are shared state too, and a mapping change can break the old version.</li><li>Object storage paths and file formats must remain readable after a switch back.</li><li>Third-party integrations configured per environment can silently diverge, making green behave differently from blue.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Cost and environment parity</h2>
+<ul><li>Two complete production environments double compute and often double idle capacity during the release window.</li><li>Parity is expensive to maintain: drift in configuration, dependencies, or infrastructure makes the idle environment a poor substitute.</li><li>Some teams rotate roles — after a stable period, blue becomes the next release target — which keeps both environments exercised.</li><li>Keeping blue warm for rollback costs money for as long as the rollback guarantee is promised.</li><li>Scaling green up just for the cutover and down afterwards saves cost but removes the spare capacity needed for rollback.</li><li>Environment parity is the core engineering cost: infrastructure as code and identical configuration management are prerequisites, not nice-to-haves.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Observability and all-at-once exposure</h2>
+<ul><li>The switch moves every user at the same moment, so a production-only defect affects the entire user base immediately.</li><li>Post-cutover monitoring must be able to distinguish the new environment from the old one in metrics and logs.</li><li>Define automatic revert conditions — error rate, latency percentiles, business metrics — before the switch, not after.</li><li>Watch saturation as well as errors, because a green environment sized correctly on paper may still run hotter under real traffic.</li><li>Keep the old environment's dashboards live during the observation window so the comparison is immediate.</li><li>An observation window that ends before slow-burn problems appear turns the fast rollback into a false comfort.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Variations</h2>
+<ul><li>Blue-green with weighted routing moves a percentage of traffic first, combining fast rollback with bounded exposure.</li><li>Per-tenant cutover switches specific customers, which suits B2B products where tenants can be moved individually.</li><li>Blue-green for stateful services is much harder, because the data layer cannot be duplicated cheaply or consistently.</li><li>Some teams run blue-green at the cluster level and rolling within the cluster, so a switch still has internal batching.</li><li>A 'green by default' model keeps the idle environment continuously deployed, shrinking the release window.</li><li>Without parity and monitoring, these variations degrade into an expensive way to do recreate.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes</h2>
+<ul><li><strong>Cold start:</strong> green serves with empty caches, producing a latency spike that looks like a code regression.</li><li><strong>Schema lock-in:</strong> version 2 makes a change that makes rollback impossible, discovered only during the incident.</li><li><strong>Config drift:</strong> green is missing a secret or environment variable that only exists in blue.</li><li><strong>Partial cutover:</strong> DNS caching leaves some users on blue, so behavior and data diverge across the population.</li><li><strong>Rollback unavailable:</strong> blue was scaled down or redeployed, so the promised seconds-long recovery does not exist.</li><li><strong>Silent capacity shortfall:</strong> green cannot carry the full load alone and degrades under the cutover.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When to choose blue-green</h2>
+<ul><li>Choose it when rollback speed dominates and the service is critical enough to justify a duplicate environment.</li><li>Choose it when the new version needs isolated warm-up and smoke testing before exposure.</li><li>Avoid it when the budget cannot absorb a second full environment for the release window.</li><li>Avoid it when the data layer makes simultaneous versions unsafe and cannot be made backward compatible.</li><li>Avoid it when all-at-once exposure is unacceptable and traffic splitting is available — then use a canary.</li><li>In practice, combine it with flags: switch environments, then release features gradually for finer control.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Blue-green</strong> gives near-instant rollback and isolated pre-release testing, but requires two full environments running at once.</li><li><strong>Router cutover</strong> is immediate and reversible but moves all users at once, so a production-only defect hits everyone.</li><li><strong>DNS cutover</strong> avoids load balancer churn but propagates slowly and unevenly because of resolver caching.</li><li><strong>Keeping blue warm</strong> preserves the rollback guarantee but doubles idle cost for the whole observation window.</li><li><strong>Rotating environments</strong> keeps both sides tested but adds operational discipline and cleanup work to every release.</li><li><strong>A separate database per environment</strong> removes schema coupling but introduces data replication and merge complexity.</li><li><strong>Weighted cutover</strong> reduces blast radius but is effectively a canary and needs traffic analysis to be meaningful.</li><li><strong>Aggressive cost cutting</strong> on the idle environment saves money but quietly converts fast rollback into a rebuild.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a blue-green deployment?</summary><div class="answer"><p>Two production-equivalent environments where blue serves live traffic and green hosts the next version. Once green is validated, the router sends traffic to it, and blue stays running as a rollback target. The release becomes a routing change rather than a fleet upgrade.</p></div></details>
+<details><summary>2. Why is rollback faster than in a rolling deployment?</summary><div class="answer"><p>Because the previous version was never destroyed and does not need to be redeployed. Reverting is the same router change in the opposite direction, so it takes seconds instead of the length of a full rollout. The guarantee depends entirely on blue staying healthy and correctly sized.</p></div></details>
+<details><summary>3. What is the biggest hidden risk in blue-green?</summary><div class="answer"><p>The shared database. If version 2 applies an incompatible or destructive schema change, version 1 can no longer serve traffic, so the fast rollback does not restore service. Schema changes must be backward compatible and split across releases.</p></div></details>
+<details><summary>4. How do you handle database changes with blue-green?</summary><div class="answer"><p>Expand and contract: add the new structure without removing the old, keep both versions compatible, backfill and switch reads, then remove the old structure in a later release after blue is retired. The removal must never happen in the same release as the addition.</p></div></details>
+<details><summary>5. What is the difference between load-balancer cutover and DNS cutover?</summary><div class="answer"><p>A load balancer switch is immediate and fully under your control, so rollback is deterministic. DNS changes propagate according to TTL and resolver behaviour, so some clients move before others and rollback is partial for a while. Prefer the load balancer for the actual switch, and use DNS only for coarse routing.</p></div></details>
+<details><summary>6. Why does the idle environment need warm-up?</summary><div class="answer"><p>An unwarmed environment starts with empty caches and cold connection pools, so the first requests after cutover hit the database and downstreams hard. That latency spike looks exactly like a regression and can trigger a needless rollback. Warm-up makes the cutover comparable to steady state.</p></div></details>
+<details><summary>7. What shared state must both environments tolerate?</summary><div class="answer"><p>Sessions, caches, queue messages, search indexes, and object storage all outlive a deployment. Any of them written in a format only one version understands will break the other. Versioning cache keys and keeping message formats additive are the usual mitigations.</p></div></details>
+<details><summary>8. How does blue-green handle blast radius?</summary><div class="answer"><p>Poorly on its own: flipping the router moves every user at once. A defect that only appears under real production traffic can affect the whole user base before anyone reacts. Weighted cutover or a canary stage reduces exposure, at the cost of more machinery.</p></div></details>
+<details><summary>9. What does environment parity mean and why does it matter?</summary><div class="answer"><p>Both environments must have the same configuration, dependencies, secrets, and infrastructure shape. Without parity, green behaves differently from blue for reasons unrelated to the code, and the smoke tests validate the wrong thing. Parity is usually achieved with infrastructure as code and shared configuration management.</p></div></details>
+<details><summary>10. How would you reduce blue-green cost?</summary><div class="answer"><p>Rotate environments instead of keeping a permanently idle fleet, scale the standby to a smaller but sufficient size, or use weighted cutover so the duplicate capacity is needed for a shorter window. Each saving trades away part of the rollback guarantee, so make the trade explicit.</p></div></details>
+<details><summary>11. How is blue-green different from canary?</summary><div class="answer"><p>Blue-green moves all traffic at one switch point; canary moves a small share first and grows it while comparing metrics. Blue-green optimizes recovery speed, canary optimizes exposure size. Blue-green with weighted routing is effectively a canary that keeps a full standby.</p></div></details>
+<details><summary>12. When should you not use blue-green?</summary><div class="answer"><p>When the budget cannot support two production environments, when the data layer cannot tolerate two versions, or when blast radius matters more than rollback speed. In those cases rolling, canary, or a maintenance window is a better fit.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Promising seconds-long rollback while scaling down or redeploying the blue environment right after cutover.</li><li>Applying a destructive schema change in the same release as the code that needs it.</li><li>Switching DNS and assuming the cutover is instant when resolver caching spreads it over many minutes.</li><li>Skipping warm-up and then misreading the cold-cache latency spike as a code defect.</li><li>Letting configuration drift between environments so green fails for reasons unrelated to the release.</li><li>Using a cutover mechanism that lives inside the application being released.</li><li>Observing for a few seconds and declaring success before slow-burn errors and saturation appear.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="rolling-deployments.html"><span>← Previous</span><strong>Rolling Deployments</strong></a><a class="next" href="canary-releases.html"><span>Next →</span><strong>Canary Releases</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/blue-green-deployments">AlgoMaster — Blue-Green Deployments</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

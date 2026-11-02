@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strangler Fig Pattern — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 80 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Strangler Fig Pattern</h1>
+    <p class="dek">Microservices Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/strangler-fig-pattern">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem with big-bang rewrites</a>
+<a href="#s2">Why rewrites fail</a>
+<a href="#s3">Where the name comes from</a>
+<a href="#s4">The pattern</a>
+<a href="#s5">The routing layer</a>
+<a href="#s6">Choosing the first slice</a>
+<a href="#s7">Moving traffic gradually</a>
+<a href="#s8">Data migration</a>
+<a href="#s9">Keeping two systems consistent</a>
+<a href="#s10">Decommissioning the old path</a>
+<a href="#s11">Failure modes</a>
+<a href="#s12">Measuring progress and governance</a>
+<a href="#s13">Related patterns and decision rules</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>The Strangler Fig pattern replaces a legacy system incrementally: a routing layer sends one slice of traffic to new code at a time until the old system has nothing left to serve.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Strangler fig pattern</dt><dd>Growing a new system around an old one and moving functionality across piece by piece until the old system can be retired.</dd></div><div class="term"><dt>Big-bang rewrite</dt><dd>Building a complete replacement and switching all traffic over on one day, concentrating risk into a single launch.</dd></div><div class="term"><dt>Routing layer</dt><dd>A facade, proxy, or gateway that decides per request whether the old or new implementation handles it.</dd></div><div class="term"><dt>Seam</dt><dd>A place in the legacy system where behaviour can be intercepted and redirected without rewriting everything around it.</dd></div><div class="term"><dt>Branch by abstraction</dt><dd>Introducing an internal abstraction so old and new implementations can coexist behind one interface during a migration.</dd></div><div class="term"><dt>Dual write</dt><dd>Writing the same change to both old and new stores during coexistence, with reconciliation to catch divergence.</dd></div><div class="term"><dt>Change data capture</dt><dd>Streaming committed database changes to another system so the new store stays current without application dual writes.</dd></div><div class="term"><dt>Parallel run</dt><dd>Executing old and new implementations on the same input and comparing results before trusting the new one.</dd></div><div class="term"><dt>Anti-corruption layer</dt><dd>A translation layer that keeps the legacy model from leaking into the new system's domain model.</dd></div><div class="term"><dt>Decommissioning</dt><dd>Removing the legacy code path, data, and infrastructure once traffic no longer depends on it.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem with big-bang rewrites</h2>
+<p class="lede">A ten-year-old commerce monolith handles products, carts, orders, payments, and accounts in one codebase, and change has become slow and risky.</p>
+<ul><li>The team decides to move to a new architecture.</li><li>The tempting option is to build the replacement from scratch and switch over on one day.</li><li>That is a <strong>big-bang rewrite</strong>, and it concentrates years of work into one launch.</li><li>The business cannot pause new features while the rewrite runs.</li><li>Nobody can fully specify the legacy behaviour, because much of it lives in code and habit.</li><li>The cutover becomes a single moment where every user is exposed at once.</li><li>Most organizations underestimate how long this takes and how much risk it carries.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why rewrites fail</h2>
+<ul><li>It takes years, and the business keeps moving during that time.</li><li>New features must be built twice or the replacement ships already behind.</li><li>Hidden rules and edge cases exist only in the legacy code and in support tickets.</li><li>Undocumented behaviour is discovered when the new system answers differently.</li><li>The old system keeps changing, so the rewrite target moves.</li><li>One big switchover means one large rollback if anything is wrong.</li><li>Morale and funding are hard to sustain through a multi-year invisible project.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Where the name comes from</h2>
+<ul><li>Martin Fowler named the pattern in 2004 after strangler fig trees in Queensland rainforests.</li><li>A strangler fig starts as a seed in the branches of a host tree.</li><li>It sends roots to the ground and grows around the host over years.</li><li>The fig gradually shades and outcompetes the host while standing in the same place.</li><li>The host dies away and the fig remains, with no single moment of replacement.</li><li>The metaphor maps directly: new code grows around the legacy system until the legacy system is unnecessary.</li><li>The important property is <strong>continuous operation throughout</strong>.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The pattern</h2>
+<ul><li>Put a routing layer in front of the legacy system so traffic can be directed per capability.</li><li>Pick one slice of functionality with a clean boundary.</li><li>Build that slice in the new system while the old one keeps serving everything else.</li><li>Shift traffic for that slice to the new implementation.</li><li>Verify behaviour, then delete the corresponding legacy code path.</li><li>Repeat with the next slice until the old system serves nothing and can be shut down.</li><li>Each step is independently releasable and reversible.</li></ul>
+
+<div class="flow"><span class="flow-step">Introduce a routing layer</span><span class="flow-arrow">→</span><span class="flow-step">Choose one capability with a clean seam</span><span class="flow-arrow">→</span><span class="flow-step">Build it in the new system</span><span class="flow-arrow">→</span><span class="flow-step">Route a small share of traffic to it</span><span class="flow-arrow">→</span><span class="flow-step">Increase traffic while comparing outcomes</span><span class="flow-arrow">→</span><span class="flow-step">Remove the legacy path for that capability</span><span class="flow-arrow">→</span><span class="flow-step">Repeat until the legacy system is empty</span></div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>The routing layer</h2>
+<ul><li>The facade is what makes incremental migration possible, and it is the piece teams most often under-build.</li><li>Options include an API gateway, a reverse proxy, a feature-flag service, or a routing module inside the monolith.</li><li>Routing can key on path, host, header, user cohort, tenant, or percentage of traffic.</li><li>Decisions should be configurable at runtime so shifting traffic does not need a deploy.</li><li>The layer must be observable: every response should say which implementation served it.</li><li>Keep routing rules simple; a tangle of per-user exceptions becomes unmaintainable.</li><li>The facade eventually becomes the permanent new edge, so design it as production infrastructure.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Choosing the first slice</h2>
+<ul><li>Prefer a capability with a clear seam and limited data coupling.</li><li>Prefer something valuable enough to prove the approach, but not the most critical path.</li><li>Notifications, search, and reporting are common first candidates.</li><li>Avoid slices whose data model is entangled with everything else.</li><li>Avoid slices with the highest regulatory or financial risk for the first attempt.</li><li>Estimate the data migration effort before committing, not after.</li><li>The first slice should teach the team how to do the next five.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Moving traffic gradually</h2>
+<ul><li>Start by sending a small percentage or an internal cohort to the new path.</li><li>Use shadow traffic to exercise the new code without affecting users.</li><li>Compare old and new responses on the same inputs to catch behavioural drift.</li><li>Increase traffic in steps, watching error rate, latency, and business metrics.</li><li>Keep a fast rollback that flips routing back to the legacy path.</li><li>Shift per tenant or region when isolation makes incidents easier to bound.</li><li>Do not declare success on error rates alone; compare business outcomes too.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Stage</th><th>Traffic to new path</th><th>Goal</th></tr></thead><tbody><tr><td>Shadow</td><td>Real requests mirrored, responses discarded</td><td>Find divergence without user impact</td></tr>
+<tr><td>Internal</td><td>Employees or test tenants</td><td>Validate behaviour with tolerant users</td></tr>
+<tr><td>Canary</td><td>Small percentage or one region</td><td>Measure production behaviour and rollback speed</td></tr>
+<tr><td>Ramp</td><td>Increasing shares in steps</td><td>Confirm stability at scale</td></tr>
+<tr><td>Full</td><td>All traffic</td><td>Retire the legacy path</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Data migration</h2>
+<ul><li>Code is usually the easy part; shared data is what makes migrations long.</li><li>Decide early whether the new slice owns its data or shares the legacy schema.</li><li>Backfill existing rows into the new store before or during the traffic shift.</li><li>Keep the backfill repeatable and idempotent so it can be re-run after a fix.</li><li>Choose a sync mechanism: dual write, change data capture, or event publication from the legacy system.</li><li>Plan the write cutover separately from the read cutover; they rarely happen at once.</li><li>Define reconciliation: how you detect and repair rows that differ between stores.</li></ul>
+
+
+<div class="note">The riskiest moment is usually the write cutover, because two writers can silently diverge.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Keeping two systems consistent</h2>
+<ul><li>Dual writes are simple to start but not atomic: one store can succeed while the other fails.</li><li>Write to the legacy store as the source of truth first, then propagate, and reconcile failures.</li><li>Change data capture moves committed changes without changing legacy application code.</li><li>Events published by the legacy system give the new system intent rather than raw row diffs.</li><li>An anti-corruption layer translates the legacy model so new code does not inherit its concepts.</li><li>Reconciliation jobs must compare counts, checksums, and sampled records, not just totals.</li><li>Every temporary sync path needs a removal date, or it becomes permanent plumbing.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Decommissioning the old path</h2>
+<ul><li>Retiring the legacy code is the step that turns a migration into a completed one.</li><li>Prove the old path receives zero traffic before deleting it.</li><li>Remove routing rules, feature flags, and coexistence code together.</li><li>Archive or delete legacy data according to retention and legal requirements.</li><li>Shut down unused infrastructure so cost actually falls.</li><li>Update runbooks, dashboards, and on-call rotations to match the new reality.</li><li>Celebrate and record the playbook; the next slice will reuse it.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failure modes</h2>
+<ul><li>The migration stalls after the first slice and two systems coexist indefinitely.</li><li>Dual writes drift, and no one notices until a customer reports missing data.</li><li>Routing logic accumulates exceptions and becomes harder to reason about than the monolith.</li><li>The new slice silently changes behaviour that downstream systems depend on.</li><li>Backfills are slow, non-idempotent, or run against a live primary and hurt latency.</li><li>The team keeps the legacy path as a fallback forever, inheriting both costs.</li><li>Ownership blurs: the legacy team and new team each assume the other maintains the seam.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Measuring progress and governance</h2>
+<ul><li>Track the percentage of traffic and the percentage of capabilities migrated.</li><li>Track the removal of legacy code, not just the addition of new services.</li><li>Set exit criteria per slice: behaviour match, traffic shifted, legacy path deleted.</li><li>Publish a migration map so everyone sees what is left.</li><li>Budget migration work explicitly; feature work will otherwise consume all capacity.</li><li>Assign one owner per slice with authority to delete the old path.</li><li>Time-box coexistence and escalate when a slice sits half-migrated.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Related patterns and decision rules</h2>
+<ul><li><strong>Branch by abstraction</strong> creates an internal seam when you cannot route at the edge.</li><li><strong>Parallel run</strong> compares outputs before trusting the new implementation.</li><li><strong>Expand and contract</strong> handles schema changes in compatible steps.</li><li><strong>Anti-corruption layer</strong> keeps legacy concepts out of the new model.</li><li>Use strangler fig when the old system must keep serving users during modernization.</li><li>Avoid it when the legacy system is small enough to replace outright or is being retired anyway.</li><li>It is not a licence to avoid decisions: each slice still needs a target design.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Incremental delivery</strong> reduces launch risk but spreads cost and coordination over a long period.</li><li><strong>Coexistence</strong> keeps users served but doubles infrastructure, data sync, and on-call surface.</li><li><strong>Routing layer</strong> enables gradual cutover but becomes critical infrastructure that must be highly available.</li><li><strong>Gradual traffic shifts</strong> bound incidents to a cohort but require reliable observability to detect drift.</li><li><strong>Dual writes</strong> are easy to start but risk divergence without reconciliation and cleanup.</li><li><strong>CDC and events</strong> avoid application dual writes but add pipeline latency and operational dependencies.</li><li><strong>Clean seams</strong> make extraction cheap but may require refactoring the monolith first.</li><li><strong>Long migrations</strong> preserve business continuity but risk fatigue, stalled slices, and permanent coexistence.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the Strangler Fig pattern?</summary><div class="answer"><p>It replaces a legacy system incrementally by growing a new system around it. A routing layer sends one capability at a time to the new implementation, and once a slice is proven the old code is removed, until the legacy system can be shut down.</p></div></details>
+<details><summary>2. Why is a big-bang rewrite risky?</summary><div class="answer"><p>It takes years while the business keeps changing, forces features to be built twice, and depends on undocumented legacy behaviour that is discovered late. All risk lands on one switchover where every user is affected at once.</p></div></details>
+<details><summary>3. Why is it called strangler fig?</summary><div class="answer"><p>Martin Fowler named it after fig trees that grow around a host tree, gradually taking its place until the host dies. There is no moment where the old tree is removed and replaced, which mirrors incremental migration without a single cutover.</p></div></details>
+<details><summary>4. What does the routing layer do?</summary><div class="answer"><p>It decides per request whether the legacy or new implementation handles it, based on path, header, tenant, cohort, or traffic percentage. It must be runtime-configurable, observable, and highly available, because it becomes the permanent edge.</p></div></details>
+<details><summary>5. How do you choose the first capability?</summary><div class="answer"><p>Pick one with a clean seam, limited data coupling, and enough value to prove the approach, but not the most critical or highest-risk path. Notifications, search, and reporting are common starting points. The first slice should teach the team how to do the rest.</p></div></details>
+<details><summary>6. How do you move traffic safely?</summary><div class="answer"><p>Shadow real traffic and discard responses, then serve internal users, then a canary percentage or region, then ramp in steps while watching errors, latency, and business metrics. Keep a fast routing rollback at every stage.</p></div></details>
+<details><summary>7. What makes data migration harder than code migration?</summary><div class="answer"><p>Data is shared and stateful: it must be backfilled, kept in sync during coexistence, and cut over for writes without divergence. Code can be routed per request; data needs reconciliation, idempotent backfills, and a clear owner of truth.</p></div></details>
+<details><summary>8. What is the difference between dual write and CDC?</summary><div class="answer"><p>Dual write makes the application write to both stores, which is simple but not atomic and can diverge. Change data capture reads the legacy database's change log and propagates it, avoiding application changes but adding pipeline latency.</p></div></details>
+<details><summary>9. How do you detect divergence between old and new systems?</summary><div class="answer"><p>Compare counts, checksums, and sampled records on a schedule, and in a parallel run compare actual outputs for the same inputs. Divergence needs an owner, an alert, and an automated or scripted repair path.</p></div></details>
+<details><summary>10. Why is decommissioning important?</summary><div class="answer"><p>Without deleting the legacy path, you pay for two systems forever and the migration never finishes. Traffic must be proven zero, routing rules and flags removed, data archived, and infrastructure shut down so cost and complexity actually fall.</p></div></details>
+<details><summary>11. How do you keep a long migration from stalling?</summary><div class="answer"><p>Set exit criteria per slice, track legacy code removal rather than new services added, budget migration capacity explicitly, give each slice one owner, and time-box coexistence with escalation when a slice sits half-done.</p></div></details>
+<details><summary>12. When is strangler fig a bad fit?</summary><div class="answer"><p>When the legacy system is small enough to replace outright, is being retired anyway, or has no usable seam to intercept. The pattern pays off when the old system must keep serving real users throughout the change.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Building the new system for years and planning a single cutover anyway, which is a big-bang rewrite with extra steps.</li><li>Skipping the routing layer and coupling clients directly to the new services during migration.</li><li>Dual writing with no reconciliation, so the stores silently diverge.</li><li>Never deleting the legacy path, leaving permanent coexistence and doubled cost.</li><li>Letting routing rules accumulate per-user exceptions until nobody can predict behaviour.</li><li>Migrating the most critical, most entangled capability first and exhausting trust on the hardest slice.</li><li>Measuring progress by new services built instead of legacy functionality removed.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="bulkhead-pattern.html"><span>← Previous</span><strong>Bulkhead Pattern</strong></a><a class="next" href="service-mesh.html"><span>Next →</span><strong>Service Mesh</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/strangler-fig-pattern">AlgoMaster — Strangler Fig Pattern</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>R-Trees — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 91 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>R-Trees</h1>
+    <p class="dek">Data Structures for Scale · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/r-trees">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: objects with extent</a>
+<a href="#s2">Why point indexes struggle with shapes</a>
+<a href="#s3">The core idea: bounding rectangles</a>
+<a href="#s4">Tree structure</a>
+<a href="#s5">Search</a>
+<a href="#s6">Insertion</a>
+<a href="#s7">Splits and tree quality</a>
+<a href="#s8">Deletion and condensation</a>
+<a href="#s9">Nearest-neighbor search</a>
+<a href="#s10">Variants</a>
+<a href="#s11">Limitations</a>
+<a href="#s12">Where it is used</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>An R-tree wraps every shape in a bounding rectangle, groups nearby rectangles into larger ones, and prunes whole groups whose boxes cannot touch the query — which is why it is the index behind most spatial databases.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>R-tree</dt><dd>A height-balanced tree of nested bounding rectangles that indexes objects by the space they occupy rather than by a single point.</dd></div><div class="term"><dt>Minimum bounding rectangle (MBR)</dt><dd>The smallest axis-aligned rectangle that fully contains an object or a group of objects.</dd></div><div class="term"><dt>Fanout</dt><dd>The maximum number of entries in one node, usually chosen so a node fits one disk page.</dd></div><div class="term"><dt>Least enlargement</dt><dd>The insertion heuristic that places a new rectangle in the child whose MBR grows the least to include it.</dd></div><div class="term"><dt>Node split</dt><dd>Dividing an overfull node into two groups so each MBR covers as little area and overlap as possible.</dd></div><div class="term"><dt>Condensation</dt><dd>The deletion cleanup that removes underfull nodes and reinserts their orphaned entries.</dd></div><div class="term"><dt>Mindist</dt><dd>The minimum possible distance from a query point to a node's rectangle, used to order best-first nearest-neighbor search.</dd></div><div class="term"><dt>R* tree</dt><dd>A variant that chooses splits and reinserts entries to minimize MBR overlap, not just area.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: objects with extent</h2>
+<p class="lede">A food-delivery app stores a delivery zone per restaurant. The zones are irregular polygons that follow streets, rivers, and neighborhood boundaries.</p>
+<ul><li>A customer's request becomes the question "which zones contain this point?"</li><li>Answering it means a point-in-polygon test per zone, and polygons can have hundreds of edges.</li><li>With a very large number of restaurants, testing every polygon per request is far too slow.</li><li>The real cost is not the geometry alone but doing it <strong>for every object on every query</strong>.</li><li>The fix must eliminate zones that are nowhere near the customer before any geometry runs.</li><li>That is a filtering problem: cheap approximate rejection first, exact computation on the survivors.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Why point indexes struggle with shapes</h2>
+<ul><li>Geohash and quadtrees assign each <strong>point</strong> to exactly one cell, which makes them easy to organize and search.</li><li>A shape has extent: a delivery zone can cover many cells at once.</li><li>With a geohash, the same zone must be written into every cell it overlaps, and a large zone can overlap a very large number of small cells.</li><li>That duplication inflates storage and forces the write path to touch many keys when a zone changes.</li><li>In a quadtree, a zone crossing a node boundary does not fit in a single child.</li><li>The options are to store it in several children or keep it at an ancestor, where more queries must inspect it.</li><li>The conclusion: instead of cutting space into fixed regions, organize objects by the space they actually occupy.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The core idea: bounding rectangles</h2>
+<ul><li>Wrap every object in its <strong>minimum bounding rectangle</strong>, the tightest axis-aligned box that contains it.</li><li>Group nearby rectangles and wrap the group in a larger bounding rectangle.</li><li>Repeat upward until one root rectangle contains everything.</li><li>The tree therefore stores rectangles at every level: leaves point at the real geometry, internal nodes point at children.</li><li>A search compares the query region with these rectangles and skips any subtree whose box cannot intersect it.</li><li>For most queries the boxes reject almost everything, so exact geometry runs on very few objects.</li><li>The hierarchy is approximate by design: a rectangle is a cheap, conservative summary of a shape.</li></ul>
+
+
+<div class="note">Bounding boxes only ever grow: they must contain their contents, so they can overlap each other even when the underlying shapes do not.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Tree structure</h2>
+<ul><li>The tree is <strong>height-balanced</strong>: every leaf sits at the same depth, so search cost is bounded.</li><li>Leaf entries hold an MBR plus a reference to the object, or the object's identifier.</li><li>Internal entries hold an MBR plus a pointer to a child node.</li><li>Each node has between a minimum and maximum number of entries; the maximum (fanout) is usually sized to one disk page.</li><li>The minimum fill keeps nodes from becoming nearly empty after deletions, at the cost of more complex maintenance.</li><li>A node's MBR is exactly the bounding box of all entries beneath it, so ancestors must be updated when descendants change.</li><li>Because nodes map to pages, a query typically costs a handful of page reads rather than a scan.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Search</h2>
+<ul><li>Start at the root and compare each entry's MBR with the query region.</li><li>If the boxes are disjoint, prune that subtree entirely — no geometry, no page reads below it.</li><li>If they intersect, descend and repeat; at the leaves, run the exact predicate.</li><li>The exact predicate depends on the query: point-in-polygon, rectangle intersection, containment, or distance.</li><li>A point query is just a degenerate region, so it follows the same path.</li><li>Boxes are conservative, so survivors include false hits; exact geometry removes them.</li><li>The cost is driven by how much the MBRs <strong>overlap</strong>, not by how many objects exist.</li></ul>
+
+<div class="flow"><span class="flow-step">Test root MBR against query</span><span class="flow-arrow">→</span><span class="flow-step">Prune disjoint subtrees</span><span class="flow-arrow">→</span><span class="flow-step">Descend into overlapping children</span><span class="flow-arrow">→</span><span class="flow-step">At leaf: run exact geometry</span><span class="flow-arrow">→</span><span class="flow-step">Return matches</span></div>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Insertion</h2>
+<ul><li>Descend from the root, at each level choosing the child whose MBR must grow <strong>least</strong> to include the new rectangle.</li><li>Ties are broken by smallest resulting area, which keeps boxes tight.</li><li>Insert the entry at the chosen leaf.</li><li>If the leaf overflows, split it into two groups and propagate the new rectangles upward.</li><li>If the root splits, a new root is created, which is the only way the tree grows in height.</li><li>Then enlarge the MBRs along the path back to the root.</li><li>The choice of path is greedy and local: a locally cheap insertion can make later searches worse, which is why split quality matters.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Splits and tree quality</h2>
+<ul><li>A split partitions the overfull entries into two groups, and the quality of that partition decides future query cost.</li><li>The quadratic split picks the two seeds that waste the most space together, then assigns each remaining entry to the group needing less enlargement.</li><li>The linear split approximates the same idea with a single pass, trading quality for build speed.</li><li>Good splits minimize total <strong>area</strong>, because smaller boxes prune more.</li><li>They also minimize <strong>overlap</strong>, because overlapping boxes force a query to follow several paths at once.</li><li>R* adds forced reinsertion: instead of splitting immediately, it removes some entries and reinserts them, which often avoids a bad split altogether.</li><li>Bulk loading from spatially sorted data produces far better trees than random insertion.</li><li>A poorly built tree still answers correctly; it just degenerates toward scanning many leaves.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Deletion and condensation</h2>
+<ul><li>Find the leaf containing the entry, then remove it.</li><li>If the node drops below the minimum fill, remove the node and reinsert its remaining entries from the top of the tree.</li><li>Condensation keeps the tree balanced and prevents nearly empty pages from lingering.</li><li>Reinsertion is chosen over merging because it can place orphans in better-fitting nodes.</li><li>Ancestor MBRs must shrink or grow to match their remaining contents; a stale box only costs pruning quality, not correctness.</li><li>Deleting a shape that spans many leaves is cheap here, unlike cell-based indexes that store duplicates.</li><li>Frequent updates make R-trees expensive, because each change can touch several pages.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Nearest-neighbor search</h2>
+<ul><li>Nearest-neighbor queries ask for the closest object, not for everything inside a region.</li><li>Use <strong>mindist</strong>: the minimum possible distance from the query point to an MBR.</li><li>Explore entries in increasing mindist order with a priority queue.</li><li>Stop when the smallest remaining mindist exceeds the best exact distance found so far.</li><li>This prunes subtrees that cannot contain a closer object without computing any geometry.</li><li>k-nearest-neighbor works the same way, stopping when the queue's bound exceeds the k-th best result.</li><li>The same machinery supports "within distance d" queries by treating d as the stopping bound.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Variants</h2>
+<ul><li><strong>R+ tree:</strong> forbids overlap between sibling MBRs by duplicating objects that straddle a boundary — faster searches, more storage and more insert paths.</li><li><strong>R* tree:</strong> minimizes overlap first and area second, with forced reinsertion; the common default in spatial databases.</li><li><strong>Hilbert R-tree:</strong> orders entries by a space-filling curve so nodes group spatially coherent objects.</li><li><strong>Priority R-tree:</strong> a bulk-loaded variant with provable worst-case query bounds.</li><li>Variants differ mainly in how they trade <em>build and update cost</em> against <em>search pruning quality</em>.</li><li>The right choice depends on whether the workload is read-mostly (favor pruning) or update-heavy (favor simpler maintenance).</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Limitations</h2>
+<ul><li>Sibling rectangles may overlap, so a query can be forced to follow several branches at once.</li><li>As dimensionality rises, boxes overlap more and pruning collapses — the structure is built for two or three dimensions.</li><li>Updates are heavier than in a point index because they can restructure pages and change ancestor MBRs.</li><li>The index is approximate by construction, so every candidate still needs an exact predicate.</li><li>Fanout and fill factor must be tuned to the page size; a node that does not fit a page loses the disk advantage.</li><li>Large or oddly shaped objects produce large MBRs that cover other data and reduce pruning.</li><li>Building the index on a live, constantly updated table is often the operational bottleneck.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Where it is used</h2>
+<ul><li>Spatial databases expose R-trees through a general search-tree framework: PostGIS uses GiST, MySQL has spatial indexes, SQLite ships an R*Tree module.</li><li>Geographic information systems use them for polygon intersection, containment, and map-window queries.</li><li>Routing and logistics use them to find zones, road segments, and service areas near a point.</li><li>Computer-aided design and game engines use them for broad-phase collision and view culling.</li><li>Choose an R-tree when the objects are shapes, when overlap and containment matter, and when a spatial database is available.</li><li>Choose a geohash or quadtree when the objects are points, and S2 or H3 when the grid must be globally consistent.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>R-tree</th><th>Geohash</th><th>Quadtree</th></tr></thead><tbody><tr><td>Indexes</td><td>Shapes and points</td><td>Points</td><td>Points</td></tr>
+<tr><td>Query types</td><td>Intersection, containment, distance</td><td>Nearby prefix lookup</td><td>Range and nearest</td></tr>
+<tr><td>Storage</td><td>Disk pages in a spatial DB</td><td>Plain indexed column</td><td>In-memory custom code</td></tr>
+<tr><td>Shape spanning cells</td><td>Native: one entry, larger box</td><td>Duplicated per cell</td><td>Stored in several nodes</td></tr>
+<tr><td>Main weakness</td><td>Overlapping MBRs, update cost</td><td>Boundaries, pole distortion</td><td>Skew, rebuild cost</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Bounding rectangles</strong> make pruning cheap but are conservative, so candidates still need exact geometry.</li><li><strong>Overlap minimization</strong> improves query pruning but makes splits and inserts more expensive to compute.</li><li><strong>R+ duplication</strong> removes sibling overlap and speeds reads but multiplies storage and insert work.</li><li><strong>Larger fanout</strong> reduces tree height but risks nodes that no longer fit a page.</li><li><strong>Higher minimum fill</strong> keeps pages dense but triggers more condensation after deletions.</li><li><strong>Forced reinsertion</strong> produces better trees but adds write amplification during load.</li><li><strong>Bulk loading</strong> yields compact trees quickly but is a batch operation, not an online one.</li><li><strong>An R-tree over a point-only workload</strong> adds update cost and overlap for capability you do not use.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why can't a geohash index a delivery zone efficiently?</summary><div class="answer"><p>A geohash indexes points, so a zone must be written into every cell it overlaps. A large zone can span a very large number of small cells, which duplicates the row many times and multiplies write cost on every zone change. An R-tree stores the zone once, wrapped in a rectangle sized to the shape.</p></div></details>
+<details><summary>2. What exactly is stored in an R-tree node?</summary><div class="answer"><p>Internal entries hold a bounding rectangle and a pointer to a child. Leaf entries hold a bounding rectangle and a reference to the actual object or its identifier. A node's rectangle is the bounding box of everything beneath it.</p></div></details>
+<details><summary>3. How does an R-tree answer "which zones contain this point?"</summary><div class="answer"><p>It descends from the root, testing each child's rectangle against the point and pruning disjoint subtrees. At the leaves it runs the exact point-in-polygon test on the few surviving candidates. The tree never tests polygons that cannot contain the point.</p></div></details>
+<details><summary>4. Explain the insertion heuristic.</summary><div class="answer"><p>At each level it picks the child whose rectangle has to grow the least to include the new object, breaking ties by smallest resulting area. Then it descends, inserts at the leaf, splits if the leaf overflows, and enlarges the rectangles on the way back up. It is greedy, so split quality matters for future searches.</p></div></details>
+<details><summary>5. Why is overlap between sibling rectangles so damaging?</summary><div class="answer"><p>If two sibling boxes overlap the query point, the search must follow both branches even though only one can hold the answer. That turns a single tree descent into several, and heavy overlap degenerates into scanning many leaves. This is why R* minimizes overlap before area.</p></div></details>
+<details><summary>6. What happens when a leaf becomes underfull after a delete?</summary><div class="answer"><p>The node is removed and its remaining entries are reinserted from the top of the tree, a process called condensation. That keeps the tree balanced and pages reasonably full. Reinsertion is preferred over merging because orphans often fit better elsewhere.</p></div></details>
+<details><summary>7. How does nearest-neighbor search avoid scanning everything?</summary><div class="answer"><p>It orders nodes by mindist, the minimum distance from the query point to their rectangle, and explores the closest first. Once the smallest remaining bound exceeds the best exact distance found, nothing left can be closer, so the search stops.</p></div></details>
+<details><summary>8. Compare an R-tree with a quadtree.</summary><div class="answer"><p>A quadtree cuts space into fixed nested quadrants, so an object spanning a boundary must be duplicated or stored high in the tree. An R-tree cuts the <em>objects</em> into groups, so each object is stored once regardless of size. Quadtrees suit points in memory; R-trees suit shapes on disk.</p></div></details>
+<details><summary>9. Why do R-trees degrade in high dimensions?</summary><div class="answer"><p>As dimensions grow, bounding boxes become large and overlap heavily, so the query cannot prune much and visits most of the tree. The structure is designed for two or three spatial dimensions; high-dimensional similarity search needs different indexes entirely.</p></div></details>
+<details><summary>10. What is the cost of frequent updates?</summary><div class="answer"><p>Each insert or delete can modify several pages, split nodes, and enlarge ancestor rectangles. That is far heavier than appending to a log-structured index, so R-trees are usually paired with read-mostly spatial data or batched updates.</p></div></details>
+<details><summary>11. How would you build an R-tree for a large existing table?</summary><div class="answer"><p>Bulk load it from data sorted by a spatial ordering such as a Hilbert curve, so each node packs spatially coherent objects. This produces a compact tree far faster than random insertion and avoids many splits. Afterwards, maintenance handles incremental changes.</p></div></details>
+<details><summary>12. When would you not choose an R-tree?</summary><div class="answer"><p>When the objects are points and a plain indexed column suffices, when the grid must be globally consistent near the poles and date line, or when updates dominate. It is also the wrong tool for high-dimensional vectors, which need approximate nearest-neighbor indexes.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating an MBR intersection as the final answer instead of running the exact geometric predicate.</li><li>Assuming sibling rectangles never overlap; overlap is allowed and is what degrades search.</li><li>Using an R-tree for point-only data where a geohash column would add no query cost.</li><li>Building the index by random insertion and blaming the database for slow spatial queries.</li><li>Ignoring fanout versus page size, so each node spans multiple pages and loses its I/O advantage.</li><li>Expecting good pruning in many dimensions; boxes overlap and the tree becomes a scan.</li><li>Forgetting that an object update changes rectangles along the whole path to the root.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="quad-tree.html"><span>← Previous</span><strong>Quad Trees</strong></a><a class="next" href="s2-h3.html"><span>Next →</span><strong>S2 and H3</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/r-trees">AlgoMaster — R-Trees</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

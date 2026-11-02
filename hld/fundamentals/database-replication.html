@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Replication — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 55 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Replication</h1>
+    <p class="dek">Database Scaling Techniques · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/database-replication">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: one database server</a>
+<a href="#s2">What replication is</a>
+<a href="#s3">Primary and replica architecture</a>
+<a href="#s4">How replication works</a>
+<a href="#s5">Why use replication</a>
+<a href="#s6">Synchronous replication</a>
+<a href="#s7">Asynchronous replication</a>
+<a href="#s8">Replication lag</a>
+<a href="#s9">Read-after-write consistency</a>
+<a href="#s10">Read replicas in practice</a>
+<a href="#s11">Failover and split brain</a>
+<a href="#s12">Multi-primary replication</a>
+<a href="#s13">Replication is not backup, and not sharding</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Replication keeps copies of the same data on several servers, buying availability, read throughput, and regional latency — at the cost of lag, failover complexity, and the illusion that a copy is a backup.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Replica</dt><dd>A database server holding a copy of the same data as another server.</dd></div><div class="term"><dt>Primary</dt><dd>The node that accepts writes; also called the leader, it logs changes and ships them to replicas.</dd></div><div class="term"><dt>Replication log</dt><dd>The ordered record of changes — logical operations or physical page changes — that replicas replay.</dd></div><div class="term"><dt>Synchronous replication</dt><dd>A mode where the primary acknowledges a write only after at least one replica has confirmed it.</dd></div><div class="term"><dt>Asynchronous replication</dt><dd>A mode where the primary acknowledges the write immediately and replicas catch up afterwards.</dd></div><div class="term"><dt>Replication lag</dt><dd>The delay between a change committing on the primary and becoming visible on a replica.</dd></div><div class="term"><dt>Read-after-write consistency</dt><dd>A guarantee that a user who just wrote can immediately read their own change, usually by routing that user's reads to the primary briefly.</dd></div><div class="term"><dt>Failover</dt><dd>Promoting a replica to primary after the original primary fails, then redirecting writes.</dd></div><div class="term"><dt>Split brain</dt><dd>A failure state where two nodes both believe they are the authoritative writer and diverge.</dd></div><div class="term"><dt>Multi-primary replication</dt><dd>An architecture where more than one node accepts writes and changes are exchanged between them, requiring conflict resolution.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: one database server</h2>
+<p class="lede">A single database is simple until it becomes the critical dependency for everything else. At that point its failure and its capacity both become the system's limits.</p>
+<ul><li>If the only database server fails, the application loses access to all of its data.</li><li>As traffic grows, one machine must absorb every read and every write.</li><li>Read-heavy products exhaust the database long before the application tier is stressed.</li><li>Users in distant regions pay round-trip latency on every query.</li><li>Adding copies of the data addresses availability, read capacity, and geography at once.</li><li>The copies must be kept in sync, and that synchronization is where the real complexity lives.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What replication is</h2>
+<ul><li>Replication means keeping copies of the same data on multiple database servers.</li><li>A write is applied on one server and then propagated so other servers update their copies.</li><li>All replicas hold the <em>whole</em> dataset, which is what separates replication from sharding.</li><li>Replication is continuous, not a periodic export: changes stream as they happen.</li><li>The application usually does not see replicas as different databases; routing decides which copy serves a query.</li><li>The core question is always how far behind a replica is allowed to be.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Primary and replica architecture</h2>
+<ul><li>One node is the <strong>primary</strong> (leader) and accepts all writes: inserts, updates, deletes.</li><li>The primary records each change and streams it to the replicas.</li><li>Replicas apply the same changes in order to their own copies.</li><li>Reads can go to the primary, but are often distributed across replicas.</li><li>Offloading reads lets the primary spend its resources on writes and its log.</li><li>The primary is still a single write bottleneck and a single point of failure until failover happens.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends a write to the primary</span><span class="flow-arrow">→</span><span class="flow-step">Primary validates and appends the change to its log</span><span class="flow-arrow">→</span><span class="flow-step">Change is streamed to each replica</span><span class="flow-arrow">→</span><span class="flow-step">Replica applies the change to its copy</span><span class="flow-arrow">→</span><span class="flow-step">Replica reports its progress back to the primary</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>How replication works</h2>
+<p class="lede">Replication transmits changes rather than recopying the database for every update. What counts as a change differs by system.</p>
+<ul><li><strong>Statement-based:</strong> the SQL statement is shipped and re-executed; compact but fragile with nondeterministic functions.</li><li><strong>Logical / row-based:</strong> row-level before-and-after images are shipped; safer, larger, and readable by other systems.</li><li><strong>Physical:</strong> low-level storage or WAL block changes are shipped; fastest to apply, tightly coupled to the engine version.</li><li>Replicas must apply changes in commit order, or they will observe states the primary never had.</li><li>A replica usually persists how far it has consumed, so it can resume after a restart.</li><li>The log is also what makes point-in-time recovery and change data capture possible.</li></ul>
+
+
+<div class="note">The mechanism decides what a replica can be used for. Logical replication can feed a different schema or a warehouse; physical replication can only feed the same engine.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Why use replication</h2>
+<ul><li><strong>Availability:</strong> if one server dies, another copy of the data still exists and can be promoted.</li><li><strong>Read scalability:</strong> read traffic spreads over several machines instead of one.</li><li><strong>Geographic latency:</strong> a replica in each region lets users read from a nearby database.</li><li><strong>Maintenance windows:</strong> a replica can serve traffic while the primary is upgraded or rebuilt.</li><li><strong>Analytics isolation:</strong> heavy reporting can run on a replica instead of competing with production writes.</li><li>Replication does not increase write capacity; all writes still pass through one primary in a single-primary design.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Synchronous replication</h2>
+<ul><li>The primary writes locally, sends the change to one or more replicas, and waits for confirmation.</li><li>Only after the required replica acknowledges does the client get a success response.</li><li>Durability is stronger: if the primary dies immediately after the ack, the change already exists elsewhere.</li><li>Write latency now includes a network round trip to the replica.</li><li>If the required replica is slow or unreachable, writes stall or fail even though the primary is healthy.</li><li>A common compromise is quorum sync: wait for any one of several replicas, not for all of them.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Asynchronous replication</h2>
+<ul><li>The primary stores the write locally and acknowledges the client immediately.</li><li>Replicas receive and apply the change shortly afterwards.</li><li>Write latency stays low because the client never waits for another machine.</li><li>If the primary fails after acknowledging but before shipping, the latest writes are lost.</li><li>A promoted replica may be missing the most recent transactions.</li><li>This is the default for most cross-region and read-scaling setups because the latency cost of sync is too high.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Synchronous</th><th>Asynchronous</th></tr></thead><tbody><tr><td>Primary responds</td><td>After a replica confirms</td><td>Right after the local write</td></tr>
+<tr><td>Write latency</td><td>Higher</td><td>Lower</td></tr>
+<tr><td>Primary fails right after ack</td><td>Change already exists on a replica</td><td>Latest change may be lost</td></tr>
+<tr><td>Required replica down</td><td>Writes may fail or stall</td><td>Writes continue</td></tr>
+<tr><td>Typical use</td><td>Critical writes, same-region HA</td><td>Read replicas, cross-region copies</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Replication lag</h2>
+<ul><li>Lag is the gap between the primary's latest commit and what a replica has applied.</li><li>It is normally small but grows during write bursts, network trouble, or a slow replica.</li><li>A lagging replica is not corrupt; it is simply behind.</li><li>Reads routed to it can return stale rows that the user already changed.</li><li>Lag also delays failover: promoting a lagging replica loses recent writes.</li><li>Monitor lag in seconds and bytes, and alert on sustained growth rather than a single spike.</li></ul>
+
+
+<div class="note">Lag is a property of asynchronous designs. It cannot be eliminated, only bounded and hidden where it matters.</div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Read-after-write consistency</h2>
+<p class="lede">Lag becomes a user-visible bug: the app confirms a username change, the page refreshes, and the old name reappears from a replica that has not caught up.</p>
+<ul><li>Route a user's reads to the primary for a short window after that user writes.</li><li>Or track replication position per session and only use replicas that have caught up to the write's log position.</li><li>Or read the just-written record from the primary and the rest from replicas.</li><li>Sticky routing to the primary is the simplest fix but adds primary read load.</li><li>The goal is narrow: <em>this user</em> must see <em>their own</em> write, not global consistency.</li><li>Monotonic reads matter too: a user should not move backwards to an older replica on the next request.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Read replicas in practice</h2>
+<ul><li>Read replicas are the standard way to scale a read-heavy workload with a modest write rate.</li><li>All writes still go to the primary; reads are spread across replicas by the app, a proxy, or a driver.</li><li>Adding replicas multiplies read capacity roughly linearly until the primary's log shipping saturates.</li><li>Each replica is another thing to monitor: lag, disk, connections, and replication errors.</li><li>Replicas are also useful for failover candidates, backups, and heavy analytical queries.</li><li>Replicas do not help write-bound systems; that requires partitioning, batching, or sharding.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Failover and split brain</h2>
+<ul><li>Failover promotes a replica to primary and redirects writes to it.</li><li>Automated failover must detect the failure, choose the most up-to-date replica, promote it, and repoint clients.</li><li>Detection is the hard part: a slow primary and a dead primary look similar from outside.</li><li>Promoting the wrong replica silently discards the writes it never received.</li><li><strong>Split brain</strong> happens when the old primary is alive but unreachable and a replica promotes itself, so two nodes accept writes.</li><li>The two histories then diverge and reconciling them is painful or impossible.</li><li>Quorums, leader election, fencing tokens, and STONITH-style isolation keep only one writer authoritative.</li></ul>
+
+<div class="flow"><span class="flow-step">Monitor detects primary unavailability</span><span class="flow-arrow">→</span><span class="flow-step">Elect a replica with the highest applied log position</span><span class="flow-arrow">→</span><span class="flow-step">Fence the old primary so it cannot accept writes</span><span class="flow-arrow">→</span><span class="flow-step">Promote the new primary</span><span class="flow-arrow">→</span><span class="flow-step">Redirect clients and rebuild the remaining replicas</span></div>
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Multi-primary replication</h2>
+<ul><li>Multi-primary (multi-leader) allows more than one node to accept writes.</li><li>A common layout is one writable database per region, each serving local users.</li><li>Local writes cut cross-region latency dramatically.</li><li>Concurrent updates to the same record in two regions create a conflict that must be resolved.</li><li>Resolution options include last-write-wins, version vectors, application merge logic, or per-record ownership.</li><li>Last-write-wins is easy but silently discards one user's write.</li><li>This design is significantly more complex than single-primary and should be justified by a real latency need.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Replication is not backup, and not sharding</h2>
+<ul><li>A replicated <code>DROP TABLE</code> or bad update propagates to every replica within seconds.</li><li>Replication protects against <em>server failure</em>; backups protect against <em>losing a previous version</em>.</li><li>Production systems generally need both, plus point-in-time recovery.</li><li>Replication copies <strong>all</strong> data to each node; sharding gives each node <strong>a slice</strong>.</li><li>Replication buys availability and read scale; sharding buys storage and write scale.</li><li>Large systems combine them: each shard has its own replicas.</li><li>Use replication when availability, read throughput, or regional latency is the problem — not when writes are the bottleneck.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>Replication</th><th>Sharding</th></tr></thead><tbody><tr><td>Each server stores</td><td>All of the data</td><td>A portion of the data</td></tr>
+<tr><td>Main benefit</td><td>Availability and read scaling</td><td>Storage and write distribution</td></tr>
+<tr><td>Failure of one node</td><td>Another copy can take over</td><td>That slice is unavailable until recovered</td></tr>
+<tr><td>Hard part</td><td>Lag, failover, conflicts</td><td>Routing, rebalancing, cross-shard queries</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Synchronous replication</strong> strengthens durability and eases failover, but raises write latency and lets a slow replica block commits.</li><li><strong>Asynchronous replication</strong> keeps writes fast and survives replica outages, but can lose recent commits and exposes stale reads.</li><li><strong>Adding read replicas</strong> multiplies read throughput, but adds lag-sensitive read paths, monitoring, and cost.</li><li><strong>Automatic failover</strong> shortens outages, but risks split brain and premature promotion without fencing.</li><li><strong>Multi-primary</strong> reduces regional write latency, but forces conflict detection and merge logic into the design.</li><li><strong>Read-after-write routing</strong> fixes the user-visible staleness bug, but shifts read load back onto the primary.</li><li><strong>Geographic replicas</strong> cut read latency for distant users, but cross-region replication lag is larger and harder to bound.</li><li><strong>Replication itself</strong> improves availability, but it duplicates mistakes as faithfully as it duplicates good data, so backups remain mandatory.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is database replication?</summary><div class="answer"><p>Keeping copies of the same data on multiple database servers and continuously propagating changes between them. One node usually accepts writes and streams its change log to replicas, which replay it. Replication improves availability, read capacity, and regional latency.</p></div></details>
+<details><summary>2. Walk through what happens on a write in a primary-replica setup.</summary><div class="answer"><p>The client sends the write to the primary, which validates it and appends it to its replication log. The change is streamed to each replica, which applies it in commit order. In synchronous mode the primary waits for an acknowledgement; in asynchronous mode it replies immediately.</p></div></details>
+<details><summary>3. Synchronous vs asynchronous replication — how do you choose?</summary><div class="answer"><p>Use synchronous when losing the last few writes is unacceptable and replicas are close enough that the round trip is cheap. Use asynchronous when write latency matters more or replicas are far away, and accept that a failover may lose recent commits. Many systems use quorum sync for critical writes and async for read replicas.</p></div></details>
+<details><summary>4. What is replication lag and why does it matter?</summary><div class="answer"><p>It is the delay between a commit on the primary and its visibility on a replica. During that window, reads from the replica return old data, which can look like a failed update to the user. Lag also determines how much data a promoted replica is missing during failover.</p></div></details>
+<details><summary>5. How do you implement read-after-write consistency?</summary><div class="answer"><p>After a user writes, route that user's reads to the primary for a short period, or track the write's log position and only read from replicas that have reached it. A narrower variant reads just the modified record from the primary. The goal is per-user, not global, consistency.</p></div></details>
+<details><summary>6. What is split brain and how do you prevent it?</summary><div class="answer"><p>It is when a partition or detection failure leaves two nodes both acting as primary, so writes diverge. Prevention requires making sure only one node can be authoritative: quorum-based election, fencing tokens that invalidate the old primary, and isolating or shutting down the old leader before promoting a new one.</p></div></details>
+<details><summary>7. What makes failover hard?</summary><div class="answer"><p>You must distinguish a dead primary from a slow or partitioned one, pick the replica with the most recent data, and stop the old primary from accepting writes. Each step can go wrong: promoting a lagging replica loses writes, and skipping fencing causes split brain. Clients and connection pools also need to be redirected.</p></div></details>
+<details><summary>8. When is multi-primary replication worth it?</summary><div class="answer"><p>When users are spread across regions and cross-region write latency is a real product problem. The cost is conflict handling: two regions may update the same record concurrently, and the system needs detection plus a resolution rule. If writes can be routed to one region, single-primary is much simpler.</p></div></details>
+<details><summary>9. Why is replication not a backup?</summary><div class="answer"><p>Replication copies every change, including mistakes. An accidental table drop, a bad migration, or corrupted data reaches all replicas within seconds. Backups preserve a previous point-in-time version, which is what you restore from after logical damage.</p></div></details>
+<details><summary>10. How is replication different from sharding?</summary><div class="answer"><p>Replication puts all the data on every node, which helps availability and read throughput. Sharding puts a slice on each node, which helps storage size and write throughput. They are complementary: a common design shards the dataset and replicates each shard.</p></div></details>
+<details><summary>11. Do read replicas increase write capacity?</summary><div class="answer"><p>No. All writes still pass through the primary in a single-primary design, and every replica adds log-shipping work to it. Write-bound systems need batching, partitioning, or sharding. Replicas only scale reads and improve availability.</p></div></details>
+<details><summary>12. How would you detect and handle a lagging replica?</summary><div class="answer"><p>Track lag in seconds and in bytes behind the primary's log, and alert when it grows steadily rather than on a single spike. Temporarily remove the replica from the read pool if lag exceeds a threshold, and investigate causes such as long transactions, insufficient I/O, or network issues. A replica that keeps falling behind should be rebuilt rather than trusted.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Treating replicas as backups and having no point-in-time restore path.</li><li>Assuming all replicas are consistent and sending read-after-write traffic to any of them.</li><li>Enabling synchronous replication to a distant region and then wondering why writes are slow.</li><li>Promoting a replica without fencing the old primary, then hitting split brain.</li><li>Adding replicas to fix a write-bound database.</li><li>Forgetting that a failover loses any writes the promoted replica never received.</li><li>Ignoring replica health until the day failover needs the most up-to-date copy.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="database-partitioning.html"><span>← Previous</span><strong>Partitioning</strong></a><a class="next" href="sharding.html"><span>Next →</span><strong>Sharding</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/database-replication">AlgoMaster — Replication</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

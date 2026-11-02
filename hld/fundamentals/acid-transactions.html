@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ACID Transactions — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 42 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>ACID Transactions</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/acid-transactions">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem</a>
+<a href="#s2">What a transaction is</a>
+<a href="#s3">Atomicity</a>
+<a href="#s4">Consistency</a>
+<a href="#s5">Isolation</a>
+<a href="#s6">Isolation anomalies</a>
+<a href="#s7">Isolation levels</a>
+<a href="#s8">How databases provide isolation</a>
+<a href="#s9">Durability and write-ahead logging</a>
+<a href="#s10">The cost of ACID</a>
+<a href="#s11">Transactions across multiple databases</a>
+<a href="#s12">ACID vs BASE</a>
+<a href="#s13">When to use ACID transactions</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>ACID transactions let an application group several operations into one all-or-nothing unit, so a crash or a concurrent request cannot leave the data half-updated — at the cost of latency, locking, and throughput.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Transaction</dt><dd>A group of database operations treated as a single unit of work that commits as a whole or rolls back.</dd></div><div class="term"><dt>Atomicity</dt><dd>The guarantee that either every change in a transaction is applied or none of them is.</dd></div><div class="term"><dt>Consistency (ACID)</dt><dd>The guarantee that a transaction moves the database from one valid state to another, with all declared rules still holding.</dd></div><div class="term"><dt>Isolation</dt><dd>The guarantee that concurrent transactions do not observe or corrupt each other's half-finished work.</dd></div><div class="term"><dt>Durability</dt><dd>The guarantee that a committed change survives a crash or power loss immediately afterward.</dd></div><div class="term"><dt>Dirty read</dt><dd>Reading a value written by another transaction that has not committed and may still roll back.</dd></div><div class="term"><dt>Isolation level</dt><dd>A named setting that chooses which concurrency anomalies the engine prevents, trading correctness for throughput.</dd></div><div class="term"><dt>MVCC</dt><dd>Multi-version concurrency control: keeping several versions of a row so readers see a consistent snapshot without blocking writers.</dd></div><div class="term"><dt>Write-ahead log</dt><dd>An append-only log of changes that is flushed before commit, used to replay committed work and discard incomplete work after a crash.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem</h2>
+<p class="lede">Alice transfers $100 to Bob. The application must deduct from Alice and credit Bob — two writes that only make sense together.</p>
+<ul><li>The server can crash <strong>between the two writes</strong>, leaving money deducted from Alice and never credited to Bob.</li><li>Two transfer requests can arrive <strong>at the same time</strong>, both read a $100 balance, and both proceed.</li><li>Both problems come from the same root cause: several operations that must behave as one, plus concurrency.</li><li>Application-level cleanup code for every partial-failure case is exactly what a database transaction replaces.</li><li>A transaction needs three things: group the operations, survive failures safely, and stop concurrent requests from interfering.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a transaction is</h2>
+<ul><li>A transaction begins, performs reads and writes, and then either <strong>commits</strong> or <strong>rolls back</strong>.</li><li>Commit makes all changes permanent and visible; rollback undoes every change the transaction made.</li><li>In SQL the shape is <code>BEGIN</code>, then the statements, then <code>COMMIT</code> or <code>ROLLBACK</code>.</li><li>The boundary is a design decision: too wide and locks and conflicts grow, too narrow and related changes escape the guarantee.</li><li>The four properties that make this useful are summarized as <strong>ACID</strong>.</li><li>Each property addresses a different failure: crash, rule violation, concurrency, and lost storage.</li></ul>
+
+
+<pre class="code"><code>BEGIN;
+UPDATE accounts SET balance = balance - 100 WHERE id = &#x27;alice&#x27;;
+UPDATE accounts SET balance = balance + 100 WHERE id = &#x27;bob&#x27;;
+COMMIT;</code></pre>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Atomicity</h2>
+<ul><li>Atomicity means <strong>all or nothing</strong>: every change in the transaction applies, or none does.</li><li>If the crash happens mid-transaction, recovery rolls back the partial work, so both balances return to their pre-transfer values.</li><li>Because no partial state is ever visible or persisted, the application can simply <strong>retry</strong> a failed transaction.</li><li>Atomicity covers the transaction's own writes; it says nothing about whether concurrent transactions conflict.</li><li>Without it, every failure path needs bespoke compensation logic, which is where subtle data corruption starts.</li></ul>
+
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Consistency</h2>
+<ul><li>Consistency means a transaction takes the database from one <strong>valid state to another</strong>, where valid is defined by rules.</li><li>Rules the engine can check — non-negative balance, unique email, foreign key to an existing customer — are enforced as <strong>constraints</strong>.</li><li>A violating statement is rejected and the transaction rolls back; nothing partial survives.</li><li>Rules the engine cannot know, such as <em>total money across all accounts is unchanged</em>, remain the application's job.</li><li>So consistency is a joint guarantee: the schema enforces structure, the code must enforce business invariants.</li><li>Beware the overloaded word: <strong>ACID consistency</strong> means rules hold, while <strong>CAP consistency</strong> means every read sees the latest write.</li><li>A transaction can be ACID-consistent and still violate business logic if the application never encoded that logic anywhere.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Isolation</h2>
+<ul><li>A busy database runs thousands of transactions concurrently, and isolation decides how much they can see of each other.</li><li>The ideal is <strong>serializable</strong> behavior: the outcome equals some order of running them one at a time.</li><li>In the transfer example, proper isolation makes the second request see the reduced balance and fail instead of double-spending.</li><li>Perfect isolation costs concurrency: transactions wait on locks or get aborted and retried.</li><li>So engines offer a ladder of isolation levels, and the application chooses how much anomaly it can tolerate.</li><li>Isolation is the ACID property most often weakened in production, usually without anyone writing it down.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Isolation anomalies</h2>
+<p class="lede">Each anomaly is a specific way an interleaving of two transactions produces a result no serial order could produce.</p>
+<ul><li><strong>Dirty read:</strong> transaction B reads Alice's new balance, but A rolls back, so B acted on a value that never existed.</li><li><strong>Non-repeatable read:</strong> B reads the same row twice and gets different values because A committed an update in between.</li><li><strong>Phantom read:</strong> B runs a range query twice and a new matching row appears because A inserted one.</li><li><strong>Lost update:</strong> A and B both read a value, both compute from it, and the second write erases the first.</li><li>Lost update is the classic double-spend: two requests read $100 and each writes a $0 balance after sending $100.</li><li>Dirty and non-repeatable reads concern one row; phantoms concern the <em>set</em> of rows a predicate matches.</li><li>The anomalies are not academic — each maps to an application bug such as overselling stock or overwriting a profile edit.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Anomaly</th><th>What happens</th><th>Typical symptom</th></tr></thead><tbody><tr><td>Dirty read</td><td>Reads another transaction's uncommitted change</td><td>Acting on data that is later rolled back</td></tr>
+<tr><td>Non-repeatable read</td><td>Same row returns different values inside one transaction</td><td>Inconsistent totals within one report</td></tr>
+<tr><td>Phantom read</td><td>Same predicate returns a new row</td><td>Counts that change between two queries</td></tr>
+<tr><td>Lost update</td><td>Two read-modify-write cycles, one overwrites the other</td><td>Lost increments, oversold inventory</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Isolation levels</h2>
+<p class="lede">The SQL standard defines four levels, each preventing a different subset of anomalies.</p>
+<ul><li><strong>Read Uncommitted</strong> allows dirty reads; it is rarely appropriate for important data.</li><li><strong>Read Committed</strong> shows only committed data, preventing dirty reads, but allows non-repeatable and phantom reads. It is the common default in PostgreSQL, Oracle, and SQL Server.</li><li><strong>Repeatable Read</strong> also prevents non-repeatable reads: a row read once keeps returning the same value. It is the default in MySQL's InnoDB.</li><li><strong>Serializable</strong> makes concurrent transactions behave as if they ran one at a time, preventing all four anomalies.</li><li>Stronger levels mean more waiting, more aborts, and lower throughput, so they are chosen per workload, not per database.</li><li>Implementations are not identical: PostgreSQL's Repeatable Read also prevents phantoms, so the standard's table is a starting point, not a contract.</li><li>Always confirm the actual behavior of your engine and version before relying on a level for correctness.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Level</th><th>Dirty read</th><th>Non-repeatable read</th><th>Phantom read</th></tr></thead><tbody><tr><td>Read Uncommitted</td><td>Possible</td><td>Possible</td><td>Possible</td></tr>
+<tr><td>Read Committed</td><td>Prevented</td><td>Possible</td><td>Possible</td></tr>
+<tr><td>Repeatable Read</td><td>Prevented</td><td>Prevented</td><td>Possible (engine-dependent)</td></tr>
+<tr><td>Serializable</td><td>Prevented</td><td>Prevented</td><td>Prevented</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>How databases provide isolation</h2>
+<ul><li>Engines use two main families of technique: <strong>locking</strong> and <strong>multi-version concurrency control</strong>.</li><li>Both must also detect and break the conflicts they cannot resolve, or the system would stall.</li><li>The choice is visible to operators as waiting, aborts, and bloat, not just as a correctness setting.</li><li>Most production engines combine the two: MVCC for reads, locks or conflict checks for writes.</li><li>Granularity matters: locking a single row lets unrelated work proceed, while a table lock serializes everything that touches the table.</li></ul>
+<h3>Locking</h3>
+<ul><li>A transaction that updates a row takes a <strong>lock</strong>; another writer of that row waits until the lock is released.</li><li>Simple and easy to reason about, but under contention transactions spend their time queuing.</li><li><strong>Deadlock:</strong> A holds row 1 and waits for row 2 while B holds row 2 and waits for row 1, so neither can proceed.</li><li>The engine detects the cycle and aborts one transaction, which the application must then retry.</li><li>Lock duration is set by transaction length, so a slow external call inside a transaction multiplies contention.</li></ul>
+
+
+<h3>Multi-version concurrency control</h3>
+<ul><li>Instead of overwriting a row in place, the engine keeps <strong>multiple versions</strong> and tags each with the transaction that created it.</li><li>A reader sees the snapshot that was current when its transaction or statement started.</li><li>So <strong>readers do not block writers and writers do not block readers</strong>, which is why MVCC dominates read-heavy workloads.</li><li>Writers that target the same row still conflict, so the engine uses row locks or first-updater-wins checks.</li><li>Old versions must be cleaned up later; if a long transaction holds an old snapshot, that cleanup is delayed.</li><li>PostgreSQL and InnoDB both rely heavily on MVCC alongside locks for conflicting writes.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Durability and write-ahead logging</h2>
+<ul><li>Durability means a committed transaction survives a crash or power loss immediately after the commit returns.</li><li>The commit must therefore be recorded on <strong>durable storage</strong> before the application is told it succeeded.</li><li>Writing every modified page at commit would be slow and scattered, so engines write a log first.</li><li><strong>Write-ahead logging</strong> appends the change records sequentially, flushes the log at commit, and writes data pages later in the background.</li><li>Sequential log writes are far cheaper than updating scattered pages, which is what makes fast commits possible.</li><li>After a crash, the log is replayed: committed records reach the data files, incomplete transactions are discarded.</li><li>One mechanism therefore delivers both <strong>atomicity</strong> and <strong>durability</strong>.</li><li>Some engines let you relax durability — for example by acknowledging before the log is flushed — and then recently committed transactions can vanish in a crash.</li></ul>
+
+<div class="flow"><span class="flow-step">Begin transaction</span><span class="flow-arrow">→</span><span class="flow-step">Write change records to the WAL</span><span class="flow-arrow">→</span><span class="flow-step">Flush WAL to disk</span><span class="flow-arrow">→</span><span class="flow-step">Acknowledge commit</span><span class="flow-arrow">→</span><span class="flow-step">Write data pages in the background</span><span class="flow-arrow">→</span><span class="flow-step">Replay the WAL after a crash</span></div>
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>The cost of ACID</h2>
+<ul><li>Durability adds a <strong>flush before acknowledgment</strong>, so commit latency is bounded by storage, not CPU.</li><li>Isolation adds lock waits or version bookkeeping, and stronger levels add aborts and retries.</li><li>When many transactions touch the same rows — a hot inventory counter, a popular seat — contention becomes the bottleneck.</li><li>Keep transactions <strong>short</strong>: never hold a lock while waiting on a slow network call.</li><li>Use the <strong>weakest isolation level that is actually correct</strong> for the workload instead of defaulting to Serializable everywhere.</li><li>Prefer a <strong>single atomic statement</strong> where possible; it avoids an explicit transaction and its lock window.</li><li>Design hot paths to spread writes — partitioned counters or queued updates — rather than serializing on one row.</li></ul>
+
+
+<pre class="code"><code>-- One statement, no read-then-write race:
+UPDATE accounts
+SET balance = balance - 100
+WHERE id = &#x27;alice&#x27; AND balance &gt;= 100;
+-- Zero rows updated means insufficient funds.</code></pre>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Transactions across multiple databases</h2>
+<p class="lede">ACID is straightforward inside one database. Once a single business operation spans shards or services, no single engine can commit both sides for you.</p>
+<ul><li>If Alice and Bob live on different shards, the transfer needs two independent commits that must agree.</li><li>Each database can commit atomically on its own, but coordinating the pair is a distributed systems problem.</li><li>There are two standard answers with very different guarantees: <strong>two-phase commit</strong> and the <strong>saga pattern</strong>.</li><li>Both add failure modes that do not exist in a single-node transaction.</li><li>Both also need an answer to <em>did this step happen?</em>, which usually means an idempotency key stored with the operation so a retry cannot apply it twice.</li></ul>
+<h3>Two-phase commit</h3>
+<ul><li>A coordinator asks every participant to <strong>prepare</strong>, meaning it can commit on request.</li><li>If all participants vote yes, the coordinator tells them to commit; if any votes no, it tells all to abort.</li><li>This gives atomicity across databases, at the cost of an extra round trip and locks held during coordination.</li><li>If the coordinator dies after prepare, participants stay blocked holding locks until it recovers.</li><li>Because locks span the whole protocol, throughput suffers and availability depends on the coordinator.</li></ul>
+
+
+<h3>Saga pattern</h3>
+<ul><li>A saga splits the operation into a sequence of <strong>local transactions</strong>, each committing on its own.</li><li>If a later step fails, earlier steps run <strong>compensating actions</strong> that reverse their effects.</li><li>In the transfer, debit Alice locally, then credit Bob; if crediting fails, refund Alice.</li><li>No locks are held across services, so availability and throughput stay high.</li><li>The price is lost isolation: other readers can observe intermediate states before the saga completes.</li><li>Compensations must be idempotent and retryable, because the failure may itself be ambiguous.</li></ul>
+
+
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Atomicity</th><th>Isolation</th><th>Main risk</th></tr></thead><tbody><tr><td>Single-node ACID</td><td>Strong</td><td>Strong (per level)</td><td>Contention and single-primary limits</td></tr>
+<tr><td>Two-phase commit</td><td>Strong</td><td>Locks held across prepare</td><td>Coordinator failure blocks participants</td></tr>
+<tr><td>Saga</td><td>Eventual via compensation</td><td>None across steps</td><td>Intermediate states visible, compensation bugs</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>ACID vs BASE</h2>
+<ul><li><strong>BASE</strong> stands for Basically Available, Soft State, Eventual Consistency and is usually associated with NoSQL systems.</li><li>The system stays available and scalable even when replicas disagree, and updates propagate until they converge.</li><li>That fits view counts, likes, feeds, and analytics, where a temporarily stale number is harmless.</li><li>It does not fit balances, inventory, or seat reservations, where a stale read means real loss.</li><li>The divide is blurrier than the acronyms suggest: many NoSQL engines now offer transactions, and distributed SQL engines offer ACID across machines.</li><li>So the useful question is <strong>what guarantee this specific data needs</strong>, not which camp the database belongs to.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>When to use ACID transactions</h2>
+<ul><li>Use them when a partial or conflicting update would cause harm that cannot be repaired later.</li><li>Classic fits: payments and transfers, account balances, inventory and orders, seat reservations, coupon redemption.</li><li>The common thread is a <strong>shared resource with a rule</strong> — money that must balance, stock that must not go negative.</li><li>Analytics events, application logs, activity counters, and view counts can usually tolerate weaker guarantees.</li><li>A practical architecture keeps critical data in a transactional store and relaxes elsewhere.</li><li>Choose the guarantee per data set, and write down the assumption so nobody later moves balance data into the eventually consistent path.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Needs strong guarantees</th><th>Usually tolerates weaker guarantees</th></tr></thead><tbody><tr><td>Payments and transfers</td><td>Analytics events</td></tr>
+<tr><td>Account balances</td><td>Application logs</td></tr>
+<tr><td>Inventory and order processing</td><td>Activity counters</td></tr>
+<tr><td>Seat reservations</td><td>View counts</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Atomicity</strong> removes partial-write bugs but requires the engine to keep undo information until commit, which costs space and recovery time.</li><li><strong>Durability</strong> survives crashes but forces a storage flush before acknowledgment, adding commit latency.</li><li><strong>Serializable isolation</strong> eliminates every anomaly but causes more waiting and aborts, cutting throughput on contended rows.</li><li><strong>Weaker isolation levels</strong> raise concurrency but leave specific anomalies for the application to handle.</li><li><strong>MVCC</strong> keeps readers from blocking writers but retains old row versions that must be cleaned up, and long snapshots delay that cleanup.</li><li><strong>Row locking</strong> is simple to reason about but serializes hot rows and risks deadlocks.</li><li><strong>Two-phase commit</strong> gives cross-database atomicity but holds locks across a network round trip and stalls if the coordinator fails.</li><li><strong>Sagas</strong> avoid distributed locks but expose intermediate states and require correct, idempotent compensating actions.</li><li><strong>Long transactions</strong> simplify application logic but widen lock windows and increase conflict and bloat.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is a transaction in one sentence?</summary><div class="answer"><p>A group of database operations treated as a single unit of work that either commits all of its changes or rolls all of them back. It exists so the application does not have to implement its own recovery for every partial-failure case.</p></div></details>
+<details><summary>2. Walk through the four ACID properties.</summary><div class="answer"><p><strong>Atomicity</strong> makes the group all-or-nothing. <strong>Consistency</strong> keeps declared rules and constraints satisfied. <strong>Isolation</strong> stops concurrent transactions from seeing or corrupting half-finished work. <strong>Durability</strong> keeps committed changes after a crash.</p></div></details>
+<details><summary>3. Isn't ACID consistency the same as CAP consistency?</summary><div class="answer"><p>No. In ACID, consistency means the data still satisfies its declared rules and invariants after the transaction. In CAP, consistency means every read observes the most recent write, as if there were a single copy. The same word describes different guarantees.</p></div></details>
+<details><summary>4. Explain the four isolation anomalies.</summary><div class="answer"><p>A dirty read sees uncommitted data that may roll back. A non-repeatable read sees the same row change between two reads because another transaction committed. A phantom read sees a new row appear in a repeated range query. A lost update loses one of two read-modify-write cycles.</p></div></details>
+<details><summary>5. Which isolation level should you use?</summary><div class="answer"><p>Start from the engine's default, usually Read Committed, and raise it only for operations whose invariants require it — a balance check, an inventory decrement, a seat booking. Higher levels buy correctness with waiting and retries, so applying Serializable everywhere is usually a throughput mistake.</p></div></details>
+<details><summary>6. How does MVCC improve concurrency?</summary><div class="answer"><p>It keeps multiple versions of a row so a reader can use the snapshot from when its transaction started. Readers therefore never block writers and writers never block readers. Writers that touch the same row still conflict and are resolved with locks or conflict detection.</p></div></details>
+<details><summary>7. What causes a deadlock and how is it handled?</summary><div class="answer"><p>Two transactions each hold one lock and wait for the other's, forming a cycle. The engine detects the cycle and aborts one transaction so the other can finish, and the aborted one must be retried. Short transactions and consistent lock ordering reduce the frequency.</p></div></details>
+<details><summary>8. How does a write-ahead log give two ACID properties at once?</summary><div class="answer"><p>Change records are appended to the log and flushed before commit, so a committed transaction is durable even if data pages are still unwritten. On restart, committed log records are replayed and incomplete transactions are discarded, which restores atomicity.</p></div></details>
+<details><summary>9. Why is a long transaction dangerous?</summary><div class="answer"><p>It holds locks and an old snapshot for its whole duration, so other writers queue and old row versions cannot be reclaimed. If it includes a slow network call, every transaction touching the same rows waits on that call. Keep the transaction to the database work and do external calls outside it.</p></div></details>
+<details><summary>10. How would you fix the double-spend race?</summary><div class="answer"><p>Either raise isolation so the two read-modify-write cycles conflict, or collapse them into one statement — <code>UPDATE ... SET balance = balance - 100 WHERE id = ? AND balance >= 100</code> — and treat zero affected rows as insufficient funds. The single statement removes the window without a long transaction.</p></div></details>
+<details><summary>11. Compare two-phase commit and sagas.</summary><div class="answer"><p>Two-phase commit gives atomicity across databases by preparing all participants and then committing them together, but it holds locks across the protocol and stalls if the coordinator dies. A saga runs local transactions and compensates on failure; it avoids distributed locks but exposes intermediate states and needs idempotent compensations.</p></div></details>
+<details><summary>12. When is BASE acceptable?</summary><div class="answer"><p>When a briefly stale or out-of-order read causes no financial or safety harm — view counts, likes, feeds, logs, recommendations. It is not acceptable for balances, inventory, reservations, or authorization decisions, where staleness can double-spend or leak access.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming a transaction makes concurrent requests safe when the isolation level still allows lost updates.</li><li>Holding a transaction open across an HTTP call, so locks are held for the duration of a network timeout.</li><li>Choosing Serializable everywhere and then blaming the database for low throughput.</li><li>Confusing ACID consistency (rules hold) with CAP consistency (latest write visible).</li><li>Relying on the SQL standard's isolation table without checking the actual engine's behavior.</li><li>Believing cross-service operations are atomic because each service uses a transaction locally.</li><li>Writing a saga compensation that is not idempotent, so a retry reverses a step twice.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="sql-vs-nosql.html"><span>← Previous</span><strong>SQL vs NoSQL</strong></a><a class="next" href="b-trees.html"><span>Next →</span><strong>B-Trees and B+ Trees</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/acid-transactions">AlgoMaster — ACID Transactions</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

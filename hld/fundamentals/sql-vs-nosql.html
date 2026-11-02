@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQL vs NoSQL — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 41 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>SQL vs NoSQL</h1>
+    <p class="dek">Databases · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/sql-vs-nosql">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The decision</a>
+<a href="#s2">What a SQL database is</a>
+<a href="#s3">What NoSQL actually covers</a>
+<a href="#s4">Schema: enforced on write vs interpreted on read</a>
+<a href="#s5">Data modeling: normalize and join vs denormalize and embed</a>
+<a href="#s6">Querying: ask anything vs design around questions</a>
+<a href="#s7">Transactions and consistency</a>
+<a href="#s8">Scaling: up first vs out by design</a>
+<a href="#s9">Worked example: payments vs chat</a>
+<a href="#s10">Common myths</a>
+<a href="#s11">When to choose SQL</a>
+<a href="#s12">When to choose NoSQL</a>
+<a href="#s13">Using both: polyglot persistence</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>The SQL vs NoSQL decision trades a <strong>fixed schema and flexible queries</strong> against a <strong>flexible schema and queries designed in advance</strong>; it is decided by the shape of the data, the access patterns, and how much consistency each part of the system needs — not by which label sounds more modern.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Relational database</dt><dd>A database that stores data in tables of rows and columns, relates tables through keys, and is queried with SQL.</dd></div><div class="term"><dt>Schema-on-write</dt><dd>The database validates structure and types when data is written, so bad rows are rejected at insert time.</dd></div><div class="term"><dt>Schema-on-read</dt><dd>The database stores whatever the application sends, and the application interprets missing or extra fields when reading.</dd></div><div class="term"><dt>Normalization</dt><dd>Storing each fact once in its own table and recombining tables with joins at query time.</dd></div><div class="term"><dt>Denormalization</dt><dd>Deliberately storing copies of related data together so a read needs fewer lookups, at the cost of keeping copies in sync.</dd></div><div class="term"><dt>Secondary index</dt><dd>An extra structure that makes lookups on a non-primary-key field fast, at the cost of write work.</dd></div><div class="term"><dt>Eventual consistency</dt><dd>A guarantee that replicas may briefly disagree after a write but converge to the same value once replication catches up.</dd></div><div class="term"><dt>Polyglot persistence</dt><dd>Using several database technologies in one system so each workload gets the engine that fits it.</dd></div><div class="term"><dt>Distributed SQL</dt><dd>A relational database that keeps SQL and ACID semantics while partitioning data across many machines.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The decision</h2>
+<p class="lede">Before writing much code, a team must decide where the data lives: a relational engine such as PostgreSQL or MySQL, or a NoSQL engine such as MongoDB, Cassandra, or DynamoDB.</p>
+<ul><li>The choice shapes <strong>how data is modeled</strong>: tables joined at read time, or documents and partitions shaped for the read.</li><li>It shapes <strong>how queries are written</strong>: arbitrary SQL, or queries planned around known access paths.</li><li>It shapes <strong>failure behavior</strong>: a write either commits everywhere it must, or becomes visible in stages.</li><li>It shapes <strong>how the system scales</strong>: a bigger primary and read replicas, or partitions spread from day one.</li><li>No option wins outright — each one buys something by giving something else up.</li><li>The useful first question is not <em>SQL or NoSQL</em> but <em>which NoSQL family</em>, because the families differ as much from each other as from SQL.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What a SQL database is</h2>
+<ul><li>Data lives in <strong>tables</strong> made of rows and columns, where each column has a name and a type.</li><li>Every table has a <strong>schema</strong> describing its columns, and the database enforces it on every write.</li><li>Rows are linked with <strong>foreign keys</strong>: an <code>orders.user_id</code> points at a row in <code>users</code>.</li><li>Data is read and written with <strong>SQL</strong>, a standard language shared by nearly every relational engine.</li><li>The same data can answer questions nobody planned for, because the query is written at read time.</li><li>Typical engines are PostgreSQL, MySQL, Oracle, and SQL Server; all add their own types, indexes, and extensions.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>What NoSQL actually covers</h2>
+<p class="lede">NoSQL is an umbrella for databases that abandon the relational table model. It is not one design with one set of guarantees.</p>
+<ul><li><strong>Key-value:</strong> a blob under a unique key, optimized for lookups by key, as in Redis or DynamoDB.</li><li><strong>Document:</strong> self-contained JSON-like records with nested fields and arrays, as in MongoDB.</li><li><strong>Wide-column:</strong> rows grouped by a partition key and sorted inside the partition, built for very high write volume, as in Cassandra.</li><li><strong>Graph:</strong> nodes and the relationships between them, as in Neo4j.</li><li>The families differ in data model, query ability, and consistency, so <em>NoSQL</em> alone says almost nothing.</li><li>Most general application comparisons come down to relational versus <strong>document</strong> and <strong>wide-column</strong> stores.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Family</th><th>Stores</th><th>Typical examples</th></tr></thead><tbody><tr><td>Key-value</td><td>A value under a unique key</td><td>Redis, DynamoDB</td></tr>
+<tr><td>Document</td><td>JSON-like documents</td><td>MongoDB, Couchbase, Firestore</td></tr>
+<tr><td>Wide-column</td><td>Rows grouped by partition key, sorted by clustering key</td><td>Cassandra, HBase, ScyllaDB</td></tr>
+<tr><td>Graph</td><td>Nodes and relationships</td><td>Neo4j</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Schema: enforced on write vs interpreted on read</h2>
+<ul><li>A relational database rejects any row that violates the declared columns, types, and constraints — this is <strong>schema-on-write</strong>.</li><li>Changing structure needs a <strong>migration</strong>; on a large table that means planning locks, backfills, and deploy order.</li><li>In a document database two documents in one collection can hold different fields, so new fields need no migration.</li><li>The application decides how to interpret those fields on read — this is <strong>schema-on-read</strong>.</li><li>The responsibility for consistency moves from the database into application code, which must handle missing fields and old formats.</li><li>The real difference is <em>when</em> structure errors surface: at write time inside one engine, or at read time across many services.</li></ul>
+<div class="table-wrap"><table><thead><tr><th></th><th>SQL (schema-on-write)</th><th>NoSQL (schema-on-read)</th></tr></thead><tbody><tr><td>Who enforces structure</td><td>The database</td><td>The application</td></tr>
+<tr><td>Different fields per record</td><td>No</td><td>Yes</td></tr>
+<tr><td>Changing structure</td><td>Migration required</td><td>Start writing the new field</td></tr>
+<tr><td>Main risk</td><td>Migrations on large tables</td><td>Inconsistent data across records</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Data modeling: normalize and join vs denormalize and embed</h2>
+<ul><li>SQL modeling <strong>normalizes</strong>: a product name is stored once, and orders reference the product by id.</li><li>Reads then <strong>join</strong> the tables back together, so the answer is assembled at query time.</li><li>NoSQL modeling usually <strong>denormalizes</strong>: the order document embeds the shipping address and a copy of each product name and price.</li><li>A single read then returns the whole object, in exactly the shape the page needs.</li><li>The cost appears on writes: the same fact now exists in many documents and must be updated in all of them.</li><li>Rule of thumb: SQL stores facts once and combines flexibly; NoSQL stores data in the shape it is read.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Benefit</th><th>Cost</th></tr></thead><tbody><tr><td>Normalize (SQL)</td><td>One copy, flexible combination</td><td>Joins at read time</td></tr>
+<tr><td>Denormalize (NoSQL)</td><td>Whole object in one read</td><td>Copies to keep in sync on change</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Querying: ask anything vs design around questions</h2>
+<ul><li>SQL is <strong>declarative and expressive</strong>: filter, join, group, sort, and aggregate in one statement.</li><li>Because the query is written at read time, the schema does not need to anticipate every report.</li><li>A wide-column store is efficient mainly when the query includes the <strong>partition key</strong>; otherwise it scans or fans out.</li><li>So NoSQL teams design <strong>one table per query pattern</strong> and write the same data more than once.</li><li>Document stores sit in between: secondary indexes and an aggregation pipeline handle many questions, but cross-collection joins remain awkward.</li><li>Decision rule: known, stable access patterns favor NoSQL; unpredictable, ad hoc questions favor SQL.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Transactions and consistency</h2>
+<ul><li>Relational engines are built around <strong>ACID</strong> transactions: a transfer debits one account and credits another, or neither happens.</li><li>Most NoSQL engines prioritized availability and scale first, so guarantees across multiple records were historically weaker.</li><li>Some systems are <strong>eventually consistent</strong>: replicas may briefly disagree, then converge.</li><li>Some, like Cassandra, make consistency tunable per query — a quorum of replicas for safety, one replica for latency.</li><li>The gap has narrowed: MongoDB supports multi-document transactions and DynamoDB offers transactional APIs.</li><li>But those transactions usually carry more restrictions or a higher cost than in a relational engine, so design should not assume them.</li><li>Key test: can a reader ever observe a state that violates a business rule? If yes, that data needs strong transactions.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Scaling: up first vs out by design</h2>
+<ul><li>A traditional SQL deployment has <strong>one primary</strong> that accepts writes; scaling starts with a bigger machine.</li><li><strong>Read replicas</strong> then absorb read traffic, but they do not raise write capacity and can lag.</li><li>Beyond one primary, SQL data must be <strong>sharded on top</strong>, in the application or with extra tooling.</li><li>Once sharded, joins, transactions, and unique constraints across shards become expensive or impossible.</li><li>Many NoSQL engines were designed to <strong>partition automatically</strong> by a partition key and redistribute when nodes are added.</li><li>That same design explains their limits: an efficient query has to respect the partition key.</li><li>SQL cost is concentrated in scale-out; NoSQL cost is concentrated in query flexibility and consistency.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Worked example: payments vs chat</h2>
+<ul><li>A <strong>payments service</strong> has highly structured accounts, transactions, and balances that are tightly related.</li><li>Correctness dominates: a duplicated or lost debit is a real financial loss, so ACID transactions and constraints matter.</li><li>The team also needs many different reports over the same data, which is exactly what SQL is for.</li><li>A <strong>chat application</strong> has very high write volume and one dominant query: the latest messages in a conversation.</li><li>Messages rarely change, so the update and join costs of normalization buy little.</li><li>Partitioning messages by conversation id and sorting by time makes each read a single-partition, already-ordered fetch.</li><li>One company can reasonably run both, each for the part of the system it fits.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Workload</th><th>Shape of data</th><th>Engine that fits</th></tr></thead><tbody><tr><td>Payments, orders, inventory</td><td>Structured, related, correctness-critical</td><td>Relational with ACID transactions</td></tr>
+<tr><td>Chat messages, activity feeds</td><td>High write rate, one read pattern, append-only</td><td>Wide-column partitioned by conversation or user</td></tr>
+<tr><td>Product catalog with varying attributes</td><td>Nested, shape varies per record</td><td>Document</td></tr>
+<tr><td>Sessions, carts, rate counters</td><td>Tiny values fetched by key</td><td>Key-value</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Common myths</h2>
+<ul><li><strong>Myth: NoSQL is always faster.</strong> It is fast for the access pattern it was designed for; a well-indexed relational table is also fast for key lookups and much faster when joins or aggregates are needed.</li><li><strong>Myth: SQL cannot scale.</strong> Indexing, caching, replicas, partitioning, and sharding carry relational workloads far past one small server; the source cites sharded PostgreSQL at Instagram.</li><li><strong>Myth: the categories are separate.</strong> PostgreSQL stores and indexes JSON, and distributed SQL engines offer SQL with horizontal scale.</li><li><strong>Reality:</strong> engines converge, so compare specific products, versions, and guarantees rather than labels.</li><li>A benchmark that ignores data shape, query mix, and consistency settings says nothing about your system.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>When to choose SQL</h2>
+<ul><li>The data is <strong>structured with clear relationships</strong> — accounts, orders, inventory, bookings.</li><li>You need <strong>transactional guarantees</strong> so partial or conflicting updates can never be observed.</li><li>You expect <strong>many different queries and reports</strong> over the same data, including ones nobody planned.</li><li>The working set fits a single primary plus replicas, which is the simplest thing to operate.</li><li>You want constraints — foreign keys, uniqueness, checks — enforced by the engine rather than by every service.</li><li>For most new applications this covers enough ground that a relational engine is the sensible default starting point.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>When to choose NoSQL</h2>
+<ul><li>Write volume or dataset size exceeds what one primary can comfortably hold.</li><li>Access patterns are <strong>known and simple</strong>: fetch by key, or fetch one partition in sorted order.</li><li>The record shape varies, or the model changes often enough that migrations would dominate delivery.</li><li>Availability across regions matters more than every read reflecting the newest write.</li><li>Common fits: session stores, activity feeds, chat history, event logs, and sensor readings.</li><li>Pick the family from the read pattern: key lookup to key-value, whole object to document, huge append-heavy partition to wide-column, deep relationships to graph.</li></ul>
+
+
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Using both: polyglot persistence</h2>
+<p class="lede">Real systems rarely standardize on one engine. An e-commerce platform may run three, each for the workload it suits.</p>
+<ul><li><strong>Orders and payments</strong> in PostgreSQL, because correctness and ad hoc reporting dominate.</li><li><strong>Sessions and carts</strong> in Redis, because lookups are by key and must be fast.</li><li><strong>Product browsing events</strong> in Cassandra, because volume is high and queries are narrow.</li><li>This is <strong>polyglot persistence</strong>: each workload gets the engine whose trade-offs match it.</li><li>Every added engine must be deployed, monitored, backed up, secured, and understood by the team.</li><li>Add an engine only for a demonstrated need; a second database adopted in advance is pure cost until that need is real.</li><li>Keep one clear <strong>source of truth</strong> per fact and treat the others as derived or cached copies.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Data</th><th>Engine</th><th>Why</th></tr></thead><tbody><tr><td>Orders and payments</td><td>PostgreSQL</td><td>Needs transactions and flexible reporting</td></tr>
+<tr><td>Sessions and carts</td><td>Redis</td><td>Key lookups at low latency</td></tr>
+<tr><td>Browsing events</td><td>Cassandra</td><td>High write volume, narrow queries</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Schema-on-write</strong> keeps data clean and predictable but makes structural change a migration on every large table.</li><li><strong>Schema-on-read</strong> makes the model easy to evolve but pushes validation into every reader and lets formats drift.</li><li><strong>Normalization</strong> stores each fact once but makes reads pay for joins and makes ad hoc reporting costlier on large tables.</li><li><strong>Denormalization</strong> makes one read return the whole object but duplicates data that must be kept in sync on every change.</li><li><strong>SQL flexibility</strong> lets you answer unplanned questions but leaves you with a single write primary that must be sharded by hand.</li><li><strong>NoSQL scale-out</strong> raises write throughput and capacity but narrows queries to the partition key you chose up front.</li><li><strong>Eventual consistency</strong> keeps serving during partitions and replica lag but can show stale or conflicting reads.</li><li><strong>Polyglot persistence</strong> fits each workload precisely but multiplies operational surface, backup procedures, and skills needed.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the real difference between SQL and NoSQL?</summary><div class="answer"><p>SQL engines model data as normalized tables joined at read time, enforce the schema on write, and provide strong multi-row transactions. NoSQL is an umbrella for key-value, document, wide-column, and graph stores that trade flexible schema and built-in partitioning for narrower query ability and often weaker cross-record guarantees.</p></div></details>
+<details><summary>2. What does schema-on-read actually cost you?</summary><div class="answer"><p>The database stores whatever the application writes, so records can differ in fields and types. Every reader must tolerate missing fields, old formats, and unexpected types, and nothing prevents two services from writing incompatible shapes. Many teams add optional schema validation to keep a predictable core shape.</p></div></details>
+<details><summary>3. Why normalize, and when would you stop?</summary><div class="answer"><p>Normalization stores each fact once, eliminating update, insert, and delete anomalies. You stop when a proven hot read path pays too much for joins or aggregates — then you denormalize that path deliberately and take on the job of keeping the copies consistent.</p></div></details>
+<details><summary>4. Is NoSQL always faster?</summary><div class="answer"><p>No. It is fast for the access pattern the data was modeled for, such as a single-partition fetch. A well-indexed relational database is also fast for key lookups and is typically faster for joins, aggregations, and ad hoc reports, which NoSQL engines either cannot do or do expensively.</p></div></details>
+<details><summary>5. How do document and wide-column stores differ?</summary><div class="answer"><p>A document store keeps a self-contained record with nested fields and arrays, and supports secondary indexes so you can query by many fields. A wide-column store groups rows by partition key and sorts them by clustering key inside the partition; efficient queries must respect that key, and you typically write one table per query pattern.</p></div></details>
+<details><summary>6. Do NoSQL databases have transactions?</summary><div class="answer"><p>Increasingly yes, but with caveats. Some systems guarantee atomicity only within one record or partition, some offer limited multi-key transactions, and others added multi-document ACID transactions with extra restrictions or cost. Design as if cross-record atomicity is expensive unless you have verified it.</p></div></details>
+<details><summary>7. How does each model scale writes?</summary><div class="answer"><p>A relational deployment starts with one primary, then a bigger machine, then read replicas, and finally sharding added on top — where cross-shard joins and transactions become hard. A NoSQL cluster partitions by key from the start and redistributes when nodes are added, which raises write capacity at the cost of query flexibility.</p></div></details>
+<details><summary>8. Payments versus chat: why different engines?</summary><div class="answer"><p>Payments needs structured, related data, strict correctness, and many reports, which suits ACID SQL. Chat has a huge append-only write rate and one dominant query — latest messages per conversation — so a wide-column store partitioned by conversation and sorted by time serves it with single-partition reads.</p></div></details>
+<details><summary>9. Is it true that SQL cannot scale?</summary><div class="answer"><p>No. Indexing, caching, read replicas, table partitioning, and sharding carry relational workloads far beyond one server, and distributed SQL engines add automatic partitioning with SQL semantics. It takes more deliberate work than a system built to shard from the start, which is a cost trade, not a hard limit.</p></div></details>
+<details><summary>10. What is polyglot persistence and its main risk?</summary><div class="answer"><p>It means using several database technologies so each workload gets the right engine — say SQL for orders, Redis for sessions, and a wide-column store for events. The risk is operational: every engine needs deployment, monitoring, backups, upgrades, and expertise, so each addition should answer a demonstrated need.</p></div></details>
+<details><summary>11. How would you decide in an interview?</summary><div class="answer"><p>State the access patterns first: what one request reads or writes, how much data and write rate you expect, and which operations must be atomic. Then pick the simplest engine whose strengths match those patterns, and name the cost you are accepting — migration pain, join limits, eventual consistency, or operational load.</p></div></details>
+<details><summary>12. When would you deliberately choose eventual consistency?</summary><div class="answer"><p>When a slightly stale read causes no harm: view counters, activity feeds, recommendations, logs, or analytics events. It should not carry money movement, inventory decrements, seat booking, or permission decisions, where a stale read can double-spend or leak access.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Choosing NoSQL because it sounds more scalable, without naming the access pattern it must serve.</li><li>Assuming one document write is enough when the operation spans several records that must stay consistent.</li><li>Denormalizing by default and then discovering there is no plan for updating the duplicated copies.</li><li>Treating schema-on-read as no schema at all, so readers must defend against every shape ever written.</li><li>Comparing a tuned NoSQL cluster against an unindexed relational table and concluding anything about engines.</li><li>Sharding a relational database before exhausting indexes, caching, and read replicas.</li><li>Adding a second and third database for fashion, then under-operating all of them.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="database-types.html"><span>← Previous</span><strong>Database Types</strong></a><a class="next" href="acid-transactions.html"><span>Next →</span><strong>ACID Transactions</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/sql-vs-nosql">AlgoMaster — SQL vs NoSQL</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

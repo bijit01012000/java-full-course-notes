@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAML — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 130 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>SAML</h1>
+    <p class="dek">Advanced Security · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/saml">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: twenty apps, twenty credentials</a>
+<a href="#s2">What SAML is, and the roles involved</a>
+<a href="#s3">The SP-initiated login flow</a>
+<a href="#s4">IdP-initiated login, and its risks</a>
+<a href="#s5">Inside the assertion</a>
+<a href="#s6">Bindings: how the message travels</a>
+<a href="#s7">What a service provider must validate</a>
+<a href="#s8">XML signature pitfalls</a>
+<a href="#s9">Replay, time windows, and session lifetime</a>
+<a href="#s10">Metadata and certificate rotation</a>
+<a href="#s11">Provisioning, attributes, and deprovisioning</a>
+<a href="#s12">SAML versus OIDC, and common failures</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>SAML lets many applications trust one central identity provider, so employees log in once and IT disables access in one place — provided every service provider validates the signed XML assertion correctly.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Single sign-on (SSO)</dt><dd>One authentication event at a central identity provider that grants access to many applications, removing per-app credentials.</dd></div><div class="term"><dt>SAML</dt><dd>An XML-based standard for exchanging authentication and authorization assertions between an identity provider and a service provider.</dd></div><div class="term"><dt>Identity provider (IdP)</dt><dd>The central system that authenticates the user and issues signed assertions about who they are and what they may access.</dd></div><div class="term"><dt>Service provider (SP)</dt><dd>The application that trusts the IdP's assertion, creates a local session, and authorizes the user.</dd></div><div class="term"><dt>Assertion</dt><dd>The signed XML document containing the subject, authentication statement, conditions, and attribute statements.</dd></div><div class="term"><dt>NameID</dt><dd>The identifier the IdP asserts for the user, which the SP maps to a local account.</dd></div><div class="term"><dt>Binding</dt><dd>The transport mechanism for SAML messages, typically an HTTP redirect with a signed query parameter or an auto-submitted HTTP form.</dd></div><div class="term"><dt>Metadata</dt><dd>An XML document describing an entity's endpoints, supported bindings, and signing certificates, exchanged in advance between IdP and SP.</dd></div><div class="term"><dt>Signature wrapping</dt><dd>An attack that moves the signed element and substitutes a forged one, exploiting parsers that validate one node but read another.</dd></div><div class="term"><dt>Single logout (SLO)</dt><dd>A SAML profile that propagates a logout to the IdP and other SPs, which is harder to make reliable than single sign-on.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: twenty apps, twenty credentials</h2>
+<p class="lede">A company runs email, chat, a code repository, a CRM, an HR portal, and many internal tools. Each with its own username and password.</p>
+<ul><li>Employees juggle many credential sets and inevitably reuse passwords or write them down.</li><li>IT creates accounts one by one when someone joins, which is slow and inconsistent.</li><li>When someone leaves, every application must be disabled individually; one missed account is a standing backdoor.</li><li>Each application implements its own password policy, reset flow, and MFA, so the weakest one sets the standard.</li><li>Auditors cannot answer <em>who has access to what</em> without querying every system separately.</li><li>The fix is central authentication: one place that proves identity, and applications that trust it.</li><li>SAML is the enterprise standard for that trust relationship, especially in packaged and B2B software.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What SAML is, and the roles involved</h2>
+<ul><li>SAML is an XML-based standard for exchanging authentication and authorization data between two parties.</li><li>The <strong>principal</strong> is the user trying to reach an application.</li><li>The <strong>identity provider</strong> authenticates the principal — checking password, MFA, device posture — and issues a signed assertion.</li><li>The <strong>service provider</strong> is the application; it does not authenticate, it verifies the assertion and creates a session.</li><li>Trust is established in advance by exchanging <strong>metadata</strong>: endpoints, bindings, and signing certificates.</li><li>The IdP is the single point of authentication and deprovisioning, which is exactly why enterprises adopt it.</li><li>SAML carries authentication <em>and</em> attributes such as email, groups, and roles, which the SP uses for authorization.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Role</th><th>Responsibility</th><th>Typical owner</th></tr></thead><tbody><tr><td>Principal</td><td>Provides credentials to the IdP</td><td>The employee or customer</td></tr>
+<tr><td>Identity provider</td><td>Authenticates and signs assertions</td><td>Corporate IT or an identity vendor</td></tr>
+<tr><td>Service provider</td><td>Validates assertions and authorizes</td><td>The application team</td></tr>
+<tr><td>Metadata</td><td>Publishes endpoints and certificates</td><td>Both sides exchange it</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>The SP-initiated login flow</h2>
+<p class="lede">Most integrations use SP-initiated login, where the user starts at the application and is redirected to the IdP.</p>
+<ul><li>The user requests a protected resource and has no local session, so the SP creates an <code>AuthnRequest</code>.</li><li>The SP redirects the browser to the IdP's single sign-on endpoint with the request, its issuer, and a request ID.</li><li>The IdP authenticates the user if needed — password, MFA — and may reuse an existing IdP session.</li><li>The IdP builds an assertion for that user and returns it to the SP's assertion consumer service.</li><li>The browser POSTs the response to the SP, which validates the signature, conditions, and audience.</li><li>The SP maps the asserted identity to a local account, creates its own session, and redirects to the original resource.</li><li>The browser is only a courier: the security comes from the signature, not from the channel that delivered the message.</li></ul>
+
+<div class="flow"><span class="flow-step">User hits a protected page at the SP</span><span class="flow-arrow">→</span><span class="flow-step">SP redirects with a signed AuthnRequest</span><span class="flow-arrow">→</span><span class="flow-step">IdP authenticates the user or reuses its session</span><span class="flow-arrow">→</span><span class="flow-step">IdP returns a signed assertion via the browser</span><span class="flow-arrow">→</span><span class="flow-step">SP validates signature, audience, recipient, and timing</span><span class="flow-arrow">→</span><span class="flow-step">SP creates a session and serves the page</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>IdP-initiated login, and its risks</h2>
+<ul><li>In IdP-initiated flow the user starts at the IdP portal and clicks an application tile; the IdP sends an unsolicited assertion.</li><li>There is no <code>AuthnRequest</code>, so the SP cannot correlate the response with a request it made.</li><li>That removes the <code>InResponseTo</code> check, which is one of the strongest replay defenses.</li><li>It is popular because it gives users a single portal, but it weakens validation and complicates session handling.</li><li>Some SPs disable unsolicited assertions entirely; check before designing a portal-based experience.</li><li>Where it is required, compensate with strict audience, recipient, timing, and one-time-use checks.</li><li>Prefer SP-initiated flows unless a product requirement forces the portal pattern.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Inside the assertion</h2>
+<ul><li><strong>Issuer:</strong> which IdP produced the assertion; the SP must match it against configured metadata.</li><li><strong>Subject and NameID:</strong> the user identifier, plus the format that explains how to interpret it.</li><li><strong>AuthnStatement:</strong> when and how the user authenticated, including the method and session index.</li><li><strong>Conditions:</strong> validity window (<code>NotBefore</code>, <code>NotOnOrAfter</code>) and audience restriction to one SP.</li><li><strong>AttributeStatement:</strong> claims such as email, display name, group membership, and role.</li><li><strong>Signature:</strong> a digital signature over the assertion, the response, or both, proving the IdP produced it.</li><li>Attributes are assertions, not facts — the SP must decide which ones it trusts and how they map to permissions.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Bindings: how the message travels</h2>
+<ul><li><strong>HTTP-Redirect</strong> puts a deflated, base64-encoded message in a query parameter; it is signed but travels through the browser URL bar.</li><li><strong>HTTP-POST</strong> delivers the message as a base64 form field in an auto-submitted HTML form; the usual choice for responses.</li><li>POST avoids URL length limits and keeps the assertion out of browser history and referrer headers.</li><li><strong>Artifact</strong> binding sends a short reference and the SP retrieves the assertion over a direct back channel.</li><li>Most deployments use Redirect for the request and POST for the response.</li><li>Because everything passes through the browser, TLS on both legs is mandatory but is not what authenticates the assertion.</li><li>Logging full SAML messages is useful for debugging and dangerous for security, since they contain identity data and signatures.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Binding</th><th>Carrier</th><th>Typical use</th></tr></thead><tbody><tr><td>HTTP-Redirect</td><td>Signed query parameter</td><td>AuthnRequest from SP to IdP</td></tr>
+<tr><td>HTTP-POST</td><td>Auto-submitted form field</td><td>Response from IdP to SP</td></tr>
+<tr><td>Artifact</td><td>Short reference plus back channel</td><td>Environments avoiding large browser payloads</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>What a service provider must validate</h2>
+<ul><li>Verify the XML signature with the IdP's configured certificate, and reject unsigned assertions.</li><li>Confirm the <strong>issuer</strong> matches the expected IdP entity ID.</li><li>Enforce the <strong>audience restriction</strong> so an assertion minted for another application cannot be replayed here.</li><li>Check <strong>NotBefore</strong> and <strong>NotOnOrAfter</strong> with a small, deliberate clock-skew allowance.</li><li>Check <strong>Destination</strong> and <strong>Recipient</strong> against the actual receiving endpoint.</li><li>Match <code>InResponseTo</code> against a pending request ID, and expire pending requests quickly.</li><li>Reject replayed assertion IDs by tracking consumed IDs for the validity window.</li></ul>
+
+
+<div class="note">Every one of these checks has been the sole cause of a real SAML vulnerability. Skipping one turns the IdP into an open door.</div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>XML signature pitfalls</h2>
+<ul><li>A SAML response is XML, so the SP's parser is part of the attack surface, not just the crypto library.</li><li><strong>Signature wrapping</strong> attacks add a second, forged assertion and move the signed one, exploiting code that validates one element but reads another.</li><li>Defend by validating the signature over the exact element you then consume, and by rejecting documents with multiple assertions or unexpected structure.</li><li>XML canonicalization differences can make a valid signature appear invalid, or let an attacker change what was signed.</li><li>Disable DTD processing and external entity resolution to prevent XXE attacks that read local files or reach internal services.</li><li>Reject duplicate IDs and any assertion whose ID does not match the signed reference.</li><li>Use a maintained SAML library rather than hand-parsing XML; the edge cases are exactly where implementations fail.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Replay, time windows, and session lifetime</h2>
+<ul><li>An assertion is a bearer credential: whoever holds it can present it until it expires.</li><li>Short validity windows limit the damage of interception, but break with large clock skew, so keep hosts time-synchronized.</li><li>One-time-use enforcement requires shared state across SP instances; without it, a load-balanced fleet may accept a replay.</li><li>The SP's own session lifetime is a separate decision from assertion validity; long SP sessions extend exposure after a compromise.</li><li>On logout or role change, the SP must be able to invalidate its session even if the IdP still has an active session.</li><li>Re-authentication can be forced by requesting a fresh authentication rather than accepting a cached IdP session.</li><li>Single logout is best-effort: if one SP is unreachable, the chain breaks, so SPs also need their own timeouts.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Metadata and certificate rotation</h2>
+<ul><li>Metadata declares entity IDs, endpoints, bindings, and signing certificates; exchanging it is the setup step for trust.</li><li>Entity IDs must be stable and unique; changing one looks like a different IdP or SP and breaks trust.</li><li>Certificates expire, and an expired signing certificate takes down every integration at once, so track expiry centrally.</li><li>Rotation requires publishing the new certificate in metadata before switching signing, so SPs can trust both during the overlap.</li><li>Some SPs only accept one certificate; coordinate the window or the login will fail mid-rotation.</li><li>Never disable signature validation to fix a certificate mismatch; fix the metadata or the clock.</li><li>Automate metadata refresh where the platform supports it, and alert when it fails, because silent staleness precedes an outage.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Provisioning, attributes, and deprovisioning</h2>
+<ul><li><strong>Just-in-time provisioning</strong> creates the local account on first successful login from assertion attributes.</li><li>Attribute mapping decides identity: which claim is the username, which groups become roles, which department drives access.</li><li>Trusting an arbitrary attribute for authorization is dangerous; validate it against a known set and apply least privilege.</li><li>Multi-valued group attributes need a mapping policy, not an implicit <em>first value wins</em>.</li><li>Deprovisioning is only as good as the IdP's lifecycle: disable the IdP account and access stops at the next login or session expiry.</li><li>Existing SP sessions survive IdP deactivation unless the SP checks back or enforces short session lifetimes.</li><li>For sensitive applications, combine SAML with SCIM-style provisioning so accounts and roles are pushed, not just inferred at login.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>SAML versus OIDC, and common failures</h2>
+<ul><li>SAML is XML and browser-post based; OpenID Connect is JSON and OAuth 2.0 based, with tokens over HTTP.</li><li>SAML dominates enterprise and packaged software; OIDC dominates mobile, single-page apps, and modern APIs.</li><li>SAML assertions are signed documents; OIDC uses signed ID tokens plus access tokens for APIs.</li><li>Both solve SSO; the choice is usually dictated by what the application and the IdP support, not by protocol preference.</li><li>Common failure: certificate expired or rotated without updating metadata, producing a login outage for every user.</li><li>Common failure: clock skew outside the validity window, causing intermittent failures that look random.</li><li>Common failure: a permissive implementation that skips audience or signature checks, which is invisible until it is exploited.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Central SSO through SAML</strong> simplifies access and deprovisioning but makes the IdP a single point of failure for every application.</li><li><strong>IdP-initiated flow</strong> offers a convenient portal but loses the request-correlation check that blocks replays.</li><li><strong>Short assertion validity</strong> limits replay exposure but breaks under clock skew and slow networks.</li><li><strong>JIT provisioning</strong> removes a provisioning integration but leaves accounts created from unverified attributes.</li><li><strong>Single logout</strong> improves the security story but is unreliable across SPs and often best-effort.</li><li><strong>HTTP-POST binding</strong> keeps assertions out of URLs but requires an auto-submitting form and careful CSP handling.</li><li><strong>Rich attribute mapping</strong> enables fine-grained authorization but couples app permissions to IdP group hygiene.</li><li><strong>Strict signature validation</strong> blocks wrapping attacks but requires a correct, maintained XML stack that is harder to debug.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does SAML solve?</summary><div class="answer"><p>It centralizes authentication so users log in once at an identity provider and many applications trust that assertion. That removes per-application credentials, makes onboarding and deprovisioning a single action, and gives IT a consistent place to enforce MFA and policy. The applications keep their own authorization and sessions.</p></div></details>
+<details><summary>2. What are the roles in a SAML deployment?</summary><div class="answer"><p>The principal is the user, the identity provider authenticates them and issues a signed assertion, and the service provider validates that assertion and grants access. Trust is established in advance by exchanging metadata containing endpoints and certificates. The browser carries messages between the two parties.</p></div></details>
+<details><summary>3. Walk through an SP-initiated login.</summary><div class="answer"><p>The user requests a protected resource and the SP redirects them to the IdP with an <code>AuthnRequest</code>. The IdP authenticates or reuses a session, builds a signed assertion, and returns it through the browser to the SP's assertion consumer service. The SP validates signature, issuer, audience, recipient, timing, and request correlation, then creates its own session.</p></div></details>
+<details><summary>4. Why is IdP-initiated login riskier?</summary><div class="answer"><p>Because there is no <code>AuthnRequest</code> from the SP, so the response cannot be correlated with a pending request and the <code>InResponseTo</code> replay defense is unavailable. The SP must rely more heavily on audience, recipient, timing, and one-time-use checks. It is convenient for portals but should be avoided when SP-initiated flow is possible.</p></div></details>
+<details><summary>5. What is inside a SAML assertion?</summary><div class="answer"><p>An issuer, a subject with a NameID, an authentication statement describing when and how the user authenticated, conditions with a validity window and audience restriction, and an attribute statement with claims such as email and groups. The whole document, or the response containing it, is digitally signed by the IdP.</p></div></details>
+<details><summary>6. Why must the SP check the audience restriction?</summary><div class="answer"><p>An assertion is valid only for the application it was minted for. Without an audience check, an assertion obtained for one application could be replayed against another that trusts the same IdP. Audience plus recipient and destination checks bind the assertion to one specific endpoint.</p></div></details>
+<details><summary>7. What is a signature wrapping attack?</summary><div class="answer"><p>It exploits XML parsing ambiguity: the attacker keeps the genuinely signed assertion somewhere in the document but inserts a forged one where the application actually reads identity data. The signature still validates, yet the effective identity is the attacker's. Defenses include validating and consuming the same element, rejecting extra assertions, and using a hardened library.</p></div></details>
+<details><summary>8. How do you prevent assertion replay?</summary><div class="answer"><p>Use short validity windows, enforce audience and recipient, correlate responses to pending requests with <code>InResponseTo</code>, and reject assertion IDs already consumed during their validity window. The last check needs shared state across instances, which is easy to miss behind a load balancer. Keep hosts synchronized so the window is not widened by clock skew.</p></div></details>
+<details><summary>9. How does certificate rotation work in SAML?</summary><div class="answer"><p>Publish the new signing certificate in metadata while the old one is still valid, so service providers can trust both, then switch signing and later remove the old certificate. The overlap window is essential because many SPs accept only one certificate. Track expiry centrally, since an expired certificate breaks every integration at once.</p></div></details>
+<details><summary>10. Does SAML handle user provisioning and deprovisioning?</summary><div class="answer"><p>Only partially. SAML can carry attributes and support just-in-time account creation at first login, but it does not push updates or deletions. Deprovisioning relies on the IdP disabling the account, and existing SP sessions persist until they expire. For strict lifecycle control, pair SAML with a provisioning protocol that pushes account state.</p></div></details>
+<details><summary>11. SAML or OIDC — how do you choose?</summary><div class="answer"><p>Choose based on what the application and IdP support and on the client type. SAML is the norm for enterprise and packaged software, while OIDC fits mobile apps, single-page apps, and API access with bearer tokens. Both provide SSO; the difference is XML documents versus JSON tokens and the ecosystem around each.</p></div></details>
+<details><summary>12. What usually breaks a SAML integration in production?</summary><div class="answer"><p>Expired or rotated certificates that were not published in metadata, clock skew outside the validity window, and mismatched entity IDs or assertion consumer URLs. Permissive validation that skips signature or audience checks is worse, because it fails silently and securely only by luck. Central expiry monitoring and message-level logging catch most of these early.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Skipping audience or recipient validation because the signature checked out.</li><li>Hand-parsing SAML XML and validating a different element than the one used to identify the user.</li><li>Rotating the IdP signing certificate without publishing it in metadata first, causing a total login outage.</li><li>Relying on IdP-initiated assertions for sensitive apps and assuming replay protection is still in place.</li><li>Treating SAML attributes as trusted roles without validating them against an allowlist.</li><li>Assuming deprovisioning is instant when existing SP sessions remain valid until expiry.</li><li>Enabling full SAML message logging in production and leaking identity data and long-lived assertions.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="rbac.html"><span>← Previous</span><strong>RBAC</strong></a><span></span></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/saml">AlgoMaster — SAML</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

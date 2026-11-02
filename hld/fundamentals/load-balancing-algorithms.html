@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Load Balancing Algorithms — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 16 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Load Balancing Algorithms</h1>
+    <p class="dek">Load Balancing · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">10 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/load-balancing-algorithms">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Static and dynamic algorithms</a>
+<a href="#s2">Round robin</a>
+<a href="#s3">Weighted round robin</a>
+<a href="#s4">Random</a>
+<a href="#s5">Least connections</a>
+<a href="#s6">Least response time</a>
+<a href="#s7">Power of two choices</a>
+<a href="#s8">Hash-based routing</a>
+<a href="#s9">Consistent hashing</a>
+<a href="#s10">Locality-aware routing</a>
+<a href="#s11">Adaptive and load-aware routing</a>
+<a href="#s12">Choosing an algorithm</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A load balancing algorithm is the rule that picks which backend serves a request; the right choice depends on <strong>what the balancer can actually observe</strong> and on how uneven request cost and duration are.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Static algorithm</dt><dd>A rule that picks a backend without looking at current server load, such as round robin or random.</dd></div><div class="term"><dt>Dynamic algorithm</dt><dd>A rule that chooses using live signals such as active connections, request counts, or response time.</dd></div><div class="term"><dt>Round robin</dt><dd>Cycling through the server list in fixed order, giving each backend an equal share of requests.</dd></div><div class="term"><dt>Weighted round robin</dt><dd>Round robin where each server has a weight and receives requests in proportion to it.</dd></div><div class="term"><dt>Least connections</dt><dd>Sending each new request to the server with the fewest active connections.</dd></div><div class="term"><dt>Power of two choices</dt><dd>Sampling two servers at random and choosing the less loaded one, which avoids herd effects.</dd></div><div class="term"><dt>Consistent hashing</dt><dd>Placing servers and keys on a ring so that adding or removing a server moves only a small fraction of keys.</dd></div><div class="term"><dt>Herding</dt><dd>Many balancer instances independently choosing the same least-loaded server and overloading it at once.</dd></div><div class="term"><dt>Slow start</dt><dd>Gradually ramping traffic to a new server so its caches and connection pools can warm up.</dd></div><div class="term"><dt>Virtual node</dt><dd>An extra position on the hash ring owned by a server, used to spread keys more evenly.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Static and dynamic algorithms</h2>
+<p class="lede">A load balancer sits in front of a pool of servers and decides which one handles each request. The rule is the algorithm.</p>
+<ul><li><strong>Static</strong> algorithms follow a fixed rule: fixed order, fixed weights, or random choice, with no live state.</li><li><strong>Dynamic</strong> algorithms read server state first: active connections, active requests, response time, or reported load.</li><li>Static is cheap and predictable but blind: it keeps sending to an overloaded server because it never looks.</li><li>Dynamic adapts but depends on metrics that are delayed, partial, or measured by the wrong instance.</li><li>An algorithm is only as good as its signal: connection count helps only if connections track load.</li><li>No algorithm compensates for missing health checks, bad timeouts, or insufficient capacity.</li><li>Most real systems layer several rules: zone preference first, then a dynamic pick inside the zone.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Balancer layer</th><th>Signals available</th><th>Signals usually missing</th></tr></thead><tbody><tr><td>DNS</td><td>Resolver location, weights, health</td><td>Active requests, exact client path</td></tr>
+<tr><td>Layer 4</td><td>IP, port, protocol, connection count</td><td>HTTP path, headers, method</td></tr>
+<tr><td>Layer 7</td><td>Request details, active requests, backend latency</td><td>Business cost unless the app reports it</td></tr>
+<tr><td>Application gateway</td><td>Tenant, queue depth, auth context, custom cost</td><td>Packet-level simplicity</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>Round robin</h2>
+<p class="lede">With servers A, B, and C, the first request goes to A, the second to B, the third to C, and the fourth back to A.</p>
+<ul><li>The balancer only stores the index of the last pick, so the implementation is a counter plus a remainder.</li><li>It is the common default in NGINX and HAProxy and a sensible baseline in interviews.</li><li>It works when all servers have <strong>similar capacity</strong> and requests cost <strong>roughly the same</strong>.</li><li>It fails when request cost varies: a five-second report and a ten-millisecond lookup get equal turns.</li><li>It also fails with heterogeneous hardware: a 16-core server still gets one third of the traffic.</li><li>In production the list must contain only healthy, ready servers, so health checking is part of the algorithm.</li><li>Requests are balanced, but <strong>work</strong> is not, which is the distinction that matters.</li></ul>
+
+
+<pre class="code"><code>pick = servers[counter % len(servers)]
+counter += 1</code></pre>
+<div class="note">Equal request counts do not imply equal CPU, memory, or queue depth on the backends.</div>
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Weighted round robin</h2>
+<ul><li>Assign each server a weight based on capacity: weight 4 receives four times the traffic of weight 1.</li><li>With weights A=4, B=1, C=1, four of every six requests go to A, and one each to B and C.</li><li>It handles heterogeneous instance sizes and mixed generations of hardware in one pool.</li><li>Weights also give deliberate control: canary releases, gradual regional ramp-up, and draining a server.</li><li><strong>Smooth</strong> weighted round robin spreads each server's turns through the cycle instead of sending bursts of four to A.</li><li>Smooth implementations keep a running score per server, add the weight each pick, choose the highest, then subtract the total weight.</li><li>The limit is that weights are <em>expected</em> capacity, not <em>current</em> capacity: a server stalling on a garbage collection pause keeps its full share.</li></ul>
+
+<div class="flow"><span class="flow-step">Start every server score at 0</span><span class="flow-arrow">→</span><span class="flow-step">Add each server's weight to its score</span><span class="flow-arrow">→</span><span class="flow-step">Pick the highest score</span><span class="flow-arrow">→</span><span class="flow-step">Subtract the total weight from the winner</span><span class="flow-arrow">→</span><span class="flow-step">Repeat for the next request</span></div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Random</h2>
+<ul><li>Pick a server at random for each request; no counter, no shared state, no coordination.</li><li>Over a small number of requests the distribution looks lumpy, but it evens out as volume grows.</li><li>It is attractive when many balancer instances must decide independently, because there is nothing to synchronise.</li><li>Like round robin it ignores load, so an overloaded server still receives new requests.</li><li>Randomness is also the ingredient that makes power of two choices work.</li><li>Weighted random exists and is useful when capacities differ but you do not want bursty cycles.</li><li>Variance is the cost: at low request rates, some servers get noticeably more than their share.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Least connections</h2>
+<ul><li>Track active connections per server and send each new request to the one with the fewest.</li><li>Slow requests hold connections open longer, so a busy server naturally stops attracting new traffic.</li><li>It suits workloads with very different durations: file uploads, long queries, WebSockets, and database connections.</li><li>A weighted variant scales the comparison by server capacity so larger servers take a bigger share.</li><li>The bookkeeping must be concurrency-safe, with increments on start and decrements on finish, timeout, or failure.</li><li>With HTTP/2 or gRPC one connection carries many concurrent requests, so connection count understates real load.</li><li>A brand-new server starts at zero connections and can be flooded unless <strong>slow start</strong> is enabled.</li></ul>
+
+
+<pre class="code"><code>pick = min(servers, key=lambda s: s.active_connections)
+pick.active_connections += 1
+# decrement on completion, timeout, or failure</code></pre>
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Least response time</h2>
+<ul><li>Connection count says how many requests are in flight, not how fast the server finishes them.</li><li>Two servers with ten connections each can differ tenfold in latency because of disk, GC, or a noisy neighbour.</li><li>The balancer measures response time per server and prefers the faster ones, often combining it with connection count.</li><li>Using only the last response is fragile: one slow query can make a healthy server look broken.</li><li>Production implementations use an <strong>exponentially weighted moving average</strong> so recent samples dominate without overreacting.</li><li>The average only shifts when a server is consistently slow, which is the desired damping.</li><li>Quiet servers need occasional probe traffic, otherwise their latency data goes stale and they are never chosen.</li></ul>
+
+
+<div class="note">Response time is also a property of the request: a heavy query is slow on any server, so latency can penalise a healthy backend that happened to receive expensive work.</div>
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Power of two choices</h2>
+<p class="lede">When many balancers share a pool, each has a partial and slightly stale view, so “pick the global minimum” causes herding.</p>
+<ul><li>Choose <strong>two servers at random</strong>, compare their load, and send the request to the lighter one.</li><li>Random sampling makes it unlikely that every balancer picks the same server at the same moment.</li><li>Comparing two is dramatically better than picking one at random, and comparing more adds little for the cost.</li><li>Cost per request is constant regardless of pool size, which matters at large scale.</li><li>It works with connections or in-flight requests, and with weights by comparing weighted scores.</li><li>Envoy uses power of two choices by default for its least-request policy; NGINX offers a similar random-two option.</li><li>It is the pragmatic default for large stateless fleets with many balancer instances.</li></ul>
+
+
+<pre class="code"><code>a, b = random.sample(servers, 2)
+pick = a if a.active_requests &lt;= b.active_requests else b</code></pre>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Hash-based routing</h2>
+<p class="lede">Sometimes the same client or key should keep reaching the same server, usually for local caches or in-memory sessions.</p>
+<ul><li>The balancer hashes a chosen value and maps the result onto the server pool.</li><li>Candidate keys include client IP, user ID, session ID, tenant ID, URL, or cache key.</li><li>Source IP hashing is the simplest form: hash the client IP and take it modulo the server count.</li><li>Problem one: many users share a public IP behind carrier or office NAT, so they all land on one server.</li><li>Problem two: changing the server count remaps most keys, because the modulus changes.</li><li>Hashing a session cookie, user ID, or tenant ID is usually more stable than hashing the IP.</li><li>Hash routing ignores load, so a hot key such as a popular product page can overload one server while others idle.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Consistent hashing</h2>
+<ul><li>Place servers and keys on a hash ring; a key belongs to the first server clockwise from its position.</li><li>Adding a server only takes over the arc between it and its predecessor, so few keys move.</li><li>Removing a server moves only its keys, and they go to the next server on the ring.</li><li>Going from four servers to five moves roughly one fifth of the keys instead of most of them.</li><li><strong>Virtual nodes</strong> give each server several ring positions so ownership is spread evenly.</li><li><strong>Rendezvous hashing</strong> achieves the same stability without a ring: score every server per key and pick the highest.</li><li>Maglev-style hashing is another variant used inside very large load balancers for stable, even distribution.</li><li>The remaining weakness is a hot key: stability is preserved, but that key's server can still saturate.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Scheme</th><th>Keys moved when a server is added</th><th>Main weakness</th></tr></thead><tbody><tr><td>Modulo hashing</td><td>Most keys</td><td>Reshuffles the whole pool</td></tr>
+<tr><td>Consistent hashing</td><td>About one server's share</td><td>Hot keys, ring management</td></tr>
+<tr><td>Rendezvous hashing</td><td>Only keys preferring that server</td><td>O(n) score per key</td></tr>
+<tr><td>Maglev hashing</td><td>Minimal disruption</td><td>Lookup table maintenance</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Locality-aware routing</h2>
+<ul><li>Servers are usually spread across availability zones and regions, and cross-zone calls add latency and transfer cost.</li><li>Prefer backends in the same zone as the balancer, then use round robin or least requests inside that zone.</li><li>Fall back to other zones when local servers are unhealthy or saturated, so capacity gaps do not become outages.</li><li>Envoy implements this as zone-aware routing with a configurable spillover threshold.</li><li>The failure mode is imbalance: if most traffic arrives in zone A but most capacity sits in zone B, strict locality overloads A.</li><li>Weight locality by both traffic share and capacity share, not by proximity alone.</li><li>Data residency rules can forbid cross-region fallback, so the fallback policy must respect legal boundaries.</li></ul>
+
+<div class="flow"><span class="flow-step">Receive request in zone A</span><span class="flow-arrow">→</span><span class="flow-step">Try healthy backends in zone A</span><span class="flow-arrow">→</span><span class="flow-step">If A is saturated or unhealthy, spill to zone B</span><span class="flow-arrow">→</span><span class="flow-step">Recheck local capacity on the next request</span></div>
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Adaptive and load-aware routing</h2>
+<ul><li>Instead of inferring load, ask the server: it reports CPU, memory, queue depth, or request rate.</li><li>Metrics can come back in response headers or through a separate reporting channel.</li><li>The balancer continuously adjusts each server's share: a server at high CPU gets less, an idle one gets more.</li><li>gRPC's weighted round robin policy lets backends report utilization and lets the client compute weights.</li><li>It shines when identical hardware performs differently because of noisy neighbours or background jobs.</li><li>The danger is <strong>instability</strong>: fast-changing weights make balancers chase whichever server last reported low load.</li><li>Mitigate with smoothed measurements, rate-limited weight changes, hysteresis, and a safe fallback when a server stops reporting.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>Choosing an algorithm</h2>
+<ul><li>Equal servers with short, uniform requests: round robin or power of two choices.</li><li>Different capacities or a canary rollout: weighted round robin, or weighted least requests.</li><li>Highly variable durations or long-lived connections: least connections, with slow start enabled.</li><li>HTTP/2 or gRPC multiplexing: least requests, because connections no longer represent work.</li><li>Many balancer instances: power of two choices to avoid herding.</li><li>Cache affinity or sticky sessions: consistent hash, rendezvous, or Maglev rather than modulo hashing.</li><li>Multi-zone deployments: locality-aware routing with spillover, and adaptive routing only if metrics are trustworthy.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Workload</th><th>Good starting point</th><th>Why</th></tr></thead><tbody><tr><td>Static web/API, equal instances</td><td>Round robin or P2C</td><td>Simple and effective</td></tr>
+<tr><td>Uneven request duration</td><td>Least requests or P2C</td><td>Avoids piling onto busy backends</td></tr>
+<tr><td>Long-lived connections</td><td>Least connections</td><td>Connection count tracks load</td></tr>
+<tr><td>Heterogeneous instances</td><td>Weighted round robin</td><td>Capacity differs</td></tr>
+<tr><td>Cache cluster</td><td>Consistent hash, Maglev, rendezvous</td><td>Keeps keys near the same cache</td></tr>
+<tr><td>Canary release</td><td>Weighted routing</td><td>Controls exposure precisely</td></tr>
+<tr><td>Multi-zone service</td><td>Locality-aware with spillover</td><td>Keeps traffic close without overload</td></tr>
+<tr><td>Inference gateway</td><td>Queue and load-aware L7 routing</td><td>GPU and queue signals matter</td></tr></tbody></table></div>
+
+<div class="note">Whatever you choose, keep health checks authoritative: an algorithm can only distribute traffic across backends that are actually able to serve it.</div>
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Static algorithms</strong> are cheap and predictable but cannot react when a backend slows down.</li><li><strong>Dynamic algorithms</strong> adapt to real load but depend on delayed or partial metrics.</li><li><strong>Round robin</strong> is trivial to operate but assumes equal capacity and equal request cost.</li><li><strong>Weighted round robin</strong> handles mixed hardware but its weights never react to live trouble.</li><li><strong>Least connections</strong> handles variable durations but misreads multiplexed HTTP/2 and gRPC traffic.</li><li><strong>Least response time</strong> follows real latency but can punish a server that merely received expensive requests.</li><li><strong>Power of two choices</strong> avoids herding cheaply but can still pick a bad server if both samples are bad.</li><li><strong>Consistent hashing</strong> preserves affinity during scaling but concentrates hot keys on single servers.</li><li><strong>Locality-aware routing</strong> cuts latency and cross-zone cost but risks imbalance when traffic and capacity are in different zones.</li><li><strong>Adaptive routing</strong> uses the truest signal but is the easiest to make oscillate.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What is the difference between a static and a dynamic load balancing algorithm?</summary><div class="answer"><p>A static algorithm follows a fixed rule such as a rotation or fixed weights and ignores current load. A dynamic algorithm reads live signals such as active connections, in-flight requests, or response time, so it can steer away from a struggling server.</p></div></details>
+<details><summary>2. When is round robin a bad choice?</summary><div class="answer"><p>When request costs vary widely or servers have different capacities. Round robin equalises request counts, not work, so a server that receives several slow requests keeps getting new ones while its peers are idle.</p></div></details>
+<details><summary>3. What problem does weighted round robin solve, and what does it not solve?</summary><div class="answer"><p>It matches traffic share to capacity, so a larger instance receives proportionally more requests, and it enables canaries and gradual ramps. It does not react to live condition: a server paused on garbage collection keeps its full weight.</p></div></details>
+<details><summary>4. Why does least connections work well for long-lived connections?</summary><div class="answer"><p>Because slow or long requests keep their connections open, so the connection count tracks outstanding work. A server handling expensive requests accumulates connections and stops attracting new traffic without any explicit cost model.</p></div></details>
+<details><summary>5. Why is least connections misleading for gRPC and HTTP/2?</summary><div class="answer"><p>Both multiplex many concurrent requests over a single connection, so one connection can represent heavy load while another carries almost nothing. Counting in-flight requests instead of connections gives a truer picture.</p></div></details>
+<details><summary>6. What is slow start and why does least connections need it?</summary><div class="answer"><p>A new server has zero connections, so it looks like the least loaded backend and gets a burst of traffic before its caches, connection pools, and JIT are warm. Slow start ramps its share gradually over tens of seconds to avoid that cold-start overload.</p></div></details>
+<details><summary>7. Why does least response time need a moving average?</summary><div class="answer"><p>A single slow request, such as one expensive query, would otherwise mark a healthy server as slow. An exponentially weighted moving average damps outliers while still shifting traffic away from a server that is consistently slow.</p></div></details>
+<details><summary>8. What is herding and which algorithm prevents it?</summary><div class="answer"><p>Herding happens when many balancer instances independently pick the same least-loaded server, overload it, then all switch to another. Power of two choices prevents it by sampling two random servers, which makes simultaneous identical choices unlikely.</p></div></details>
+<details><summary>9. Why is modulo hashing dangerous when the pool changes?</summary><div class="answer"><p>Changing the number of servers changes the modulus, so most keys map to different servers. Local caches lose their data and session affinity breaks even though only one server was added.</p></div></details>
+<details><summary>10. How does consistent hashing reduce key movement?</summary><div class="answer"><p>Servers and keys share a ring, and each key belongs to the next server clockwise. Adding or removing a server only reassigns the arc it owns, so a small fraction of keys move instead of most of them. Virtual nodes keep that ownership evenly spread.</p></div></details>
+<details><summary>11. What is the risk of hash-based routing?</summary><div class="answer"><p>It ignores load, so a hot key such as a popular product page sends all of its traffic to one server and can saturate it while the rest of the pool idles. Affinity and balance are in direct tension.</p></div></details>
+<details><summary>12. How do you choose an algorithm in an interview?</summary><div class="answer"><p>Start from the workload: request duration variance, connection longevity, server homogeneity, protocol, and number of regions. Then name the signal available at your balancer layer and pick the simplest algorithm that uses it, with health checks and slow start as defaults.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Assuming equal request counts mean equal load.</li><li>Using round robin with a long-tail endpoint that occasionally takes seconds.</li><li>Enabling least connections without slow start and melting every new instance.</li><li>Counting connections on a gRPC service where one connection carries thousands of requests.</li><li>Using modulo hashing for cache affinity and losing most of the cache on every scale event.</li><li>Hashing only the client IP when many users share a NAT address.</li><li>Building locality-aware routing that ignores how much traffic and capacity each zone actually has.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="load-balancers.html"><span>← Previous</span><strong>Load Balancers</strong></a><a class="next" href="dns-load-balancing.html"><span>Next →</span><strong>DNS Load Balancing</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/load-balancing-algorithms">AlgoMaster — Load Balancing Algorithms</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monolithic Architecture — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 66 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Monolithic Architecture</h1>
+    <p class="dek">Architectural Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/monolithic-architecture">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Where most applications begin</a>
+<a href="#s2">What makes an application monolithic</a>
+<a href="#s3">How a request flows through a monolith</a>
+<a href="#s4">The layered structure</a>
+<a href="#s5">Why monoliths work well</a>
+<a href="#s6">Scaling a monolith</a>
+<a href="#s7">The codebase keeps growing</a>
+<a href="#s8">Tight coupling and the big ball of mud</a>
+<a href="#s9">Shared releases and all-or-nothing scaling</a>
+<a href="#s10">Weak fault isolation</a>
+<a href="#s11">Technology lock-in</a>
+<a href="#s12">The modular monolith</a>
+<a href="#s13">Monolith vs microservices, and when to split</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A monolith builds, deploys, and runs every feature as one unit — the simplest way to start, but its coupling, shared releases, and shared process become the constraints as the system and the team grow.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Monolith</dt><dd>An application whose features are built, packaged, and deployed as a single artifact and run inside one process.</dd></div><div class="term"><dt>Deployment unit</dt><dd>The boundary that defines a monolith: everything that must be rebuilt and released together, regardless of how the code is organized internally.</dd></div><div class="term"><dt>Modular monolith</dt><dd>A single deployable application whose code is split into business-domain modules with explicit public interfaces and owned tables.</dd></div><div class="term"><dt>Big ball of mud</dt><dd>A codebase where modules reach into each other's internals so freely that no one can predict what a change will break.</dd></div><div class="term"><dt>Tight coupling</dt><dd>A dependency on another module's internal methods, tables, or data shapes rather than on a stable public contract.</dd></div><div class="term"><dt>All-or-nothing scaling</dt><dd>Scaling the entire application because one workload inside it is under heavy load, wasting capacity on the parts that are idle.</dd></div><div class="term"><dt>Fault isolation</dt><dd>The degree to which a failure in one component can be contained so that other components keep serving requests.</dd></div><div class="term"><dt>Strangler fig pattern</dt><dd>Incrementally routing pieces of functionality to new services until the old system can be switched off, instead of rewriting everything at once.</dd></div><div class="term"><dt>In-process call</dt><dd>A direct function or method invocation inside one runtime, with no network hop, serialization, or remote failure mode.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Where most applications begin</h2>
+<p class="lede">A new e-commerce product needs accounts, a catalog, a cart, orders, and payments. The obvious first version puts all of it in one application.</p>
+<ul><li>One codebase, one build, one deployment, and one database behind it is the natural starting shape.</li><li>Sign-up is handled by the user module, checkout by the order module, but both live in the same program.</li><li>This is how many applications start, including some that later serve very large user bases.</li><li>Starting with services forces you to commit to boundaries before you understand the domain.</li><li>The real question is not whether to start monolithic, but <strong>how long the simplicity holds</strong>.</li><li>Growth in traffic, code size, and headcount each attack a different monolith advantage.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What makes an application monolithic</h2>
+<p class="lede">The defining trait is deployment, not code quality: a monolith is one deployable unit even when its code is neatly modular.</p>
+<ul><li>Modules may exist — users, catalog, orders, payments — but they are compiled or packaged into <strong>one artifact</strong>.</li><li>They run in the <strong>same process</strong> and call each other with ordinary function calls.</li><li>They usually share <strong>one database</strong>, which is what enables simple transactions later.</li><li>Changing a single line in payments forces a rebuild and redeploy of the entire application.</li><li>A well-designed monolith can have clear modules and clear ownership; a badly designed one is tangled code in one process.</li><li>Because the code can be clean or messy, <em>monolith</em> alone says nothing about maintainability.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>How a request flows through a monolith</h2>
+<ul><li>A user clicks <strong>Place Order</strong>; the request reaches the order handler in the application.</li><li>The order code calls the inventory module to verify stock, then the payments module to charge the card.</li><li>The order row is written to the shared database and inventory is decremented in the same transaction.</li><li>Every step is a function call in one process: no network hop, no serialization, no partial remote failure.</li><li>If saving the order fails, the stock change rolls back with it — atomicity comes for free.</li><li>A distributed version of the same workflow needs sagas, compensations, and idempotent retries.</li><li>This transactional simplicity is the strongest technical argument for a monolith.</li></ul>
+
+<div class="flow"><span class="flow-step">Client sends Place Order</span><span class="flow-arrow">→</span><span class="flow-step">Order handler validates request</span><span class="flow-arrow">→</span><span class="flow-step">Inventory module checks and reserves stock</span><span class="flow-arrow">→</span><span class="flow-step">Payments module charges the card</span><span class="flow-arrow">→</span><span class="flow-step">Order and stock written in one transaction</span><span class="flow-arrow">→</span><span class="flow-step">Commit and return confirmation</span></div>
+<div class="note">The whole flow succeeds or fails as one database transaction — a guarantee that is expensive to reproduce across services.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>The layered structure</h2>
+<p class="lede">Most monoliths organize code into technical layers, with requests flowing down and responses flowing back up.</p>
+<ul><li>The <strong>presentation layer</strong> accepts HTTP requests and renders responses through controllers or views.</li><li>The <strong>business logic layer</strong> holds rules such as discount calculation and cancellation eligibility.</li><li>The <strong>data access layer</strong> reads and writes the database.</li><li>Larger systems split business logic into an <strong>application layer</strong> (use-case coordination) and a <strong>domain layer</strong> (rules).</li><li>The data access layer often becomes an <strong>infrastructure layer</strong> that also talks to queues and external APIs.</li><li>Layering separates technical roles, not business capabilities — order and payment logic can still share one layer.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Responsibility</th><th>Examples</th></tr></thead><tbody><tr><td>Presentation</td><td>Accept requests and return responses</td><td>Controllers, REST endpoints, views</td></tr>
+<tr><td>Application</td><td>Coordinate use cases and workflows</td><td>Checkout flow, refund workflow</td></tr>
+<tr><td>Domain</td><td>Apply business rules</td><td>Discount rules, cancelled orders cannot ship</td></tr>
+<tr><td>Infrastructure</td><td>Talk to databases and external systems</td><td>Repositories, queue clients, payment clients</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Why monoliths work well</h2>
+<ul><li><strong>Simple development:</strong> one repository to clone, one application to run locally, one place to search while debugging.</li><li><strong>Simple deployment:</strong> build one JAR or container image and release it; no cross-service version coordination.</li><li><strong>Easier testing:</strong> an end-to-end test can start the whole app and exercise a complete user journey.</li><li><strong>Performance:</strong> in-memory calls avoid network round trips, serialization, and remote failure handling.</li><li><strong>Data consistency:</strong> one database gives transactions, joins, and foreign keys without distributed coordination.</li><li><strong>Cheap refactoring:</strong> renaming a method or moving a class is one commit verified by the compiler and tests.</li><li>For a small team building a new product, these benefits usually outweigh the drawbacks.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Scaling a monolith</h2>
+<p class="lede">A monolith can scale with the same techniques as any web application; the constraint is that every copy carries every feature.</p>
+<ul><li><strong>Vertical scaling:</strong> move to a bigger machine with more CPU and memory.</li><li><strong>Horizontal scaling:</strong> run several identical copies behind a load balancer; any copy can serve any request.</li><li>Horizontal scaling only works if the app is <strong>stateless</strong>, with sessions and shared data in a database or cache.</li><li>On the data side, add read replicas, caching, and proper indexing.</li><li>Move slow work such as email or report generation to background workers so it does not hold request threads.</li><li>A well-built monolith can serve a very large number of users before architecture becomes the limit.</li><li>The first real limits are usually team coordination and release risk, not raw server capacity.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The codebase keeps growing</h2>
+<ul><li>A successful product can grow from a small codebase to over a million lines and from a handful of engineers to dozens.</li><li>Builds take longer, so the feedback loop between commit and test result stretches.</li><li>The full test suite may take tens of minutes, so developers stop running it locally.</li><li>New engineers need weeks to understand how the pieces fit together.</li><li>None of this breaks the application, but it steadily reduces how fast the team ships.</li><li>Slow feedback encourages batching changes into larger pull requests, which makes each change riskier.</li><li>Codebase size is a <strong>coordination cost</strong>, not a runtime problem.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Tight coupling and the big ball of mud</h2>
+<p class="lede">The bigger long-term problem is coupling: nothing in a single process stops one module from reaching directly into another.</p>
+<ul><li>A marketing report needs order data, so it queries the orders table directly or calls an internal orders method.</li><li>The feature ships fast, but marketing code now depends on the internal details of the orders system.</li><li>Repeated across hundreds of features, these shortcuts form a dense web of hidden dependencies.</li><li>Changing the shape of the orders table can then break reporting, shipping, and invoicing at once.</li><li>This is the classic <strong>big ball of mud</strong>: small changes feel risky because the blast radius is unknown.</li><li>Coupling is not caused by having one codebase; it is caused by shortcuts nobody blocked.</li><li>The usual fix is the modular monolith, not necessarily microservices.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Shared releases and all-or-nothing scaling</h2>
+<p class="lede">Two costs come directly from shipping one unit: releases carry everyone's changes, and scaling applies to the whole application.</p>
+<ul><li>A one-line search fix still requires rebuilding, testing, and redeploying the whole application.</li><li>That release also contains whatever payments, orders, and catalog merged that week.</li><li>If any included change is faulty, the entire release may need to be rolled back.</li><li>Teams respond by coordinating release trains, which makes releases rarer and each one larger.</li><li>Larger releases are riskier because more independent changes fail together.</li><li>Feature flags, canaries, and fast rollbacks reduce the risk but do not change the shared unit.</li><li>On the scaling side, a CPU-heavy workload such as image resizing forces you to duplicate the entire app.</li><li>Each copy still needs memory for catalog, cart, and checkout even though only image processing is busy.</li></ul>
+<h3>The worker-pool middle ground</h3>
+<ul><li>Push heavy jobs onto a queue and run a separate pool of worker processes from the same codebase.</li><li>Only the workers scale, so the cost tracks the workload that is actually hot.</li><li>This keeps one deployment while removing the worst all-or-nothing scaling effect.</li><li>It does not fix release coupling, shared process failure, or language lock-in.</li></ul>
+
+
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Weak fault isolation</h2>
+<ul><li>All modules share one process, so a fault in one module can take down the rest.</li><li>A memory leak in recommendations slowly consumes the heap until the process crashes.</li><li>The crash also removes login, checkout, and payments, which were healthy the whole time.</li><li>A slow query can exhaust the shared database connection pool for every module.</li><li>A slow external API can tie up all request threads, so unrelated endpoints stop responding.</li><li>Timeouts, bulkheads, and resource limits help, but the modules are never fully isolated.</li><li>The blast radius of any defect is effectively the whole application.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Technology lock-in</h2>
+<ul><li>A monolith is usually built with a single language and framework, which keeps conventions consistent early on.</li><li>A machine-learning feature may need Python libraries while the core is Java, which is awkward inside one process.</li><li>Framework major upgrades may require testing and updating a million lines together, taking months.</li><li>Shared runtime and dependency versions force unrelated teams onto the same upgrade schedule.</li><li>A full rewrite is rarely the answer; extract only the specialized workload as a separate service.</li><li>This keeps the stable core in place while letting the new workload pick its own stack.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>The modular monolith</h2>
+<p class="lede">The modular monolith keeps one application and one deployment but organizes code around business domains.</p>
+<ul><li>Modules are business capabilities such as users, catalog, orders, and payments, not technical layers.</li><li>Each module exposes a <strong>small public interface</strong>; other modules must not import its internals.</li><li>Modules own their own tables, so shipping asks orders for data instead of querying the orders table.</li><li>Folder structure follows business areas first, with layers inside each module.</li><li>Build rules or architecture tests enforce boundaries, for example failing a build if anything outside orders imports orders internals.</li><li>Tools such as ArchUnit for Java and Packwerk for Ruby automate these checks.</li><li>A clean boundary makes later extraction into a service a small step instead of a data-migration project.</li></ul>
+
+
+<div class="note">You get most monolith benefits while preventing the gradual slide into a big ball of mud.</div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Monolith vs microservices, and when to split</h2>
+<ul><li>Microservices run each business capability as its own service with its own deployment and usually its own database.</li><li>They enable independent deploys, per-service scaling, and stronger fault isolation.</li><li>They also add network calls that can fail, sagas for cross-service transactions, service discovery, and distributed tracing.</li><li>A monolith trades independent scaling and deployment for simplicity; microservices trade simplicity for independence.</li><li>Neither is better in general, and large successful monoliths exist — Shopify runs a large modular Rails monolith.</li><li>Split when multiple teams are blocked by shared releases, one part needs very different scaling, or failures keep spreading.</li><li>Even then, a modular monolith or extracting a few hot parts is often enough.</li></ul>
+<h3>Leaving safely with the strangler fig</h3>
+<ul><li>Avoid a full rewrite: it takes years while the business keeps changing the old system.</li><li>Extract one capability, such as notifications, as a new service and route those requests to it.</li><li>Once stable, delete the old code path and repeat with the next capability.</li><li>Extraction is far cheaper when the module already has a clean boundary and owns its tables.</li></ul>
+
+<div class="flow"><span class="flow-step">Pick one capability with a clean seam</span><span class="flow-arrow">→</span><span class="flow-step">Build the new service beside the monolith</span><span class="flow-arrow">→</span><span class="flow-step">Route that traffic to the new service</span><span class="flow-arrow">→</span><span class="flow-step">Verify behaviour and remove the old code</span><span class="flow-arrow">→</span><span class="flow-step">Repeat for the next capability</span></div>
+<h3>Decision rules</h3>
+<div class="table-wrap"><table><thead><tr><th>Start monolithic when...</th><th>Consider splitting when...</th></tr></thead><tbody><tr><td>You are building a new product</td><td>Multiple teams are constantly blocked by shared releases</td></tr>
+<tr><td>The team is small</td><td>One part needs to scale very differently from the rest</td></tr>
+<tr><td>The domain is still changing</td><td>Failures in one area frequently affect the whole system</td></tr>
+<tr><td>Strong data consistency matters</td><td>One workload needs a different language or runtime</td></tr>
+<tr><td>You have limited capacity to run infrastructure</td><td>Module boundaries are already clear and stable</td></tr></tbody></table></div>
+
+<div class="table-wrap"><table><thead><tr><th></th><th>Monolith</th><th>Modular monolith</th><th>Microservices</th></tr></thead><tbody><tr><td>Deployment</td><td>One unit</td><td>One unit</td><td>Many independent units</td></tr>
+<tr><td>Calls between parts</td><td>In-process</td><td>In-process via module APIs</td><td>Over the network</td></tr>
+<tr><td>Transactions</td><td>Normal database transactions</td><td>Normal database transactions</td><td>Sagas, eventual consistency</td></tr>
+<tr><td>Scaling</td><td>Whole app</td><td>Whole app or worker pools</td><td>Per service</td></tr>
+<tr><td>Fault isolation</td><td>Weak</td><td>Weak</td><td>Stronger</td></tr>
+<tr><td>Operational cost</td><td>Low</td><td>Low</td><td>High</td></tr>
+<tr><td>Main risk</td><td>Tangled code</td><td>Boundaries need enforcing</td><td>Distributed-system complexity</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Single deployment</strong> makes releases and testing simple but couples every team to one release train and one rollback decision.</li><li><strong>In-process calls</strong> are fast and reliable but cannot be scaled or deployed independently per module.</li><li><strong>One shared database</strong> gives ACID transactions and joins but lets any module couple to any table.</li><li><strong>Horizontal app scaling</strong> adds capacity but duplicates every feature in every copy, including idle ones.</li><li><strong>Modular monolith</strong> keeps operational simplicity and clean boundaries but requires tooling and discipline to enforce them.</li><li><strong>Microservices</strong> improve independent scaling and fault isolation but add network failures, sagas, discovery, and tracing.</li><li><strong>Delaying the split</strong> avoids premature boundaries but accumulates coupling that makes later extraction expensive.</li><li><strong>Extracting one workload</strong> fixes the hot spot cheaply but leaves the rest of the shared release and failure domain intact.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What actually makes an application a monolith?</summary><div class="answer"><p>It is built, packaged, and deployed as one artifact and runs in one process, usually against one database. Code organization does not decide it: a clean modular codebase and a tangled one are both monoliths if they ship as a single unit.</p></div></details>
+<details><summary>2. Why do so many systems start as monoliths?</summary><div class="answer"><p>Because the first version has one team, an unclear domain, and a need to ship quickly. One repo, one deploy, in-process calls, and real database transactions remove a large amount of coordination and infrastructure work that would otherwise slow the team down.</p></div></details>
+<details><summary>3. Walk through a request inside a monolith.</summary><div class="answer"><p>The order handler receives Place Order, calls the inventory module to reserve stock, calls payments to charge the card, and writes the order. All of it is function calls in one process, and the order write plus stock decrement commit in a single database transaction, so a failure rolls both back.</p></div></details>
+<details><summary>4. How does a monolith scale?</summary><div class="answer"><p>Vertically with a bigger machine, and horizontally by running identical stateless copies behind a load balancer. Data-side techniques are the same as elsewhere: caching, read replicas, indexes, and background workers for slow jobs. The limitation is that every copy contains every feature.</p></div></details>
+<details><summary>5. What is all-or-nothing scaling?</summary><div class="answer"><p>When one workload, such as image processing, is CPU-heavy while the rest is light, you cannot scale only that workload. You run more copies of the entire application, each sized for the full feature set, so you pay for capacity most of the system does not use. A queue plus a worker pool from the same codebase is the usual middle ground.</p></div></details>
+<details><summary>6. Why is deployment risk higher in a monolith?</summary><div class="answer"><p>Every change ships together with every other team's merged work, so one faulty change can force a rollback of the whole release. Teams then coordinate release schedules, which makes releases rarer and larger, and larger releases are riskier still. Canaries and flags reduce but do not remove the coupling.</p></div></details>
+<details><summary>7. How does a monolith fail?</summary><div class="answer"><p>Because modules share a process and resource pools, one memory leak, slow query, or slow downstream API can consume all threads or connections. Healthy modules such as login and payments then fail too. Timeouts and limits reduce the damage but cannot isolate modules the way separate processes can.</p></div></details>
+<details><summary>8. Is a monolith always a big ball of mud?</summary><div class="answer"><p>No. Coupling comes from unblocked shortcuts such as one module querying another's tables, not from having a single codebase. A modular monolith with public interfaces, owned tables, and architecture tests keeps boundaries intact and stays maintainable for years.</p></div></details>
+<details><summary>9. What is a modular monolith and what does it cost?</summary><div class="answer"><p>One deployable application organized by business domain, where each module exposes a narrow interface and owns its tables. It keeps simple development and deployment, but the boundaries are conventions that must be enforced with build rules or architecture tests, and a single process still limits fault isolation.</p></div></details>
+<details><summary>10. When should you move from a monolith to microservices?</summary><div class="answer"><p>When real pain appears: teams are blocked by shared releases, one capability needs very different scaling, failures in one area keep affecting everything, or a workload needs another runtime. Clear, stable module boundaries are the precondition, not the reward.</p></div></details>
+<details><summary>11. How do you migrate safely?</summary><div class="answer"><p>Use the strangler fig pattern: choose one capability with a clean seam, build it as a service, route that traffic to it, verify, delete the old path, then repeat. The application keeps serving users throughout, and you can stop after extracting the few parts that actually hurt.</p></div></details>
+<details><summary>12. Why extract modules before extracting services?</summary><div class="answer"><p>If every module reads every table, pulling one out becomes a long data migration with unclear ownership. Once a module owns its tables and exposes an interface, the extraction is mostly wiring and traffic switching.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Judging a monolith by code style instead of by its deployment unit.</li><li>Starting with microservices before the domain boundaries are understood.</li><li>Calling a system modular while every module still reads every table.</li><li>Assuming a monolith cannot scale, when the real limit is team coordination and release risk.</li><li>Scaling the whole application to fix one hot workload instead of isolating it.</li><li>Planning a big-bang rewrite instead of incremental extraction.</li><li>Extracting services without first establishing clean module boundaries and table ownership.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="client-server-architecture.html"><span>← Previous</span><strong>Client-Server Architecture</strong></a><a class="next" href="microservices-architecture.html"><span>Next →</span><strong>Microservices Architecture</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/monolithic-architecture">AlgoMaster — Monolithic Architecture</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

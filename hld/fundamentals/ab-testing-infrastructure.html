@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A/B Testing Infrastructure — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 115 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>A/B Testing Infrastructure</h1>
+    <p class="dek">Deployment Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>12</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">8 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/ab-testing-infrastructure">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">Why before-and-after comparisons mislead</a>
+<a href="#s2">What an A/B test actually is</a>
+<a href="#s3">Assigning users to variants</a>
+<a href="#s4">Exposure logging</a>
+<a href="#s5">Choosing metrics before you look</a>
+<a href="#s6">Sample size, power, and duration</a>
+<a href="#s7">Reading the result honestly</a>
+<a href="#s8">Infrastructure pieces</a>
+<a href="#s9">Running many experiments at once</a>
+<a href="#s10">Validity threats</a>
+<a href="#s11">Operational lifecycle</a>
+<a href="#s12">A/B tests versus canaries and feature flags</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>A/B testing compares two variants on comparable user groups at the same time, so outside events affect both groups equally and the difference can be attributed to the change.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>A/B test</dt><dd>A controlled experiment that sends comparable groups of users different variants simultaneously and compares outcomes.</dd></div><div class="term"><dt>Control</dt><dd>The existing behavior that the treatment is measured against; without it, differences cannot be attributed to the change.</dd></div><div class="term"><dt>Randomization unit</dt><dd>The entity that is randomly assigned to a variant, such as a user, session, device, or account.</dd></div><div class="term"><dt>Assignment</dt><dd>The deterministic mapping of a randomization unit to a variant, usually by hashing an identifier with a salt.</dd></div><div class="term"><dt>Exposure event</dt><dd>A logged record that a specific unit actually saw a specific variant, which is the basis for correct analysis.</dd></div><div class="term"><dt>Primary metric</dt><dd>The single outcome the experiment is designed to move, chosen before the test starts.</dd></div><div class="term"><dt>Guardrail metric</dt><dd>A metric that must not degrade, used to catch harm the primary metric would hide.</dd></div><div class="term"><dt>Sample ratio mismatch</dt><dd>A significant deviation from the intended traffic split, usually indicating a bug in assignment or logging.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>Why before-and-after comparisons mislead</h2>
+<p class="lede">A redesign ships on Monday and the purchase rate rises by Friday. It is tempting to credit the redesign, but the week also contained a discount campaign, a competitor outage, and a holiday.</p>
+<ul><li>Any change in the metric could be caused by the release, by external events, or by both.</li><li>Seasonality, marketing campaigns, competitor behavior, and app-store featuring all move metrics independently.</li><li>A before-and-after comparison has no way to separate the treatment effect from the calendar.</li><li>Concurrent comparison solves this: both groups live through the same external events.</li><li>The remaining difference is then attributable to the variant, within a stated level of uncertainty.</li><li>This is why experiments are infrastructure, not just a dashboard: assignment, logging, and analysis all have to be correct.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>What an A/B test actually is</h2>
+<ul><li>Users are split into a control group that sees the current experience and a treatment group that sees the variant.</li><li>The split is random but deterministic per user, so each user gets a stable experience.</li><li>Both groups are measured over the same period, so external shocks affect them similarly.</li><li>The comparison is between groups, not between time periods, which is the whole point.</li><li>Multiple variants can be tested at once, but each additional arm divides the available sample.</li><li>A test that changes several unrelated things at once cannot attribute the effect to any one of them.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Assigning users to variants</h2>
+<ul><li>Hash a stable identifier — user ID, account ID, or device ID — together with an experiment salt to get a uniform bucket.</li><li>Deterministic hashing means reassignment does not happen on refresh, so experience stays stable.</li><li>Choose the randomization unit to match the decision: user-level for product changes, account-level for B2B features.</li><li>Session-level assignment is acceptable for low-risk UI tests but leaks across pages and breaks long-term measurement.</li><li>Device-level assignment splits a single person across variants if they use multiple devices.</li><li>The assignment function must be shared across services, or different services will disagree about a user's variant.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Unit</th><th>Good for</th><th>Weakness</th></tr></thead><tbody><tr><td>User ID</td><td>Most product changes</td><td>Cross-device inconsistency</td></tr>
+<tr><td>Account or tenant</td><td>B2B and shared-seat features</td><td>Smaller effective sample</td></tr>
+<tr><td>Device</td><td>Anonymous or logged-out traffic</td><td>Same person split across devices</td></tr>
+<tr><td>Session</td><td>Low-risk UI experiments</td><td>Unstable over time, contamination</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Exposure logging</h2>
+<ul><li>Log when a user is actually exposed to a variant, not merely when they were assigned one.</li><li>Users assigned but never exposed dilute the treatment effect and bias the estimate.</li><li>Exposure events must carry the experiment key, variant, unit ID, timestamp, and enough context to join with outcomes.</li><li>Logging from the client is easy to lose; logging on the server is more complete but may miss client-only rendering.</li><li>Deduplicate exposures so a page refresh does not double-count a user in the denominator.</li><li>Instrumentation bugs are the most common reason an experiment produces a confident but wrong answer.</li></ul>
+
+
+<div class="note">Analyze on the exposed population and keep the assignment population as a cross-check; large divergence between them signals a logging problem.</div>
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Choosing metrics before you look</h2>
+<ul><li>Pick one primary metric that represents the decision, and define it precisely before the test starts.</li><li>Add guardrail metrics that must not degrade, such as latency, error rate, or cancellation rate.</li><li>Add counter-metrics for the obvious way to game the primary metric, such as revenue rising while refunds rise faster.</li><li>Define the metric window: immediate effects and delayed retention measure different things.</li><li>Pre-register the analysis plan so the result is not chosen after seeing several cuts of the data.</li><li>A metric that moves only in a segment may be a real insight or a multiple-comparison artifact; distinguish them deliberately.</li></ul>
+
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Sample size, power, and duration</h2>
+<ul><li>Decide the minimum detectable effect before the test; it determines how much traffic and time are needed.</li><li>Underpowered tests produce inconclusive results that teams then interpret as 'no effect'.</li><li>Run for full weekly cycles so day-of-week composition is balanced across variants.</li><li>Stopping early when results look good inflates false positives; fix the horizon unless a sequential method is used.</li><li>Very large samples make trivial differences statistically significant, so judge practical significance too.</li><li>If traffic is split across many concurrent experiments, each test's effective sample shrinks.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>Reading the result honestly</h2>
+<ul><li>Report an effect size with a confidence interval, not only a pass or fail verdict.</li><li>A confidence interval that includes both a meaningful gain and a meaningful loss is genuinely inconclusive.</li><li>Beware novelty effects: new designs often spike engagement, then regress as the novelty fades.</li><li>Beware primacy effects: users habituated to the old design may underperform initially on a better one.</li><li>Segment results are exploratory unless pre-registered; slicing until a win appears is p-hacking.</li><li>Check that the observed split matches the intended split before trusting any metric.</li></ul>
+
+
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>Infrastructure pieces</h2>
+<ul><li>An experiment configuration store holds definitions, variants, traffic allocation, and targeting.</li><li>An assignment service or SDK evaluates the experiment locally using cached configuration.</li><li>An exposure pipeline carries events into the analytics store, usually with buffering and retries.</li><li>A metrics layer joins exposures with outcomes and computes per-variant aggregates.</li><li>An analysis service or notebook layer produces effect estimates, confidence intervals, and diagnostics.</li><li>A monitoring layer watches assignment balance, event volume, and pipeline lag, because silent breakage invalidates results.</li></ul>
+
+<div class="flow"><span class="flow-step">Define hypothesis and metrics</span><span class="flow-arrow">→</span><span class="flow-step">Configure variants and allocation</span><span class="flow-arrow">→</span><span class="flow-step">Assign users deterministically</span><span class="flow-arrow">→</span><span class="flow-step">Log exposures and outcomes</span><span class="flow-arrow">→</span><span class="flow-step">Analyze effect with intervals</span><span class="flow-arrow">→</span><span class="flow-step">Decide, ship, or stop</span></div>
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Running many experiments at once</h2>
+<ul><li>Orthogonal experiments assign on independent hash layers so a user can be in multiple tests without interference.</li><li>Overlapping experiments on the same layer correlate assignments and contaminate each other's results.</li><li>Interaction effects are real: two individually positive changes can be negative together.</li><li>Keep a holdout group across many experiments to measure cumulative product impact.</li><li>Document which experiments are active so a surprising result can be traced to a co-running test.</li><li>Sample dilution from too many concurrent tests is a common reason for inconclusive results.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Validity threats</h2>
+<ul><li><strong>Sample ratio mismatch:</strong> the observed split deviates from the configured one, indicating a bug rather than a finding.</li><li><strong>Instrumentation change mid-test:</strong> altering event definitions partway invalidates the comparison.</li><li><strong>Bot and internal traffic:</strong> non-user requests distort conversion metrics unless filtered.</li><li><strong>Cross-device identity:</strong> one person counted as two units weakens the experiment.</li><li><strong>Spillover:</strong> treatment users interact with control users, as in social or marketplace features.</li><li><strong>Selective exposure:</strong> a variant that only renders on some pages is not comparable to a control that renders everywhere.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Operational lifecycle</h2>
+<ul><li>Start with a hypothesis and the decision it informs; experiments without a decision are just data collection.</li><li>Define metrics, allocation, duration, and stopping rules in the experiment document.</li><li>Run a small pre-check that assignments are balanced and events are flowing before trusting results.</li><li>Monitor guardrails continuously so harm is caught during the test, not after.</li><li>Conclude with a recorded decision: ship, iterate, or abandon, with the evidence attached.</li><li>Clean up the experiment configuration and remove losing variant code, or the codebase accumulates dead paths.</li></ul>
+
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>A/B tests versus canaries and feature flags</h2>
+<ul><li>A canary asks whether the new version is safe; an A/B test asks whether it is better.</li><li>Canary analysis uses operational guardrails; experiment analysis uses statistical estimates of effect.</li><li>A canary is usually short and automatic; an experiment runs long enough to measure behavior.</li><li>Feature flags are the delivery mechanism that makes both possible by controlling exposure at runtime.</li><li>Running an experiment on top of a broken release measures noise; validate safety first, then measure benefit.</li><li>The same traffic-splitting infrastructure often serves both, but the decision rules are different.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Question</th><th>Tool</th><th>Decision</th></tr></thead><tbody><tr><td>Is it safe?</td><td>Canary or health checks</td><td>Promote or abort</td></tr>
+<tr><td>Is it better?</td><td>A/B test</td><td>Ship or iterate</td></tr>
+<tr><td>Should this user see it?</td><td>Feature flag targeting</td><td>Enable or disable</td></tr>
+<tr><td>Is the service healthy?</td><td>Monitoring and SLOs</td><td>Page or ignore</td></tr></tbody></table></div>
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Concurrent A/B testing</strong> removes calendar bias but requires assignment, logging, and analysis infrastructure that must itself be correct.</li><li><strong>User-level assignment</strong> gives stable experience but splits a person across devices and reduces effective sample size.</li><li><strong>Server-side exposure logging</strong> is more complete but misses client-only rendering; client-side logging captures rendering but loses events.</li><li><strong>Longer tests</strong> capture novelty decay and weekly cycles but delay decisions and slow the product.</li><li><strong>More concurrent experiments</strong> increase learning velocity but dilute samples and create interaction effects.</li><li><strong>Strict pre-registration</strong> protects validity but limits exploratory discovery.</li><li><strong>Segment analysis</strong> can reveal real heterogeneous effects but multiplies false positives.</li><li><strong>Aggressive guardrail thresholds</strong> protect users but can stop experiments before a real effect is measurable.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. Why is a before-and-after comparison unreliable?</summary><div class="answer"><p>Because other things change at the same time: campaigns, seasonality, competitor events, and holidays. A before-and-after comparison cannot separate the release from the calendar. A concurrent control group experiences the same external conditions, which is what makes attribution possible.</p></div></details>
+<details><summary>2. What is the minimum viable A/B testing infrastructure?</summary><div class="answer"><p>Deterministic assignment of users to variants, exposure logging that records what each unit actually saw, outcome events joinable to those exposures, and an analysis that reports effect size with uncertainty. Monitoring for assignment balance and pipeline lag is part of the minimum, because silent breakage produces confident wrong answers.</p></div></details>
+<details><summary>3. Why is deterministic hashing used for assignment?</summary><div class="answer"><p>It gives the same user the same variant on every request without storing assignments, and it can be computed independently by any service. Random assignment per request would flip users between variants and destroy both experience and measurement.</p></div></details>
+<details><summary>4. Why is the randomization unit important?</summary><div class="answer"><p>It defines what is independent in the analysis. User-level assignment matches most product decisions but splits a person across devices; session-level assignment is unstable over time; account-level fits shared B2B features but shrinks the sample. Choosing the wrong unit creates contamination or an underpowered test.</p></div></details>
+<details><summary>5. Why log exposures rather than assignments?</summary><div class="answer"><p>Because assigned users may never actually see the variant, which dilutes the measured effect. Exposure logging restricts analysis to users who genuinely experienced the change. Divergence between assigned and exposed populations is also an early warning of instrumentation bugs.</p></div></details>
+<details><summary>6. What is sample ratio mismatch and why does it matter?</summary><div class="answer"><p>It is a significant deviation from the intended traffic split, such as a 50/50 test receiving 52/48. It almost always indicates a bug in assignment, targeting, or logging rather than a real effect. When it appears, the experiment should be investigated and usually discarded.</p></div></details>
+<details><summary>7. Why can't you stop a test as soon as it looks significant?</summary><div class="answer"><p>Repeatedly checking and stopping at the first significant result inflates the false-positive rate, because you are effectively taking many looks. Fixed-horizon tests assume a single analysis. Sequential methods exist, but they must be chosen in advance.</p></div></details>
+<details><summary>8. What is statistical power and why does it matter?</summary><div class="answer"><p>It is the probability of detecting an effect of a given size if that effect is real. Underpowered tests frequently return 'no significant difference' even when a meaningful effect exists. Power depends on sample size, baseline variance, and the minimum detectable effect you care about.</p></div></details>
+<details><summary>9. What are guardrail metrics?</summary><div class="answer"><p>Metrics that must not degrade while the primary metric is optimized, such as latency, error rate, support contacts, or refunds. They prevent a local win from becoming a systemic loss. A primary metric that improves while a guardrail collapses is not a successful experiment.</p></div></details>
+<details><summary>10. How do you run multiple experiments without contaminating them?</summary><div class="answer"><p>Use orthogonal assignment layers on independent hash inputs so a user's variant in one experiment is independent of another. Document active experiments and watch for interaction effects. Keep a long-lived holdout to measure cumulative impact.</p></div></details>
+<details><summary>11. What is a novelty effect?</summary><div class="answer"><p>An early change in behavior caused by the newness of a change rather than its quality, which typically decays. It inflates short tests and can reverse later. Running for full cycles and, where possible, re-measuring after the novelty fades keeps conclusions honest.</p></div></details>
+<details><summary>12. How does A/B testing relate to canary releases?</summary><div class="answer"><p>A canary answers whether a release is safe, using operational guardrails over a short window. An A/B test answers whether a variant is better, using statistical estimation over a longer period. Both rely on runtime traffic splitting, but they support different decisions.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Comparing before and after the release and calling the difference the treatment effect.</li><li>Analyzing on assigned users instead of exposed users, diluting the measured effect.</li><li>Stopping the test at the first significant peek and reporting an inflated win.</li><li>Slicing segments after the fact until one shows an improvement.</li><li>Ignoring sample ratio mismatch and treating the resulting numbers as findings.</li><li>Changing event definitions or logging code partway through the experiment.</li><li>Choosing a primary metric after seeing which one moved.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="feature-flags.html"><span>← Previous</span><strong>Feature Flags</strong></a><a class="next" href="schema-migrations.html"><span>Next →</span><strong>Schema Migrations</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/ab-testing-infrastructure">AlgoMaster — A/B Testing Infrastructure</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>

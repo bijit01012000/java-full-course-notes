@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hexagonal Architecture — System Design Fundamentals</title>
+<script>
+(function(){try{var s=localStorage.getItem("sd-theme");var t=s||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}})();
+</script>
+<link rel="stylesheet" href="../assets/notes.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="topline">
+      <div class="eyebrow">System Design Fundamentals · 71 / 130</div>
+      <div class="actions">
+        <button class="btn" id="themeToggle" type="button" aria-label="Toggle dark theme">☾ Dark</button>
+        <button class="btn primary" type="button" onclick="window.print()">Print / PDF</button>
+      </div>
+    </div>
+    <h1>Hexagonal Architecture</h1>
+    <p class="dek">Architectural Patterns · detailed revision notes</p>
+    <div class="meta">
+      <span class="pill accent"><strong>13</strong> sections</span>
+      <span class="pill">12 interview questions</span>
+      <span class="pill">9 key terms</span>
+      <span class="pill"><a href="https://algomaster.io/learn/system-design/hexagonal-architecture">source ↗</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">On this page</p>
+      <a href="#s1">The problem: business logic tangled with technology</a>
+<a href="#s2">The core idea: inside versus outside</a>
+<a href="#s3">Ports: the core's contract with the world</a>
+<a href="#s4">Adapters: the technology-specific edge</a>
+<a href="#s5">Driving versus driven sides</a>
+<a href="#s6">Why a hexagon: the shape is not the point</a>
+<a href="#s7">The dependency rule</a>
+<a href="#s8">A request through the hexagon</a>
+<a href="#s9">Testing the core without infrastructure</a>
+<a href="#s10">Replacing technology</a>
+<a href="#s11">Relationship to other architecture styles</a>
+<a href="#s12">What it costs and when it pays off</a>
+<a href="#s13">Applying it in practice</a>
+<a href="#tradeoffs">Trade-offs</a>
+<a href="#questions">Interview questions</a>
+<a href="#traps">Traps</a>
+      <div class="extra"><a href="index.html">← All 130 topics</a></div>
+    </nav>
+    <main>
+      <div class="one-liner"><span class="label">In one line</span>Hexagonal architecture — ports and adapters — keeps business logic in a technology-free core and connects every transport, database, and external service to it through explicit interfaces.</div>
+      
+      <dl class="key-terms"><div class="term"><dt>Domain core</dt><dd>The part of the code that holds business rules and use cases, written without knowledge of HTTP, SQL, frameworks, or vendors.</dd></div><div class="term"><dt>Port</dt><dd>An interface owned by the core that describes what the application needs or offers, independent of any technology.</dd></div><div class="term"><dt>Adapter</dt><dd>A concrete implementation that connects a port to a specific technology such as a REST controller, a repository, or a payment SDK.</dd></div><div class="term"><dt>Driving adapter</dt><dd>An inbound adapter that starts a use case — an HTTP controller, CLI command, queue consumer, or scheduled job.</dd></div><div class="term"><dt>Driven adapter</dt><dd>An outbound adapter the core calls — a database repository, message publisher, cache client, or external API client.</dd></div><div class="term"><dt>Use case</dt><dd>A single application operation, such as place order, that coordinates domain objects through ports.</dd></div><div class="term"><dt>Dependency inversion</dt><dd>Making the core depend on abstractions it owns while infrastructure code depends on and implements those abstractions.</dd></div><div class="term"><dt>Composition root</dt><dd>The single startup location where concrete adapters are constructed and wired into the core.</dd></div><div class="term"><dt>Anti-corruption layer</dt><dd>A translation boundary that maps an external model into the core's own model so foreign concepts do not leak inward.</dd></div></dl>
+      <section class="section-block" id="s1">
+<h2><span class="n">01</span>The problem: business logic tangled with technology</h2>
+<p class="lede">Business logic should not care whether a request arrived over HTTP, from a queue, or from a scheduled job, nor whether data lives in PostgreSQL, MongoDB, or a file.</p>
+<ul><li>In practice the details mix: a controller starts making pricing decisions.</li><li>A use case imports an ORM model, so persistence shape dictates domain shape.</li><li>A service calls a payment SDK directly, so the vendor's API appears inside business rules.</li><li>After a while, changing a database, framework, or provider means touching business logic.</li><li>Tests then need a database or a running vendor sandbox just to check a rule.</li><li>The root cause is <strong>direction of dependency</strong>: the core depends on details instead of details depending on the core.</li></ul>
+
+
+</section>
+<section class="section-block" id="s2">
+<h2><span class="n">02</span>The core idea: inside versus outside</h2>
+<ul><li>Split the system into an <strong>inside</strong> that holds business rules and an <strong>outside</strong> that holds technology.</li><li>The inside is the domain model plus the use cases that operate on it.</li><li>The outside is everything that talks to the world: web, CLI, queues, databases, caches, payment providers.</li><li>All communication crosses the boundary through explicit interfaces rather than direct references.</li><li>The core must be compilable and testable with no framework, no database, and no network.</li><li>The pattern was introduced by Alistair Cockburn as <em>ports and adapters</em>.</li></ul>
+
+
+</section>
+<section class="section-block" id="s3">
+<h2><span class="n">03</span>Ports: the core's contract with the world</h2>
+<ul><li>A port is an <strong>interface owned by the core</strong>, expressed in the core's own vocabulary.</li><li>Driving ports describe what the application can do: place an order, refund a payment, cancel a subscription.</li><li>Driven ports describe what the application needs: load an order, save an order, charge a card, send a notification.</li><li>Ports take and return domain types, never HTTP request objects, ORM entities, or vendor response objects.</li><li>A port is a design decision about capability, not a thin wrapper around a specific library.</li><li>One port may have several adapters, for example a real payment provider and a fake one for tests.</li></ul>
+
+
+<div class="note">If a port signature mentions a framework type, the technology has already leaked inward.</div>
+</section>
+<section class="section-block" id="s4">
+<h2><span class="n">04</span>Adapters: the technology-specific edge</h2>
+<ul><li>An adapter implements or calls a port and contains all technology detail: annotations, SQL, serialization, retries, credentials.</li><li>Adapters translate between the outside representation and the core's model.</li><li>A REST controller maps JSON into a command, invokes a use case, and maps the result back into a response.</li><li>A repository adapter implements a driven port on top of JPA, JDBC, or a document store.</li><li>Adapters should be replaceable without changing a line in the core.</li><li>Multiple adapters per port is normal and expected, not duplication.</li></ul>
+
+
+</section>
+<section class="section-block" id="s5">
+<h2><span class="n">05</span>Driving versus driven sides</h2>
+<p class="lede">The two sides of the hexagon differ in who initiates the call and therefore in how the port is used.</p>
+<ul><li><strong>Driving (inbound)</strong> adapters call into the core: controllers, CLI handlers, message listeners, cron jobs.</li><li>Driving ports are implemented by the core's use-case classes.</li><li><strong>Driven (outbound)</strong> adapters are called by the core: repositories, gateways, event publishers.</li><li>Driven ports are implemented by infrastructure classes, and the core holds only the interface.</li><li>A single capability often appears on both sides: HTTP in, database out.</li><li>Getting the direction right is what keeps the dependency arrows pointing inward.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Side</th><th>Who calls whom</th><th>Port implemented by</th><th>Typical adapters</th></tr></thead><tbody><tr><td>Driving / inbound</td><td>Outside calls the core</td><td>The core's use case</td><td>REST controller, CLI, queue listener, scheduler</td></tr>
+<tr><td>Driven / outbound</td><td>The core calls outside</td><td>Infrastructure</td><td>Repository, payment gateway, mail sender, cache</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s6">
+<h2><span class="n">06</span>Why a hexagon: the shape is not the point</h2>
+<ul><li>The hexagon is a drawing convention: enough sides to show several inbound and outbound channels without implying a top or bottom layer.</li><li>It deliberately avoids the layered diagram, where the database sits underneath and looks like the foundation.</li><li>There is no privileged direction such as <em>up</em> or <em>down</em>; every outside channel is equal.</li><li>Nothing in the pattern requires six adapters or a hexagonal folder.</li><li>The real content is the <strong>inside/outside boundary plus the dependency rule</strong>.</li><li>Interview answers should describe ports, adapters, and dependency direction, not the drawing.</li></ul>
+
+
+</section>
+<section class="section-block" id="s7">
+<h2><span class="n">07</span>The dependency rule</h2>
+<ul><li>Source-code dependencies point <strong>inward</strong>, toward the domain core.</li><li>The core defines interfaces for what it needs; infrastructure implements them.</li><li>This inverts the usual flow, where business code imports the database library.</li><li>Wiring happens once at startup in a composition root, which knows every concrete adapter.</li><li>The domain must not import framework annotations, ORM base classes, or vendor SDK types.</li><li>Enforce it with architecture tests that fail the build on forbidden imports.</li><li>This is the same rule used by clean architecture and onion architecture.</li></ul>
+
+<div class="flow"><span class="flow-step">Adapter receives external input</span><span class="flow-arrow">→</span><span class="flow-step">Adapter translates into a core command</span><span class="flow-arrow">→</span><span class="flow-step">Use case executes domain rules</span><span class="flow-arrow">→</span><span class="flow-step">Core calls a driven port</span><span class="flow-arrow">→</span><span class="flow-step">Adapter fulfils it with a real technology</span><span class="flow-arrow">→</span><span class="flow-step">Result translated back to the outside</span></div>
+</section>
+<section class="section-block" id="s8">
+<h2><span class="n">08</span>A request through the hexagon</h2>
+<ul><li>An HTTP controller parses the request and validates transport-level concerns such as content type.</li><li>It builds a command object in domain terms and passes it to a use case through a driving port.</li><li>The use case loads aggregates through driven ports, applies rules, and decides the outcome.</li><li>It saves through a repository port and may publish a domain event through another port.</li><li>The adapter translates the outcome into an HTTP status and response body.</li><li>Business rules never see the HTTP request, the SQL, or the vendor payload.</li><li>The same use case can be invoked by a queue consumer with no changes.</li></ul>
+
+
+</section>
+<section class="section-block" id="s9">
+<h2><span class="n">09</span>Testing the core without infrastructure</h2>
+<ul><li>Use-case tests instantiate the core with in-memory fakes for driven ports.</li><li>Rules are tested in milliseconds with no database, container, or network.</li><li>Fakes double as documentation of what the core expects from each port.</li><li>Adapter tests are separate and focus on mapping, queries, and error translation.</li><li>A thin set of end-to-end tests covers the wiring that unit tests cannot.</li><li>Because the core has no framework dependency, tests do not break on framework upgrades.</li><li>This test pyramid is a direct consequence of the dependency rule.</li></ul>
+
+
+</section>
+<section class="section-block" id="s10">
+<h2><span class="n">10</span>Replacing technology</h2>
+<ul><li>Swapping a database means writing a new driven adapter, not editing use cases.</li><li>Swapping a payment provider means a new gateway adapter plus mapping tests.</li><li>Adding a gRPC or GraphQL surface means a new driving adapter over the same use cases.</li><li>Adding a batch job means a scheduler adapter invoking an existing port.</li><li>Migrations become contained because no domain code imports the old technology.</li><li>Vendor-specific quirks stay in the adapter, where an anti-corruption layer can absorb them.</li><li>The core becomes the stable part while the edges churn.</li></ul>
+
+
+</section>
+<section class="section-block" id="s11">
+<h2><span class="n">11</span>Relationship to other architecture styles</h2>
+<ul><li><strong>Layered architecture</strong> also separates concerns but usually lets business code depend on data access.</li><li><strong>Clean architecture</strong> and <strong>onion architecture</strong> share the dependency rule with different diagrams and naming.</li><li>Hexagonal emphasizes <em>ports and adapters</em>, that is, the boundary mechanics rather than the rings.</li><li><strong>Domain-driven design</strong> is complementary: it shapes the core, not the boundary.</li><li><strong>Microservices</strong> is a deployment style; a service can be hexagonal or a layered mess internally.</li><li>The pattern is intra-application, so it does not by itself solve distributed transactions or service discovery.</li><li>Choosing hexagonal says nothing about how many deployables you run.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Style</th><th>Core promise</th><th>Typical weakness</th></tr></thead><tbody><tr><td>Layered</td><td>Separate presentation, logic, and data</td><td>Business layer depends on data layer</td></tr>
+<tr><td>Hexagonal</td><td>Core isolated behind ports and adapters</td><td>More interfaces and wiring</td></tr>
+<tr><td>Clean / onion</td><td>Dependency rule with concentric rings</td><td>Over-engineering on small apps</td></tr>
+<tr><td>Microservices</td><td>Independent deployment and scaling</td><td>Distributed-system complexity</td></tr></tbody></table></div>
+
+</section>
+<section class="section-block" id="s12">
+<h2><span class="n">12</span>What it costs and when it pays off</h2>
+<ul><li>Every external interaction gains an interface, a mapping layer, and wiring code.</li><li>Small CRUD services get little benefit and noticeable indirection.</li><li>It pays off when business rules are non-trivial and change independently of technology.</li><li>It pays off when multiple entry points exist: web, mobile API, queue, batch, CLI.</li><li>It pays off when a database, vendor, or framework swap is plausible.</li><li>It pays off when the domain must be tested quickly and deterministically.</li><li>Apply it to the core domain, not uniformly to every module.</li></ul>
+
+
+<div class="note">A common compromise is to keep thin CRUD modules plain and apply ports and adapters only where rules are dense.</div>
+</section>
+<section class="section-block" id="s13">
+<h2><span class="n">13</span>Applying it in practice</h2>
+<ul><li>Package by domain first, then by inside and outside within that domain.</li><li>Name ports after intent — <code>OrderRepository</code>, <code>PaymentGateway</code> — not after technology.</li><li>Keep commands, results, and errors in domain vocabulary, not HTTP status codes.</li><li>Construct adapters only in the composition root; do not let the core instantiate infrastructure.</li><li>Use architecture tests to forbid framework imports inside the domain package.</li><li>Do not confuse the pattern with a folder named <em>hexagonal</em> over the same tangled dependencies.</li><li>Start with one bounded context, prove the testing benefit, then expand.</li></ul>
+
+
+</section>
+      <section class="section-block" id="tradeoffs">
+        <h2><span class="n">↔</span>Trade-offs to say out loud</h2>
+        <ul><li><strong>Technology independence</strong> improves testability and replaceability but adds interfaces, mappers, and wiring.</li><li><strong>Multiple entry points</strong> reuse one core cleanly but require each driving adapter to handle its own validation and error mapping.</li><li><strong>Isolated domain tests</strong> run fast and reliably but do not prove that real SQL or vendor calls work.</li><li><strong>Adapter abstraction</strong> contains vendor quirks but can hide useful provider features behind a lowest-common-denominator port.</li><li><strong>Boundary discipline</strong> prevents coupling but needs architecture tests and ongoing review to survive deadlines.</li><li><strong>Uniform application</strong> is consistent but over-engineering for simple CRUD modules.</li><li><strong>Decoupled core</strong> makes large refactors cheaper but can slow small feature work with extra layers.</li></ul>
+      </section>
+      <section class="section-block" id="questions">
+        <h2><span class="n">?</span>Interview questions</h2>
+        <div class="qa-tools">
+          <p>Answer aloud before opening the outline.</p>
+          <button class="btn" id="expandAll" type="button">Expand all answers</button>
+        </div>
+        <div class="qa"><details><summary>1. What problem does hexagonal architecture solve?</summary><div class="answer"><p>It stops business logic from depending on delivery mechanisms, databases, frameworks, and vendors. Instead of the domain importing an ORM or payment SDK, the core defines ports and infrastructure implements them, so technology changes stay at the edge.</p></div></details>
+<details><summary>2. What is a port and what is an adapter?</summary><div class="answer"><p>A port is an interface owned by the core describing a capability or a need, expressed in domain terms. An adapter is the technology-specific implementation that connects that port to HTTP, SQL, a queue, or a vendor API.</p></div></details>
+<details><summary>3. Why is it called hexagonal?</summary><div class="answer"><p>The hexagon is a diagram convention that gives room to draw several inbound and outbound channels without implying a top or bottom. It signals that all outside channels are equal and that dependencies point inward. The shape has no functional meaning.</p></div></details>
+<details><summary>4. What is the difference between driving and driven adapters?</summary><div class="answer"><p>Driving adapters call into the application — controllers, CLI handlers, queue listeners. Driven adapters are called by the application — repositories, gateways, notifiers. The first implements a core use case; the second implements an interface the core owns.</p></div></details>
+<details><summary>5. Where does dependency inversion appear here?</summary><div class="answer"><p>The core declares interfaces for what it needs instead of importing concrete libraries. Infrastructure classes depend on those interfaces and implement them. Wiring happens at startup in a composition root, so source dependencies point toward the domain.</p></div></details>
+<details><summary>6. How does this change testing?</summary><div class="answer"><p>Use cases can be tested with in-memory fakes for driven ports, with no database or network. Adapter tests cover mapping and real queries separately. The result is fast, deterministic domain tests that survive framework upgrades.</p></div></details>
+<details><summary>7. Can you swap a database without touching business logic?</summary><div class="answer"><p>Yes, if the domain only sees a repository port and domain types. You write a new adapter and mapping tests; use cases stay unchanged. In practice some assumptions leak through query shapes and transaction boundaries, so the port should be designed around use cases, not tables.</p></div></details>
+<details><summary>8. Is hexagonal architecture the same as clean architecture?</summary><div class="answer"><p>They share the dependency rule and the goal of an isolated core. Clean architecture draws concentric rings and names layers entities, use cases, interface adapters, and frameworks. Hexagonal focuses on the port-and-adapter boundary. Onion architecture is another close variant.</p></div></details>
+<details><summary>9. Does hexagonal architecture mean microservices?</summary><div class="answer"><p>No. It is an intra-application code structure. A single monolith can be hexagonal, and a microservice can be a layered tangle internally. Service count is a deployment decision, independent of how each service is organized.</p></div></details>
+<details><summary>10. When is it overkill?</summary><div class="answer"><p>For small CRUD services with little business logic and a single entry point, the extra interfaces and mappers add indirection with little payoff. Apply it where rules are non-trivial, entry points are multiple, or technology replacement and fast domain tests matter.</p></div></details>
+<details><summary>11. How do you keep the boundary from eroding?</summary><div class="answer"><p>Enforce it mechanically: architecture tests that fail on forbidden imports, a composition root that owns all construction, ports named after intent, and review rules that reject framework types in domain signatures.</p></div></details>
+<details><summary>12. What does a request look like end to end?</summary><div class="answer"><p>A controller adapter parses HTTP and builds a command, a use case applies domain rules and calls driven ports, repository and gateway adapters perform real I/O, and the controller maps the result back to a response. The core never sees HTTP or SQL.</p></div></details></div>
+      </section>
+      <section class="section-block" id="traps">
+        <h2><span class="n">!</span>Traps</h2>
+        <div class="traps"><ul><li>Drawing a hexagon while business code still imports the ORM and the vendor SDK.</li><li>Creating one port per class instead of one port per capability, which produces shallow indirection.</li><li>Putting HTTP status codes or framework annotations inside port signatures.</li><li>Letting domain code instantiate repositories or clients instead of receiving them from the composition root.</li><li>Applying the full pattern to trivial CRUD modules and slowing delivery for no benefit.</li><li>Assuming hexagonal architecture solves distributed transactions or service decomposition.</li><li>Treating a folder rename as the refactor and leaving the same dependency graph underneath.</li></ul></div>
+      </section>
+      <nav class="page-nav"><a class="prev" href="peer-to-peer-p2p-architecture.html"><span>← Previous</span><strong>Peer-to-Peer (P2P) Architecture</strong></a><a class="next" href="cqrs.html"><span>Next →</span><strong>CQRS</strong></a></nav>
+      <footer class="footer">
+        <p><strong>Source:</strong> <a href="https://algomaster.io/learn/system-design/hexagonal-architecture">AlgoMaster — Hexagonal Architecture</a>. Notes are a structured revision summary; verify exact product-specific details against the lesson.</p>
+        <p><a href="index.html">All 130 topics</a> · <a href="../fundamentals-video-concepts.html">Quick revision guide</a> · <a href="../fundamentals-video-topics.html">Video topic index</a></p>
+      </footer>
+    </main>
+  </div>
+</div>
+<script src="../assets/notes.js"></script>
+</body>
+</html>
